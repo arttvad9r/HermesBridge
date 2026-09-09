@@ -26,12 +26,14 @@ class BridgeToolRegistry(
     private val apkArtifactRepository: ApkArtifactRepository? = null,
     private val apkPackageInspector: ApkPackageInspector? = null,
     private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
+    private val appUsageRepository: AppUsageRepository? = null,
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         return when (request.tool) {
             DEVICE_HEALTH -> executeDeviceHealth(request)
             BATTERY_USAGE -> executeBatteryUsage(request)
             APPS_LIST -> executeAppsList(request)
+            APPS_USAGE -> AppUsageToolHandler(appsRepository, appUsageRepository).execute(request)
             FILES_LIST -> executeFilesList(request)
             FILES_ANALYZE -> executeFilesAnalyze(request)
             FILES_DELETE -> executeFilesDelete(request)
@@ -797,6 +799,7 @@ class BridgeToolRegistry(
         const val DEVICE_HEALTH = "device.health"
         const val BATTERY_USAGE = "battery.usage"
         const val APPS_LIST = "apps.list"
+        const val APPS_USAGE = "apps.usage"
         const val FILES_LIST = "files.list"
         const val FILES_ANALYZE = "files.analyze"
         const val FILES_DELETE = "files.delete"
