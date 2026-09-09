@@ -48,7 +48,7 @@ class AppPermissionsAuditToolHandler(
         scanApps.forEach { app ->
             val snapshot = try {
                 repository.read(app.packageName)
-            } catch (_: Throwable) {
+            } catch (_: Exception) {
                 skippedApps += 1
                 return@forEach
             }
@@ -96,10 +96,10 @@ class AppPermissionsAuditToolHandler(
                             val app = finding.app
                             add(
                                 buildJsonObject {
-                                    put("packageName", app.packageName)
-                                    put("label", app.label)
+                                    put("packageName", app.packageName.take(MAX_PACKAGE_NAME_LENGTH))
+                                    put("label", app.label.take(MAX_LABEL_LENGTH))
                                     if (app.versionName == null) put("versionName", JsonNull)
-                                    else put("versionName", app.versionName)
+                                    else put("versionName", app.versionName.take(MAX_VERSION_NAME_LENGTH))
                                     put("versionCode", app.versionCode)
                                     put("systemApp", app.systemApp)
                                     put("enabled", app.enabled)
@@ -145,7 +145,10 @@ class AppPermissionsAuditToolHandler(
     companion object {
         const val TOOL_NAME = "apps.permissionsAudit"
         const val MAX_SCANNED_APPS = 200
-        const val MAX_FINDING_APPS = 100
-        const val MAX_PERMISSIONS_PER_APP = 30
+        const val MAX_FINDING_APPS = 30
+        const val MAX_PERMISSIONS_PER_APP = 10
+        private const val MAX_PACKAGE_NAME_LENGTH = 255
+        private const val MAX_LABEL_LENGTH = 120
+        private const val MAX_VERSION_NAME_LENGTH = 80
     }
 }
