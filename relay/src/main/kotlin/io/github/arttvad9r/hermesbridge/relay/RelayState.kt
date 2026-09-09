@@ -96,6 +96,12 @@ class DeviceRegistry(
 
     fun list(): List<DeviceRecord> = devices.values.sortedBy { it.label.lowercase() }
 
+    fun revoke(deviceId: String): Boolean = synchronized(persistenceLock) {
+        val removed = devices.remove(deviceId) ?: return@synchronized false
+        persistLocked()
+        removed.deviceId == deviceId
+    }
+
     private fun loadFromDisk() {
         val path = storagePath ?: return
         if (!Files.exists(path)) return
