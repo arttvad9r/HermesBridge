@@ -25,6 +25,8 @@ object MessageType {
     const val HEARTBEAT_PONG = "heartbeat.pong"
     const val COMMAND_REQUEST = "command.request"
     const val COMMAND_RESULT = "command.result"
+    const val DEVICE_REVOKE_REQUEST = "device.revoke.request"
+    const val DEVICE_REVOKE_OK = "device.revoke.ok"
     const val ERROR = "error"
 }
 
@@ -61,6 +63,9 @@ data class AuthResponsePayload(val signature: String)
 
 @Serializable
 data class AuthOkPayload(val sessionId: String)
+
+@Serializable
+data class DeviceRevokeOkPayload(val deviceId: String)
 
 @Serializable
 data class CommandRequestPayload(
