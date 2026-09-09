@@ -28,6 +28,7 @@ class BridgeForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        BridgeAuditRuntime.initialize(applicationContext)
         createNotificationChannel()
 
         val healthRepository = AndroidDeviceHealthRepository(applicationContext)
@@ -158,6 +159,12 @@ class BridgeForegroundService : Service() {
             Intent(this, BridgeForegroundService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val historyIntent = PendingIntent.getActivity(
+            this,
+            2,
+            Intent(this, AuditLogActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
@@ -167,6 +174,7 @@ class BridgeForegroundService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(0, "История", historyIntent)
             .addAction(0, "Остановить", stopIntent)
             .build()
     }
