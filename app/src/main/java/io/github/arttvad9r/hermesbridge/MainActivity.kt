@@ -1,5 +1,6 @@
 package io.github.arttvad9r.hermesbridge
 
+import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -63,6 +64,10 @@ class MainActivity : ComponentActivity() {
                     contract = ActivityResultContracts.OpenDocumentTree(),
                     onResult = { uri -> uri?.let(vm::grantFileTree) },
                 )
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                    onResult = { vm.refreshNotificationPermission() },
+                )
 
                 BridgeScreen(
                     state = state,
@@ -72,6 +77,21 @@ class MainActivity : ComponentActivity() {
                     onFinishSetup = vm::finishSetup,
                     onRestartSetup = vm::restartSetup,
                     onRefreshHealth = vm::refreshHealth,
+                    onRequestNotifications = {
+                        if (requiresRuntimePermission(Build.VERSION.SDK_INT)) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            vm.refreshNotificationPermission()
+                        }
+                    },
+                    onOpenNotificationSettings = {
+                        runCatching {
+                            startActivity(
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                            )
+                        }
+                    },
                     onChooseFileTree = { fileTreeLauncher.launch(null) },
                     onRevokeFileAccess = vm::revokeFileAccess,
                     onOpenUsageAccessSettings = {
@@ -84,6 +104,9 @@ class MainActivity : ComponentActivity() {
                     onDeny = vm::denyAction,
                     onRequestShizukuPermission = vm::requestShizukuPermission,
                     onRefreshShizuku = vm::refreshShizuku,
+                    onOpenShizuku = {
+                        ShizukuRestorationNotifier.shizukuLaunchIntent(this)?.let { startActivity(it) }
+                    },
                 )
             }
         }
@@ -116,6 +139,8 @@ private fun BridgeScreen(
     onFinishSetup: () -> Unit,
     onRestartSetup: () -> Unit,
     onRefreshHealth: () -> Unit,
+    onRequestNotifications: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
     onChooseFileTree: () -> Unit,
     onRevokeFileAccess: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
@@ -124,6 +149,7 @@ private fun BridgeScreen(
     onDeny: (String) -> Unit,
     onRequestShizukuPermission: () -> Unit,
     onRefreshShizuku: () -> Unit,
+    onOpenShizuku: () -> Unit,
 ) {
     var showRevokePairingDialog by remember { mutableStateOf(false) }
 
@@ -201,6 +227,14 @@ private fun BridgeScreen(
                         onPair = onPair,
                     )
                 } else {
+                    if (requiresRuntimePermission(Build.VERSION.SDK_INT)) {
+                        NotificationAccessCard(
+                            granted = state.notificationsGranted,
+                            onRequest = onRequestNotifications,
+                            onOpenSettings = onOpenNotificationSettings,
+                        )
+                    }
+
                     FileAccessCard(
                         configured = state.fileAccessConfigured,
                         onChoose = onChooseFileTree,
@@ -215,11 +249,14 @@ private fun BridgeScreen(
 
                     ShizukuCard(
                         state = state.shizuku,
+                        wasConfigured = state.shizukuWasConfigured,
                         onRequestPermission = onRequestShizukuPermission,
                         onRefresh = onRefreshShizuku,
+                        onOpenShizuku = onOpenShizuku,
                     )
 
                     FinishSetupCard(
+                        notificationsGranted = state.notificationsGranted,
                         fileAccessConfigured = state.fileAccessConfigured,
                         usageAccessGranted = state.usageAccessGranted,
                         shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
@@ -243,6 +280,14 @@ private fun BridgeScreen(
                     onRefresh = onRefreshHealth,
                 )
 
+                if (requiresRuntimePermission(Build.VERSION.SDK_INT)) {
+                    NotificationAccessCard(
+                        granted = state.notificationsGranted,
+                        onRequest = onRequestNotifications,
+                        onOpenSettings = onOpenNotificationSettings,
+                    )
+                }
+
                 FileAccessCard(
                     configured = state.fileAccessConfigured,
                     onChoose = onChooseFileTree,
@@ -257,8 +302,10 @@ private fun BridgeScreen(
 
                 ShizukuCard(
                     state = state.shizuku,
+                    wasConfigured = state.shizukuWasConfigured,
                     onRequestPermission = onRequestShizukuPermission,
                     onRefresh = onRefreshShizuku,
+                    onOpenShizuku = onOpenShizuku,
                 )
 
                 CapabilitiesCard(
@@ -314,6 +361,7 @@ private fun SetupHeaderCard(connected: Boolean) {
 
 @Composable
 private fun FinishSetupCard(
+    notificationsGranted: Boolean,
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
     shizukuReady: Boolean,
@@ -327,6 +375,9 @@ private fun FinishSetupCard(
                 fontWeight = FontWeight.SemiBold,
             )
             CapabilityRow("Базовая диагностика", "Доступно")
+            if (requiresRuntimePermission(Build.VERSION.SDK_INT)) {
+                CapabilityRow("Уведомления", if (notificationsGranted) "Настроено" else "Рекомендуется")
+            }
             CapabilityRow("Файлы", if (fileAccessConfigured) "Настроено" else "Можно позже")
             CapabilityRow("Статистика приложений", if (usageAccessGranted) "Настроено" else "Можно позже")
             CapabilityRow("Shizuku", if (shizukuReady) "Настроено" else "Можно позже")
@@ -522,6 +573,51 @@ private fun HealthCard(
 }
 
 @Composable
+private fun NotificationAccessCard(
+    granted: Boolean,
+    onRequest: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Уведомления",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                if (granted) "Уведомления включены." else "Уведомления не разрешены.",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                if (granted) {
+                    "Hermes Bridge может показывать статус фонового соединения, быстрый доступ к истории и напоминание восстановить Shizuku после перезагрузки."
+                } else {
+                    "Базовое соединение работает и без них, но Android не покажет постоянный статус Hermes и напоминание восстановить Shizuku после перезагрузки."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!granted) {
+                Button(
+                    onClick = onRequest,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Разрешить уведомления")
+                }
+                TextButton(
+                    onClick = onOpenSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Настройки уведомлений")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun FileAccessCard(
     configured: Boolean,
     onChoose: () -> Unit,
@@ -607,15 +703,22 @@ private fun UsageAccessCard(
 @Composable
 private fun ShizukuCard(
     state: ShizukuAccessState,
+    wasConfigured: Boolean,
     onRequestPermission: () -> Unit,
     onRefresh: () -> Unit,
+    onOpenShizuku: () -> Unit,
 ) {
     val title = when (state.status) {
-        ShizukuAccessStatus.UNAVAILABLE -> "Shizuku не запущен"
+        ShizukuAccessStatus.UNAVAILABLE -> if (wasConfigured) "Shizuku нужно запустить снова" else "Shizuku не запущен"
         ShizukuAccessStatus.UNSUPPORTED -> "Shizuku устарел"
         ShizukuAccessStatus.PERMISSION_REQUIRED -> "Shizuku готов к авторизации"
         ShizukuAccessStatus.DENIED -> "Доступ Shizuku не выдан"
         ShizukuAccessStatus.READY -> "Shizuku подключён"
+    }
+    val message = if (wasConfigured && state.status == ShizukuAccessStatus.UNAVAILABLE) {
+        "После перезагрузки Android запустите Shizuku снова. Базовое соединение Hermes уже работает; восстановить нужно только расширенные команды."
+    } else {
+        state.message
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -634,7 +737,7 @@ private fun ShizukuCard(
                 }
             }
             Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            state.message?.let {
+            message?.let {
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
@@ -658,6 +761,14 @@ private fun ShizukuCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Выдать доступ Hermes Bridge")
+                }
+            }
+            if (wasConfigured && state.status == ShizukuAccessStatus.UNAVAILABLE) {
+                Button(
+                    onClick = onOpenShizuku,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Открыть Shizuku")
                 }
             }
         }
