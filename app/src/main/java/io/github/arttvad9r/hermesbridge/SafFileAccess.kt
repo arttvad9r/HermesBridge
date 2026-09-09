@@ -147,6 +147,11 @@ class AndroidSafFilesRepository(
 
         while (queue.isNotEmpty() && scanned < MAX_ANALYSIS_ENTRIES) {
             val (directory, directoryPath) = queue.removeFirst()
+            if (directoryPath.size >= MAX_DEPTH) {
+                if (directory.listFiles().isNotEmpty()) truncated = true
+                continue
+            }
+
             for (child in directory.listFiles()) {
                 if (scanned >= MAX_ANALYSIS_ENTRIES) {
                     truncated = true
