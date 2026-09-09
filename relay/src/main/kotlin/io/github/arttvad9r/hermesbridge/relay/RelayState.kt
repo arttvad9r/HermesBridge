@@ -1,6 +1,10 @@
 package io.github.arttvad9r.hermesbridge.relay
 
 import io.github.arttvad9r.hermesbridge.protocol.BridgeProtocol
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.security.KeyFactory
 import java.security.PublicKey
 import java.security.SecureRandom
@@ -9,6 +13,9 @@ import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 
 private const val PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -49,8 +56,28 @@ data class DeviceRecord(
     val label: String,
 )
 
-class DeviceRegistry {
+@Serializable
+private data class StoredDevice(
+    val deviceId: String,
+    val publicKey: String,
+    val label: String,
+)
+
+@Serializable
+private data class StoredDeviceRegistry(
+    val version: Int = 1,
+    val devices: List<StoredDevice> = emptyList(),
+)
+
+class DeviceRegistry(
+    private val storagePath: Path? = null,
+) {
     private val devices = ConcurrentHashMap<String, DeviceRecord>()
+    private val persistenceLock = Any()
+
+    init {
+        loadFromDisk()
+    }
 
     fun register(publicKey: PublicKey, label: String): DeviceRecord {
         val record = DeviceRecord(
@@ -58,11 +85,71 @@ class DeviceRegistry {
             publicKey = publicKey,
             label = label.take(80),
         )
-        devices[record.deviceId] = record
+        synchronized(persistenceLock) {
+            devices[record.deviceId] = record
+            persistLocked()
+        }
         return record
     }
 
     fun find(deviceId: String): DeviceRecord? = devices[deviceId]
+
+    fun list(): List<DeviceRecord> = devices.values.sortedBy { it.label.lowercase() }
+
+    private fun loadFromDisk() {
+        val path = storagePath ?: return
+        if (!Files.exists(path)) return
+
+        val raw = Files.readString(path)
+        if (raw.isBlank()) return
+        val stored = BridgeProtocol.json.decodeFromString<StoredDeviceRegistry>(raw)
+        require(stored.version == 1) { "Unsupported relay device registry version: ${stored.version}" }
+
+        stored.devices.forEach { item ->
+            val publicKey = AuthCrypto.decodeEcPublicKey(item.publicKey)
+            devices[item.deviceId] = DeviceRecord(
+                deviceId = item.deviceId,
+                publicKey = publicKey,
+                label = item.label.take(80),
+            )
+        }
+    }
+
+    private fun persistLocked() {
+        val path = storagePath ?: return
+        val absolute = path.toAbsolutePath()
+        val parent = requireNotNull(absolute.parent)
+        Files.createDirectories(parent)
+
+        val stored = StoredDeviceRegistry(
+            devices = devices.values
+                .sortedBy { it.deviceId }
+                .map { record ->
+                    StoredDevice(
+                        deviceId = record.deviceId,
+                        publicKey = Base64.getEncoder().encodeToString(record.publicKey.encoded),
+                        label = record.label,
+                    )
+                },
+        )
+        val content = BridgeProtocol.json.encodeToString(stored)
+        val temp = Files.createTempFile(parent, ".devices-", ".json.tmp")
+        try {
+            Files.writeString(temp, content)
+            try {
+                Files.move(
+                    temp,
+                    absolute,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                Files.move(temp, absolute, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            Files.deleteIfExists(temp)
+        }
+    }
 }
 
 object AuthCrypto {
