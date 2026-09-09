@@ -52,11 +52,13 @@ class RelayAgentTransport(
     appUsageRepository: AppUsageRepository = AndroidAppUsageRepository(context),
     appPermissionsRepository: AppPermissionsRepository = AndroidAppPermissionsRepository(context),
     batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
+    deviceIdentity: DeviceIdentity = AndroidKeystoreDeviceIdentity(),
+    pairingRecordStore: PairingRecordStore = PairingStore(context.applicationContext),
 ) : AgentTransport {
-    private val appContext = context.applicationContext
     private val relayWsUrl = parseRelayEndpoint(relayWsUrl).webSocketUrl
-    private val identity = AndroidKeystoreDeviceIdentity()
-    private val pairingStore = PairingStore(appContext)
+    private val identity = deviceIdentity
+    private val pairingStore = pairingRecordStore
+    private val pairingCredentials = PairingCredentialManager(pairingStore, identity)
     private val coreToolRegistry = BridgeToolRegistry(
         healthRepository = healthRepository,
         appsRepository = appsRepository,
@@ -93,8 +95,10 @@ class RelayAgentTransport(
     override suspend fun pair(code: String): Result<Unit> = startConnection(code)
 
     override suspend fun resume(): Result<Unit> {
-        if (pairingStore.deviceId() == null) {
-            return Result.failure(IllegalStateException("Device is not paired yet."))
+        val validation = pairingCredentials.validateResume()
+        if (validation.isFailure) {
+            mutableConnectionState.value = ConnectionState.ERROR
+            return validation
         }
         return startConnection(null)
     }
@@ -176,6 +180,12 @@ class RelayAgentTransport(
             val authenticated = runCatching {
                 runSession(pairingCode, ready)
             }.getOrElse { error ->
+                if (error is DeviceIdentityUnavailableException && pairingStore.deviceId() != null) {
+                    pairingCredentials.invalidateAfterSigningFailure()
+                    mutableConnectionState.value = ConnectionState.ERROR
+                    if (!ready.isCompleted) ready.complete(Result.failure(error))
+                    return
+                }
                 if (pairingStore.deviceId() == null) {
                     mutableConnectionState.value = ConnectionState.ERROR
                     if (!ready.isCompleted) {
