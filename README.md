@@ -11,7 +11,7 @@ The intended UX is deliberately simple:
 
 Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with exact-argument approvals for mutating/privileged actions.
 
-> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, guided setup, safe re-pair/revocation, Hermes MCP integration, read-only diagnostics/app metadata/files, bounded permission and storage audits, approved dangerous-permission revocation, SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end validation is still required before treating privileged operations as production-ready.
+> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, guided setup, local bounded audit history, Android 13+ notification setup, Shizuku reboot-restoration UX, Hermes MCP integration, read-only diagnostics/app metadata/files, bounded permission and storage audits, approved dangerous-permission revocation, SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end validation is still required before treating privileged and reboot-recovery behavior as production-ready.
 
 ## Current capabilities
 
@@ -19,6 +19,7 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - One-time pairing and challenge/response reconnect authentication.
 - Persistent outbound WSS connection from Android to the relay.
 - Foreground service with reboot/package-update recovery.
+- Android 13+ notification-permission setup is explicit and optional; denying it does not disable the Hermes relay connection.
 - Guided first-run setup instead of exposing all technical settings at once.
 - Confirmed phone-side self-revoke plus localhost admin revoke; clean re-pair without reinstalling the APK.
 - Relay deployment examples for systemd + TLS reverse proxy.
@@ -35,11 +36,15 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - `delete_path` — deletion of one validated SAF file/directory after local approval bound to the target's current metadata; the granted root itself is protected.
 - Explicit local revoke/change control for the SAF folder grant.
 - Shizuku detection/authorization status in the Android app.
+- Hermes Bridge remembers whether Shizuku has successfully reached READY. After a real reboot it reconnects the base relay first, then performs a delayed Shizuku check and can notify the user that advanced access needs restoration.
+- The Shizuku restoration notification links back to Hermes Bridge and, when the official Shizuku app is installed, offers a direct `Открыть Shizuku` action. Package visibility remains narrow; there is no `QUERY_ALL_PACKAGES`.
 - One-use, expiring approvals bound to canonical tool arguments.
 - `install_apk` — APK from a dedicated VPS staging directory, streamed through a short-lived relay artifact, then verified on Android by size/SHA-256/package/version/signing certificates before approval and Shizuku installation.
 - `uninstall_app` — Shizuku-backed package uninstall after local approval.
 - `force_stop_app` — Shizuku-backed force-stop after local approval.
 - Hermes Bridge protects its own package from install replacement, uninstall, force-stop and agent-driven permission changes.
+- Local `История Hermes` screen stores at most 200 sanitized command/approval events on-device. Raw command arguments, auth tokens, file contents and raw error messages are not stored.
+- The history screen is internal (`exported=false`) and is reachable from the foreground-service notification.
 
 ## Goals
 
@@ -74,6 +79,7 @@ Hermes on VPS
                    +-- UsageStats (optional special access)
                    +-- Storage Access Framework (user-selected tree)
                    +-- approval policy
+                   +-- local bounded audit history
                    +-- Shizuku (optional typed privileged/read-only commands)
                    +-- Accessibility (planned, optional)
 ```
@@ -106,11 +112,13 @@ The project keeps these non-negotiable rules:
 - default-deny tool routing/registration;
 - read-only tools are narrowly typed, argument-validated and output-bounded;
 - app metadata/audits stay launcher-scoped and do not request `QUERY_ALL_PACKAGES`;
+- the only additional explicit package visibility used for recovery UX is the official Shizuku package;
 - permission audit uses Android's own `dangerous` protection classification rather than an invented risk score;
 - agent-driven permission changes are revoke-only, launcher-scoped, limited to currently granted Android-`dangerous` permissions and exact locally approved targets;
 - privileged/mutating commands require one-use exact-argument approval;
 - APK install approval is bound to verified content/package/signing metadata rather than transport tokens;
 - SAF deletion approval is bound to the validated target path and current metadata;
+- audit history stores bounded sanitized metadata rather than raw tool arguments or secret-bearing error text;
 - long-term device credentials are stored in Android Keystore;
 - production device transport requires WSS;
 - the Hermes-side admin token stays local to the VPS process boundary where possible;
