@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
                     onRevokeFileAccess = vm::revokeFileAccess,
                     onApprove = vm::approveAction,
                     onDeny = vm::denyAction,
+                    onRequestShizukuPermission = vm::requestShizukuPermission,
+                    onRefreshShizuku = vm::refreshShizuku,
                 )
             }
         }
@@ -100,6 +102,8 @@ private fun BridgeScreen(
     onRevokeFileAccess: () -> Unit,
     onApprove: (String) -> Unit,
     onDeny: (String) -> Unit,
+    onRequestShizukuPermission: () -> Unit,
+    onRefreshShizuku: () -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -152,7 +156,16 @@ private fun BridgeScreen(
                 onRevoke = onRevokeFileAccess,
             )
 
-            CapabilitiesCard(state.fileAccessConfigured)
+            ShizukuCard(
+                state = state.shizuku,
+                onRequestPermission = onRequestShizukuPermission,
+                onRefresh = onRefreshShizuku,
+            )
+
+            CapabilitiesCard(
+                fileAccessConfigured = state.fileAccessConfigured,
+                shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
+            )
 
             Spacer(Modifier.height(20.dp))
         }
@@ -368,6 +381,66 @@ private fun FileAccessCard(
 }
 
 @Composable
+private fun ShizukuCard(
+    state: ShizukuAccessState,
+    onRequestPermission: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val title = when (state.status) {
+        ShizukuAccessStatus.UNAVAILABLE -> "Shizuku не запущен"
+        ShizukuAccessStatus.UNSUPPORTED -> "Shizuku устарел"
+        ShizukuAccessStatus.PERMISSION_REQUIRED -> "Shizuku готов к авторизации"
+        ShizukuAccessStatus.DENIED -> "Доступ Shizuku не выдан"
+        ShizukuAccessStatus.READY -> "Shizuku подключён"
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "Расширенный доступ",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(onClick = onRefresh) {
+                    Text("Проверить")
+                }
+            }
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            state.message?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (state.status == ShizukuAccessStatus.READY) {
+                val mode = when (state.serverUid) {
+                    0 -> "root"
+                    2000 -> "ADB/shell"
+                    null -> "неизвестно"
+                    else -> "UID ${state.serverUid}"
+                }
+                MetricRow("API Shizuku", state.serverApiVersion?.toString() ?: "—")
+                HorizontalDivider()
+                MetricRow("Режим", mode)
+            }
+            if (state.status == ShizukuAccessStatus.PERMISSION_REQUIRED) {
+                Button(
+                    onClick = onRequestPermission,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Выдать доступ Hermes Bridge")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MetricRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -379,7 +452,10 @@ private fun MetricRow(label: String, value: String) {
 }
 
 @Composable
-private fun CapabilitiesCard(fileAccessConfigured: Boolean) {
+private fun CapabilitiesCard(
+    fileAccessConfigured: Boolean,
+    shizukuReady: Boolean,
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Доступ", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -387,7 +463,7 @@ private fun CapabilitiesCard(fileAccessConfigured: Boolean) {
             CapabilityRow("Список приложений", "Доступно")
             CapabilityRow("Просмотр файлов", if (fileAccessConfigured) "Доступно" else "Не настроено")
             CapabilityRow("Подтверждение действий", "Готово")
-            CapabilityRow("Расширенный доступ Shizuku", "Запланировано")
+            CapabilityRow("Расширенный доступ Shizuku", if (shizukuReady) "Готово" else "Не настроено")
             CapabilityRow("Управление интерфейсом", "Опционально")
         }
     }
