@@ -30,15 +30,32 @@ class AndroidKeystoreDeviceIdentity : DeviceIdentity {
     override fun hasStoredKey(): Boolean = keyStore.containsAlias(DEVICE_KEY_ALIAS)
 
     override fun publicKeyBase64(): String {
-        ensureKeyExists()
-        val certificate = requireNotNull(keyStore.getCertificate(DEVICE_KEY_ALIAS)) {
-            "Hermes Bridge device certificate is unavailable."
+        return try {
+            ensureKeyExists()
+            val certificate = keyStore.getCertificate(DEVICE_KEY_ALIAS)
+                ?: throw DeviceIdentityUnavailableException(
+                    "Hermes Bridge device certificate is unavailable."
+                )
+            Base64.encodeToString(certificate.publicKey.encoded, Base64.NO_WRAP)
+        } catch (error: DeviceIdentityUnavailableException) {
+            throw error
+        } catch (error: Throwable) {
+            throw DeviceIdentityUnavailableException(
+                "Hermes Bridge could not read its Android Keystore identity.",
+                error,
+            )
         }
-        return Base64.encodeToString(certificate.publicKey.encoded, Base64.NO_WRAP)
     }
 
     override fun sign(payload: ByteArray): String {
-        val store = keyStore
+        val store = try {
+            keyStore
+        } catch (error: Throwable) {
+            throw DeviceIdentityUnavailableException(
+                "Android Keystore is unavailable. Try reconnecting again.",
+                error,
+            )
+        }
         if (!store.containsAlias(DEVICE_KEY_ALIAS)) {
             throw DeviceIdentityUnavailableException(
                 "Hermes Bridge device identity is missing. Pair the phone again."
@@ -67,9 +84,16 @@ class AndroidKeystoreDeviceIdentity : DeviceIdentity {
     }
 
     override fun reset() {
-        val store = keyStore
-        if (store.containsAlias(DEVICE_KEY_ALIAS)) {
-            store.deleteEntry(DEVICE_KEY_ALIAS)
+        try {
+            val store = keyStore
+            if (store.containsAlias(DEVICE_KEY_ALIAS)) {
+                store.deleteEntry(DEVICE_KEY_ALIAS)
+            }
+        } catch (error: Throwable) {
+            throw DeviceIdentityUnavailableException(
+                "Hermes Bridge could not reset its Android Keystore identity.",
+                error,
+            )
         }
     }
 
