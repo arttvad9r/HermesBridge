@@ -145,11 +145,13 @@ def _validate_path_segments(path_segments: list[str]) -> None:
             raise ValueError("path_segments contains a forbidden segment.")
 
 
-def _validate_package_name(package_name: str) -> str:
+def _validate_package_name(package_name: str, *, protect_bridge: bool = True) -> str:
+    if not isinstance(package_name, str):
+        raise ValueError("package_name must be a string.")
     value = package_name.strip()
     if not (3 <= len(value) <= MAX_PACKAGE_NAME_LENGTH) or not PACKAGE_NAME_RE.fullmatch(value):
         raise ValueError("package_name is not a valid Android package name.")
-    if value == HERMES_BRIDGE_PACKAGE:
+    if protect_bridge and value == HERMES_BRIDGE_PACKAGE:
         raise ValueError("The Hermes Bridge package is protected from agent package operations.")
     return value
 
@@ -277,6 +279,17 @@ def app_usage(device_id: str, days: int = 30) -> dict[str, Any]:
         device_id,
         "apps.usage",
         {"days": days},
+    )
+
+
+@mcp.tool()
+def app_permissions(device_id: str, package_name: str) -> dict[str, Any]:
+    """Read requested and currently granted permissions for one launcher-visible Android app. Does not broaden package visibility or modify permissions."""
+    package = _validate_package_name(package_name, protect_bridge=False)
+    return _device_command(
+        device_id,
+        "apps.permissions",
+        {"packageName": package},
     )
 
 
