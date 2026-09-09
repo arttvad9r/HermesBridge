@@ -116,7 +116,7 @@ private class DeviceSessionHub {
                 payload = BridgeProtocol.payload(payload),
             )
             session.send(Frame.Text(BridgeProtocol.encode(envelope)))
-            return withTimeout(20_000L) { deferred.await() }
+            return withTimeout(commandTimeoutMillis(request.tool)) { deferred.await() }
         } finally {
             pending.remove(requestId)
         }
@@ -143,6 +143,9 @@ internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = w
     result.error?.code == "command_timeout" -> HttpStatusCode.GatewayTimeout
     else -> HttpStatusCode.OK
 }
+
+internal fun commandTimeoutMillis(tool: String): Long =
+    if (tool == "apps.install") 300_000L else 20_000L
 
 fun main() {
     val token = System.getenv("HERMES_BRIDGE_ADMIN_TOKEN")
