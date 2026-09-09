@@ -42,6 +42,7 @@ class RelayAgentTransport(
     healthRepository: DeviceHealthRepository,
     appsRepository: InstalledAppsRepository = AndroidInstalledAppsRepository(context),
     filesRepository: SafFilesRepository = AndroidSafFilesRepository(context),
+    privilegedAppsBackend: PrivilegedAppsBackend = DroidMcpShizukuAppsBackend(),
 ) : AgentTransport {
     private val appContext = context.applicationContext
     private val identity = AndroidKeystoreDeviceIdentity()
@@ -50,6 +51,7 @@ class RelayAgentTransport(
         healthRepository = healthRepository,
         appsRepository = appsRepository,
         filesRepository = filesRepository,
+        privilegedAppsBackend = privilegedAppsBackend,
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = HttpClient(CIO) {
