@@ -6,9 +6,27 @@ It intentionally exposes only narrow, typed operations. It does **not** expose r
 
 ## Current tools
 
+Read-only:
+
 - `list_devices` — list paired phones and online/offline state.
 - `create_pairing_code` — create a one-time phone pairing code.
-- `device_health(device_id)` — invoke the fixed Android `device.health` allowlisted tool.
+- `device_health(device_id)` — battery percentage plus memory/storage totals.
+- `battery_usage(device_id)` — bounded parsed Batterystats data since the last charge.
+- `list_apps(device_id)` — launcher-visible apps only; no `QUERY_ALL_PACKAGES`.
+- `app_usage(device_id, days=30)` — UsageStats for launcher-visible apps; requires Android Usage Access.
+- `app_permissions(device_id, package_name)` — requested/granted permission metadata for one launcher-visible app.
+- `permissions_audit(device_id)` — bounded scan of launcher-visible apps returning only permissions that are both granted and classified by Android as `dangerous`.
+- `list_files(device_id, path_segments=[])` — browse the user-granted SAF tree.
+- `analyze_files(device_id, path_segments=[])` — bounded recursive analysis inside the user-granted SAF tree.
+
+Mutating/privileged, with Android-side approval:
+
+- `delete_path(device_id, path_segments)`.
+- `install_apk(device_id, apk_name, replace=true)`.
+- `uninstall_app(device_id, package_name, keep_data=false)`.
+- `force_stop_app(device_id, package_name)`.
+
+`app_permissions` and `permissions_audit` do not widen Android package visibility: the Android side first derives candidates from the same launcher-visible set used by `list_apps`.
 
 ## Install on the Hermes VPS
 
@@ -22,6 +40,7 @@ The adapter expects:
 ```text
 HERMES_BRIDGE_RELAY_URL=http://127.0.0.1:8080
 HERMES_BRIDGE_ADMIN_TOKEN=<same relay admin token>
+HERMES_BRIDGE_APK_DIR=/opt/HermesBridge/apks
 ```
 
 Keep the relay admin endpoint on loopback. Android should connect through public WSS; Hermes MCP should call the relay through `127.0.0.1`.
@@ -38,6 +57,7 @@ mcp_servers:
     env:
       HERMES_BRIDGE_RELAY_URL: "http://127.0.0.1:8080"
       HERMES_BRIDGE_ADMIN_TOKEN: "<relay-admin-token>"
+      HERMES_BRIDGE_APK_DIR: "/opt/HermesBridge/apks"
 ```
 
 Then verify with Hermes:
@@ -53,7 +73,9 @@ The resulting Hermes tools are expected to be namespaced by Hermes under the con
 The MCP adapter is a second allowlist in addition to the Android app allowlist:
 
 1. Hermes can only see MCP functions defined in this package.
-2. `device_health` hardcodes the relay command name to `device.health`.
-3. Android independently checks its own tool registry before execution.
-4. The relay admin API remains local to the VPS.
-5. Future destructive actions should be separate MCP tools with explicit confirmation policy; they should never be introduced through a generic `run_command(tool, args)` entry point.
+2. Every MCP function hardcodes exactly one Android tool name.
+3. Android independently checks its own typed router/registry and risk policy before execution.
+4. Read-only package tools remain launcher-scoped and do not request `QUERY_ALL_PACKAGES`.
+5. Permission audit output is bounded and returns Android's platform classification, not a custom risk score.
+6. The relay admin API remains local to the VPS.
+7. Destructive actions are separate typed MCP tools with Android-side exact-target approval; there is no generic `run_command(tool, args)` entry point.
