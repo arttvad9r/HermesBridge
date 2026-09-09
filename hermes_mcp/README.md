@@ -21,12 +21,13 @@ Read-only:
 
 Mutating/privileged, with Android-side approval:
 
+- `revoke_app_permission(device_id, package_name, permission_name)` — revoke one currently granted Android-`dangerous` permission from one launcher-visible app; no grant/all-permissions/user-id/flags surface is exposed.
 - `delete_path(device_id, path_segments)`.
 - `install_apk(device_id, apk_name, replace=true)`.
 - `uninstall_app(device_id, package_name, keep_data=false)`.
 - `force_stop_app(device_id, package_name)`.
 
-`app_permissions` and `permissions_audit` do not widen Android package visibility: the Android side first derives candidates from the same launcher-visible set used by `list_apps`.
+`app_permissions`, `permissions_audit` and permission revoke do not widen Android package visibility: the Android side first derives candidates from the same launcher-visible set used by `list_apps`.
 
 ## Install on the Hermes VPS
 
@@ -77,5 +78,6 @@ The MCP adapter is a second allowlist in addition to the Android app allowlist:
 3. Android independently checks its own typed router/registry and risk policy before execution.
 4. Read-only package tools remain launcher-scoped and do not request `QUERY_ALL_PACKAGES`.
 5. Permission audit output is bounded and returns Android's platform classification, not a custom risk score.
-6. The relay admin API remains local to the VPS.
-7. Destructive actions are separate typed MCP tools with Android-side exact-target approval; there is no generic `run_command(tool, args)` entry point.
+6. Permission changes are revoke-only, exact-target and require Android-side approval; Android derives the target user locally.
+7. The relay admin API remains local to the VPS.
+8. Destructive actions are separate typed MCP tools with Android-side exact-target approval; there is no generic `run_command(tool, args)` entry point.
