@@ -40,6 +40,7 @@ class AppPermissionsAuditToolHandler(
         val visibleApps = appsRepository.listLaunchableApps()
         val scanApps = visibleApps.take(MAX_SCANNED_APPS)
         var skippedApps = 0
+        var matchedApps = 0
         var dangerousGrantedPermissionCount = 0
         var resultTruncated = false
         val findings = ArrayList<AppAuditFinding>()
@@ -56,23 +57,20 @@ class AppPermissionsAuditToolHandler(
                 return@forEach
             }
 
-            val dangerousGranted = snapshot.permissions
-                .asSequence()
-                .filter { it.dangerous && it.granted }
-                .take(MAX_PERMISSIONS_PER_APP + 1)
-                .toList()
+            val dangerousGranted = snapshot.permissions.filter { it.dangerous && it.granted }
             if (dangerousGranted.isEmpty()) return@forEach
 
+            matchedApps += 1
             dangerousGrantedPermissionCount += dangerousGranted.size
-            val permissions = if (dangerousGranted.size > MAX_PERMISSIONS_PER_APP) {
-                resultTruncated = true
-                dangerousGranted.take(MAX_PERMISSIONS_PER_APP)
-            } else {
-                dangerousGranted
-            }
+            val returnedPermissions = dangerousGranted.take(MAX_PERMISSIONS_PER_APP)
+            if (returnedPermissions.size < dangerousGranted.size) resultTruncated = true
 
             if (findings.size < MAX_FINDING_APPS) {
-                findings += AppAuditFinding(app, permissions)
+                findings += AppAuditFinding(
+                    app = app,
+                    dangerousGrantedCount = dangerousGranted.size,
+                    permissions = returnedPermissions,
+                )
             } else {
                 resultTruncated = true
             }
@@ -86,7 +84,8 @@ class AppPermissionsAuditToolHandler(
                 put("visibleAppCount", visibleApps.size)
                 put("scannedAppCount", scanApps.size)
                 put("skippedAppCount", skippedApps)
-                put("matchedAppCount", findings.size)
+                put("matchedAppCount", matchedApps)
+                put("returnedAppCount", findings.size)
                 put("dangerousGrantedPermissionCount", dangerousGrantedPermissionCount)
                 put("scanTruncated", scanTruncated)
                 put("resultTruncated", resultTruncated)
@@ -104,7 +103,7 @@ class AppPermissionsAuditToolHandler(
                                     put("versionCode", app.versionCode)
                                     put("systemApp", app.systemApp)
                                     put("enabled", app.enabled)
-                                    put("dangerousGrantedCount", finding.permissions.size)
+                                    put("dangerousGrantedCount", finding.dangerousGrantedCount)
                                     put(
                                         "permissions",
                                         buildJsonArray {
@@ -132,6 +131,7 @@ class AppPermissionsAuditToolHandler(
 
     private data class AppAuditFinding(
         val app: InstalledAppSnapshot,
+        val dangerousGrantedCount: Int,
         val permissions: List<AppPermissionSnapshot>,
     )
 
