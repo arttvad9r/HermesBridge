@@ -84,15 +84,18 @@
 
 - [x] Pairing UI.
 - [x] Confirmed "Отвязать телефон" flow that revokes the server-side pairing before clearing local state.
+- [x] Android 13+ notification-permission card with explicit user action and system-settings fallback; relay remains functional when denied.
 - [x] File-access step using Storage Access Framework.
 - [x] Persisted SAF grant with explicit revoke/change controls.
 - [x] Reboot recovery state for the base relay connection.
 - [x] Shizuku detection/setup/authorization card and runtime state.
+- [x] Remember whether Shizuku was successfully configured without broad package visibility.
+- [x] Delayed post-reboot Shizuku restoration check that does not interfere with the base relay connection.
+- [x] "Advanced access needs restoration" notification only for previously configured Shizuku, with direct Shizuku launch when installed.
 - [x] Usage Access status/setup card with manual Android special-access flow.
 - [x] Guided first-run flow: connect Hermes, choose optional capabilities, finish into the normal dashboard.
 - [x] Local "История Hermes" screen reachable from the foreground-service notification.
 - [ ] Accessibility setup as an optional separate step.
-- [ ] "Advanced access needs restoration" notification.
 
 ## P1 — privileged actions
 
@@ -136,9 +139,10 @@
 - [ ] Network security config and TLS validation tests.
 - [ ] Keystore migration/recovery tests.
 - [ ] Process-death/reboot/network-handover tests on device.
+- [ ] Notification permission grant/deny/settings behavior on Android 13+ physical device.
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Usage Access behavior/revocation tests on physical device.
-- [ ] Shizuku reboot/reactivation tests on physical device.
+- [ ] Shizuku reboot/reactivation and restoration-notification tests on physical device.
 - [ ] Audit-log persistence, clear-history and notification-entry E2E on physical device.
 - [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
