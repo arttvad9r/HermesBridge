@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge
 
 import android.content.pm.PackageManager
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.lang.reflect.InvocationTargetException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,11 @@ import rikka.shizuku.Shizuku
 
 interface PrivilegedAppsBackend {
     fun readiness(): PrivilegedBackendReadiness
+
+    suspend fun install(
+        artifact: VerifiedApkArtifact,
+        replace: Boolean,
+    ): PrivilegedOperationResult
 
     suspend fun uninstall(
         packageName: String,
@@ -70,6 +76,52 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         }
     }
 
+    override suspend fun install(
+        artifact: VerifiedApkArtifact,
+        replace: Boolean,
+    ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
+        readinessFailure()?.let { return@withContext it }
+        if (!artifact.file.isFile || artifact.sizeBytes !in 1..MAX_APK_ARTIFACT_BYTES) {
+            return@withContext PrivilegedOperationResult(
+                ok = false,
+                code = "invalid_apk_artifact",
+                message = "Verified APK file is missing or has an invalid size.",
+            )
+        }
+        if (artifact.file.length() != artifact.sizeBytes) {
+            return@withContext PrivilegedOperationResult(
+                ok = false,
+                code = "invalid_apk_artifact",
+                message = "Verified APK size changed before installation.",
+            )
+        }
+
+        when (
+            val attempt = executeAttempt(
+                argv = buildPmInstallCommand(artifact.sizeBytes, replace),
+                timeoutCode = "install_timeout",
+                timeoutMessage = "Package manager did not finish installation within ${INSTALL_TIMEOUT_MILLIS / 1000} seconds.",
+                timeoutMillis = INSTALL_TIMEOUT_MILLIS,
+                stdinFile = artifact.file,
+            )
+        ) {
+            is FixedCommandAttempt.Failure -> attempt.result
+            is FixedCommandAttempt.Success -> {
+                val command = attempt.result
+                if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
+                    PrivilegedOperationResult(ok = true)
+                } else {
+                    PrivilegedOperationResult(
+                        ok = false,
+                        code = "install_failed",
+                        message = command.firstOutputLine()
+                            ?: "Package manager rejected the APK installation.",
+                    )
+                }
+            }
+        }
+    }
+
     override suspend fun uninstall(
         packageName: String,
         keepData: Boolean,
@@ -88,7 +140,7 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
             val attempt = executeAttempt(
                 argv = argv,
                 timeoutCode = "uninstall_timeout",
-                timeoutMessage = "Package manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
+                timeoutMessage = "Package manager did not finish within ${EXEC_TIMEOUT_MILLIS / 1000} seconds.",
             )
         ) {
             is FixedCommandAttempt.Failure -> attempt.result
@@ -117,7 +169,7 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
                 val attempt = executeAttempt(
                     argv = arrayOf("am", "force-stop", packageName),
                     timeoutCode = "force_stop_timeout",
-                    timeoutMessage = "Activity manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
+                    timeoutMessage = "Activity manager did not finish within ${EXEC_TIMEOUT_MILLIS / 1000} seconds.",
                 )
             ) {
                 is FixedCommandAttempt.Failure -> attempt.result
@@ -161,9 +213,17 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         argv: Array<String>,
         timeoutCode: String,
         timeoutMessage: String,
+        timeoutMillis: Long = EXEC_TIMEOUT_MILLIS,
+        stdinFile: File? = null,
     ): FixedCommandAttempt {
         return try {
-            FixedCommandAttempt.Success(executeFixedCommand(argv))
+            FixedCommandAttempt.Success(
+                executeFixedCommand(
+                    argv = argv,
+                    timeoutMillis = timeoutMillis,
+                    stdinFile = stdinFile,
+                )
+            )
         } catch (_: TimeoutCancellationException) {
             FixedCommandAttempt.Failure(
                 PrivilegedOperationResult(
@@ -185,7 +245,11 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         }
     }
 
-    private suspend fun executeFixedCommand(argv: Array<String>): FixedCommandResult {
+    private suspend fun executeFixedCommand(
+        argv: Array<String>,
+        timeoutMillis: Long,
+        stdinFile: File?,
+    ): FixedCommandResult {
         if (!Shizuku.pingBinder()) {
             error("Shizuku binder is not reachable.")
         }
@@ -197,7 +261,7 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         val stdoutBuffer = ByteArrayOutputStream()
         val stderrBuffer = ByteArrayOutputStream()
 
-        return withTimeout(EXEC_TIMEOUT_MS) {
+        return withTimeout(timeoutMillis) {
             coroutineScope {
                 val stdoutJob = launch(Dispatchers.IO) {
                     runCatching { process.inputStream.use { it.copyTo(stdoutBuffer) } }
@@ -205,8 +269,18 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
                 val stderrJob = launch(Dispatchers.IO) {
                     runCatching { process.errorStream.use { it.copyTo(stderrBuffer) } }
                 }
+                val stdinJob = launch(Dispatchers.IO) {
+                    process.outputStream.use { output ->
+                        if (stdinFile != null) {
+                            stdinFile.inputStream().buffered().use { input ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
                 try {
                     val exitCode = runInterruptible(Dispatchers.IO) { process.waitFor() }
+                    stdinJob.join()
                     stdoutJob.join()
                     stderrJob.join()
                     FixedCommandResult(
@@ -255,7 +329,8 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
     }
 
     companion object {
-        private const val EXEC_TIMEOUT_MS = 30_000L
+        private const val EXEC_TIMEOUT_MILLIS = 30_000L
+        private const val INSTALL_TIMEOUT_MILLIS = 180_000L
         private val PACKAGE_NAME_REGEX = Regex(
             "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
         )
@@ -275,12 +350,29 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
     }
 }
 
+internal fun buildPmInstallCommand(sizeBytes: Long, replace: Boolean): Array<String> {
+    require(sizeBytes in 1..MAX_APK_ARTIFACT_BYTES) { "Invalid APK size." }
+    return buildList {
+        add("pm")
+        add("install")
+        if (replace) add("-r")
+        add("-S")
+        add(sizeBytes.toString())
+        add("-")
+    }.toTypedArray()
+}
+
 object DisabledPrivilegedAppsBackend : PrivilegedAppsBackend {
     override fun readiness() = PrivilegedBackendReadiness(
         ready = false,
         code = "shizuku_unavailable",
         message = "Privileged app backend is not configured.",
     )
+
+    override suspend fun install(
+        artifact: VerifiedApkArtifact,
+        replace: Boolean,
+    ) = unavailable()
 
     override suspend fun uninstall(
         packageName: String,
