@@ -70,6 +70,12 @@ data class RelayDeviceResponse(
     val connected: Boolean,
 )
 
+@Serializable
+data class RelayRevokeResponse(
+    val deviceId: String,
+    val revoked: Boolean,
+)
+
 private class DeviceSessionHub {
     private val sessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<CommandResultPayload>>()
@@ -90,6 +96,15 @@ private class DeviceSessionHub {
     }
 
     fun isConnected(deviceId: String): Boolean = sessions.containsKey(deviceId)
+
+    suspend fun revoke(deviceId: String) {
+        val session = sessions.remove(deviceId) ?: return
+        try {
+            session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Device pairing revoked"))
+        } catch (_: Exception) {
+            // Revocation is already effective once the session is removed and registry key is deleted.
+        }
+    }
 
     suspend fun sendCommand(
         deviceId: String,
@@ -203,6 +218,36 @@ fun Application.relayModule(
             call.respondText(
                 BridgeProtocol.json.encodeToString(devices),
                 ContentType.Application.Json,
+            )
+        }
+
+        post("/api/v1/devices/{deviceId}/revoke") {
+            if (!call.requireAdmin(adminToken)) return@post
+            val deviceId = call.parameters["deviceId"]
+            if (deviceId == null || !DEVICE_ID_REGEX.matches(deviceId)) {
+                call.respondText(
+                    "{\"error\":\"invalid_device_id\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.BadRequest,
+                )
+                return@post
+            }
+
+            val revoked = runtime.devices.revoke(deviceId)
+            if (!revoked) {
+                call.respondText(
+                    "{\"error\":\"device_not_found\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.NotFound,
+                )
+                return@post
+            }
+
+            runtime.sessions.revoke(deviceId)
+            call.respondText(
+                BridgeProtocol.json.encodeToString(RelayRevokeResponse(deviceId, revoked = true)),
+                ContentType.Application.Json,
+                HttpStatusCode.OK,
             )
         }
 
@@ -522,3 +567,4 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
 }
 
 private const val APK_NAME_HEADER = "X-Hermes-Apk-Name"
+private val DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9-]{1,80}$")
