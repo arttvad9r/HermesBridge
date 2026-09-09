@@ -3,6 +3,7 @@ package io.github.arttvad9r.hermesbridge
 enum class ConnectionState {
     DISCONNECTED,
     PAIRING,
+    RECONNECTING,
     CONNECTED,
     ERROR,
 }
