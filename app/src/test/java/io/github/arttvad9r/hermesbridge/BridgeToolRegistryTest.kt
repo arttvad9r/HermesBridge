@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -33,7 +34,28 @@ class BridgeToolRegistryTest {
         )
     }
 
-    private val registry = BridgeToolRegistry(healthRepository, appsRepository)
+    private val filesRepository = object : SafFilesRepository {
+        override fun list(pathSegments: List<String>) = SafDirectorySnapshot(
+            rootName = "Shared",
+            pathSegments = pathSegments,
+            entries = listOf(
+                SafFileEntrySnapshot(
+                    name = "notes.txt",
+                    pathSegments = pathSegments + "notes.txt",
+                    directory = false,
+                    mimeType = "text/plain",
+                    sizeBytes = 123L,
+                    lastModifiedEpochMillis = 456L,
+                )
+            ),
+        )
+    }
+
+    private val registry = BridgeToolRegistry(
+        healthRepository = healthRepository,
+        appsRepository = appsRepository,
+        filesRepository = filesRepository,
+    )
 
     @Test
     fun deviceHealthExecutesWithoutApproval() = runBlocking {
@@ -69,6 +91,64 @@ class BridgeToolRegistryTest {
                 tool = BridgeToolRegistry.APPS_LIST,
                 requestId = "request-apps-args",
                 arguments = buildJsonObject { put("unexpected", true) },
+            )
+        )
+
+        assertFalse(result.ok)
+        assertEquals("invalid_arguments", result.error?.code)
+    }
+
+    @Test
+    fun filesListExecutesForSafePathSegments() = runBlocking {
+        val result = registry.execute(
+            CommandRequestPayload(
+                tool = BridgeToolRegistry.FILES_LIST,
+                requestId = "request-files",
+                arguments = buildJsonObject {
+                    put(
+                        "pathSegments",
+                        buildJsonArray {
+                            add("Documents")
+                            add("Notes")
+                        },
+                    )
+                },
+            )
+        )
+
+        assertTrue(result.ok)
+        assertEquals("1", result.result?.get("count")?.toString())
+        assertTrue(result.result?.toString()?.contains("notes.txt") == true)
+    }
+
+    @Test
+    fun filesListRejectsTraversalSegments() = runBlocking {
+        val result = registry.execute(
+            CommandRequestPayload(
+                tool = BridgeToolRegistry.FILES_LIST,
+                requestId = "request-files-traversal",
+                arguments = buildJsonObject {
+                    put(
+                        "pathSegments",
+                        buildJsonArray {
+                            add("..")
+                        },
+                    )
+                },
+            )
+        )
+
+        assertFalse(result.ok)
+        assertEquals("invalid_arguments", result.error?.code)
+    }
+
+    @Test
+    fun filesListRejectsUnexpectedArguments() = runBlocking {
+        val result = registry.execute(
+            CommandRequestPayload(
+                tool = BridgeToolRegistry.FILES_LIST,
+                requestId = "request-files-extra",
+                arguments = buildJsonObject { put("path", "../") },
             )
         )
 
