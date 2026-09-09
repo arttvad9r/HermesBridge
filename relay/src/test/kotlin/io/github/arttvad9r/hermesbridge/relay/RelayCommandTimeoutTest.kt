@@ -10,8 +10,14 @@ class RelayCommandTimeoutTest {
     }
 
     @Test
+    fun fileAnalysisGetsBoundedExtendedTimeout() {
+        assertEquals(60_000L, commandTimeoutMillis("files.analyze"))
+    }
+
+    @Test
     fun ordinaryToolsKeepShortTimeout() {
         assertEquals(20_000L, commandTimeoutMillis("device.health"))
+        assertEquals(20_000L, commandTimeoutMillis("files.delete"))
         assertEquals(20_000L, commandTimeoutMillis("apps.uninstall"))
         assertEquals(20_000L, commandTimeoutMillis("apps.forceStop"))
     }
