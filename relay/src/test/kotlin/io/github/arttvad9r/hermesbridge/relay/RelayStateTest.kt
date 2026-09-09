@@ -7,7 +7,6 @@ import java.security.Signature
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -51,10 +50,9 @@ class RelayStateTest {
         val registered = firstRegistry.register(keyPair.public, "My phone")
 
         val restoredRegistry = DeviceRegistry(store)
-        val restored = restoredRegistry.find(registered.deviceId)
+        val restored = requireNotNull(restoredRegistry.find(registered.deviceId))
 
-        assertNotNull(restored)
-        assertEquals("My phone", restored?.label)
-        assertTrue(keyPair.public.encoded.contentEquals(restored?.publicKey?.encoded))
+        assertEquals("My phone", restored.label)
+        assertTrue(keyPair.public.encoded.contentEquals(restored.publicKey.encoded))
     }
 }
