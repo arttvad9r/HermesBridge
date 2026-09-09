@@ -42,8 +42,9 @@
 - [x] `list_devices`.
 - [x] `create_pairing_code`.
 - [x] `device_health`.
-- [x] `battery_usage` with bounded parsed Batterystats output and no raw shell arguments.
+- [x] `battery_usage` with bounded parsed Batterystats power use and top partial wakelocks; no raw shell arguments.
 - [x] `list_apps`.
+- [x] `app_usage` with optional 1–365 day window, launcher-only visibility and Android Usage Access gate.
 - [x] `list_files` inside the user-granted SAF tree.
 - [x] `analyze_files` with bounded recursive SAF storage analysis.
 - [x] `delete_path` behind Android-side exact-target approval.
@@ -56,7 +57,9 @@
 - [x] Explicit Hermes Bridge Android tool allowlist.
 - [x] `device.health`.
 - [x] `battery.usage` through fixed `dumpsys batterystats --charged --checkin`, parsed locally and read-only.
+- [x] Bounded top partial-wakelock diagnostics from the same Batterystats snapshot.
 - [x] `apps.list` with launcher-only package visibility; no `QUERY_ALL_PACKAGES`.
+- [x] `apps.usage` intersects UsageStats with launcher-visible packages so special access does not widen package visibility.
 - [x] `files.list` limited to a user-selected SAF directory tree.
 - [x] `files.analyze` with bounded traversal, total size and largest-file summaries inside the granted tree.
 - [x] `files.delete` with root protection and approval bound to target metadata.
@@ -65,7 +68,7 @@
 - [x] `apps.forceStop` with strict package validation, self-protection and approval.
 - [x] Structured result/error envelopes.
 - [x] Path-segment validation and bounded file-list size/depth.
-- [ ] Add read-only app details as needed without broad package visibility.
+- [ ] Add additional read-only app details only where useful and without broad package visibility.
 - [ ] Idempotency where a future mutating operation is safely retryable.
 - [ ] Audit log.
 
@@ -73,11 +76,11 @@
 
 - [x] Pairing UI.
 - [x] File-access step using Storage Access Framework.
-- [x] Persisted read-only SAF grant with explicit revoke/change controls.
+- [x] Persisted SAF grant with explicit revoke/change controls.
 - [x] Reboot recovery state for the base relay connection.
 - [x] Shizuku detection/setup/authorization card and runtime state.
+- [x] Usage Access status/setup card with manual Android special-access flow.
 - [ ] Turn the current cards into a guided first-run setup flow.
-- [ ] Usage Access step.
 - [ ] Accessibility setup as an optional separate step.
 - [ ] "Advanced access needs restoration" notification.
 
@@ -89,7 +92,7 @@
 - [x] Force-stop app.
 - [ ] Selected permission operations.
 - [ ] Selected safe settings operations.
-- [x] First selected diagnostic: bounded read-only Batterystats power-use snapshot.
+- [x] First selected diagnostic: bounded read-only Batterystats power-use and partial-wakelock snapshot.
 - [ ] Additional selected diagnostics (`dumpsys`) wrapped in typed tools as justified.
 - [x] Never register upstream/raw shell in the Hermes tool surface.
 
@@ -121,8 +124,9 @@
 - [ ] Keystore migration/recovery tests.
 - [ ] Process-death/reboot/network-handover tests on device.
 - [ ] SAF permission revocation/provider failure tests on device.
+- [ ] Usage Access behavior/revocation tests on physical device.
 - [ ] Shizuku reboot/reactivation tests on device.
-- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics E2E through the deployed VPS relay.
+- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
 - [ ] Signed reproducible release process.
