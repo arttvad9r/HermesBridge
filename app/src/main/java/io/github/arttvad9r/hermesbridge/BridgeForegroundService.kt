@@ -1,0 +1,185 @@
+package io.github.arttvad9r.hermesbridge
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+
+class BridgeForegroundService : Service() {
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var commandJob: Job? = null
+    private lateinit var transport: RelayAgentTransport
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+
+        val healthRepository = AndroidDeviceHealthRepository(applicationContext)
+        transport = RelayAgentTransport(
+            context = applicationContext,
+            relayWsUrl = BuildConfig.RELAY_WS_URL,
+            healthRepository = healthRepository,
+            onConnectionState = ::onTransportState,
+        )
+
+        startAsForeground(
+            title = "Hermes Bridge",
+            text = "Подготовка защищённого соединения…",
+        )
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action ?: ACTION_CONNECT) {
+            ACTION_PAIR -> {
+                val code = intent?.getStringExtra(EXTRA_PAIRING_CODE)
+                if (code.isNullOrBlank()) {
+                    onTransportState(ConnectionState.ERROR, "Не передан код привязки.")
+                } else {
+                    launchCommand { transport.pair(code) }
+                }
+            }
+
+            ACTION_CONNECT -> launchCommand { transport.connect() }
+            ACTION_STOP -> stopBridge()
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        commandJob?.cancel()
+        transport.close()
+        serviceScope.cancel()
+        BridgeRuntime.update(ConnectionState.DISCONNECTED)
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun launchCommand(block: suspend () -> Result<Unit>) {
+        commandJob?.cancel()
+        commandJob = serviceScope.launch {
+            val result = block()
+            result.onFailure { error ->
+                onTransportState(
+                    ConnectionState.ERROR,
+                    error.message ?: "Не удалось подключиться к relay.",
+                )
+            }
+        }
+    }
+
+    private fun stopBridge() {
+        BridgeRuntime.update(ConnectionState.DISCONNECTED)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun onTransportState(state: ConnectionState, message: String?) {
+        BridgeRuntime.update(state, message)
+        val text = when (state) {
+            ConnectionState.DISCONNECTED -> "Соединение остановлено"
+            ConnectionState.PAIRING -> "Подключение к Hermes…"
+            ConnectionState.CONNECTED -> "Hermes подключён к телефону"
+            ConnectionState.ERROR -> message ?: "Ошибка соединения"
+        }
+        updateNotification(text)
+    }
+
+    private fun startAsForeground(title: String, text: String) {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        } else {
+            0
+        }
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            buildNotification(title, text),
+            type,
+        )
+    }
+
+    private fun updateNotification(text: String) {
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification("Hermes Bridge", text))
+    }
+
+    private fun buildNotification(title: String, text: String): Notification {
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val stopIntent = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, BridgeForegroundService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_bridge_notification)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(contentIntent)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(0, "Остановить", stopIntent)
+            .build()
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Hermes Bridge",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "Постоянное защищённое соединение Hermes с телефоном"
+            setShowBadge(false)
+        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "hermes_bridge_connection"
+        private const val NOTIFICATION_ID = 1001
+        private const val ACTION_CONNECT = "io.github.arttvad9r.hermesbridge.CONNECT"
+        private const val ACTION_PAIR = "io.github.arttvad9r.hermesbridge.PAIR"
+        private const val ACTION_STOP = "io.github.arttvad9r.hermesbridge.STOP"
+        private const val EXTRA_PAIRING_CODE = "pairing_code"
+
+        fun connect(context: Context) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, BridgeForegroundService::class.java).setAction(ACTION_CONNECT),
+            )
+        }
+
+        fun pair(context: Context, code: String) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, BridgeForegroundService::class.java)
+                    .setAction(ACTION_PAIR)
+                    .putExtra(EXTRA_PAIRING_CODE, code),
+            )
+        }
+    }
+}
