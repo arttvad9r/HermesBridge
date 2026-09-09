@@ -169,4 +169,18 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
     }
+
+    fun revokePairing() {
+        if (_state.value.connectionState != ConnectionState.CONNECTED) {
+            _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с Hermes.") }
+            return
+        }
+        runCatching { BridgeForegroundService.revokePairing(app) }
+            .onFailure { error ->
+                BridgeRuntime.update(
+                    ConnectionState.ERROR,
+                    error.message ?: "Не удалось запустить отзыв привязки.",
+                )
+            }
+    }
 }
