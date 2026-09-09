@@ -19,6 +19,8 @@ interface PrivilegedAppsBackend {
         packageName: String,
         keepData: Boolean,
     ): PrivilegedOperationResult
+
+    suspend fun forceStop(packageName: String): PrivilegedOperationResult
 }
 
 data class PrivilegedBackendReadiness(
@@ -37,8 +39,8 @@ data class PrivilegedOperationResult(
  * Narrow Shizuku package backend adapted from the Apache-2.0 droid-mcp project,
  * pinned to upstream commit aeaa5b9e8e96f56ef64a7ca23d0726585f7b1103 (0.10.1 era).
  *
- * Only the fixed `pm uninstall [-k] <package>` operation is retained here.
- * No generic command execution method is exposed through Hermes Bridge.
+ * Only fixed typed package operations are retained here. No generic command
+ * execution method is exposed through Hermes Bridge.
  * See THIRD_PARTY_NOTICES.md for attribution.
  */
 class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
@@ -71,21 +73,8 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         packageName: String,
         keepData: Boolean,
     ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
-        val ready = readiness()
-        if (!ready.ready) {
-            return@withContext PrivilegedOperationResult(
-                ok = false,
-                code = ready.code,
-                message = ready.message,
-            )
-        }
-        if (!PACKAGE_NAME_REGEX.matches(packageName) || packageName.length !in 3..255) {
-            return@withContext PrivilegedOperationResult(
-                ok = false,
-                code = "invalid_package_name",
-                message = "The package name is invalid.",
-            )
-        }
+        readinessFailure()?.let { return@withContext it }
+        invalidPackageFailure(packageName)?.let { return@withContext it }
 
         val argv = buildList {
             add("pm")
@@ -94,36 +83,95 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
             add(packageName)
         }.toTypedArray()
 
-        val command = try {
-            executeFixedCommand(argv)
-        } catch (_: TimeoutCancellationException) {
-            return@withContext PrivilegedOperationResult(
-                ok = false,
-                code = "uninstall_timeout",
-                message = "Package manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
-            )
-        } catch (error: Throwable) {
-            return@withContext PrivilegedOperationResult(
-                ok = false,
-                code = "shizuku_spawn_failed",
-                message = (error.message ?: error::class.java.simpleName).take(200),
-            )
-        }
+        val command = executeOrFailure(
+            argv = argv,
+            timeoutCode = "uninstall_timeout",
+            timeoutMessage = "Package manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
+        ) ?: return@withContext lastExecutionFailure
 
         if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
             PrivilegedOperationResult(ok = true)
         } else {
-            val detail = sequenceOf(command.stderr, command.stdout)
-                .flatMap { it.lineSequence() }
-                .map(String::trim)
-                .firstOrNull(String::isNotEmpty)
-                ?.take(200)
-                ?: "Package manager rejected the uninstall request."
             PrivilegedOperationResult(
                 ok = false,
                 code = "uninstall_failed",
-                message = detail,
+                message = command.firstOutputLine()
+                    ?: "Package manager rejected the uninstall request.",
             )
+        }
+    }
+
+    override suspend fun forceStop(packageName: String): PrivilegedOperationResult =
+        withContext(Dispatchers.IO) {
+            readinessFailure()?.let { return@withContext it }
+            invalidPackageFailure(packageName)?.let { return@withContext it }
+
+            val command = executeOrFailure(
+                argv = arrayOf("am", "force-stop", packageName),
+                timeoutCode = "force_stop_timeout",
+                timeoutMessage = "Activity manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
+            ) ?: return@withContext lastExecutionFailure
+
+            if (command.exitCode == 0) {
+                PrivilegedOperationResult(ok = true)
+            } else {
+                PrivilegedOperationResult(
+                    ok = false,
+                    code = "force_stop_failed",
+                    message = command.firstOutputLine()
+                        ?: "Activity manager rejected the force-stop request.",
+                )
+            }
+        }
+
+    private fun readinessFailure(): PrivilegedOperationResult? {
+        val ready = readiness()
+        return if (ready.ready) null else PrivilegedOperationResult(
+            ok = false,
+            code = ready.code,
+            message = ready.message,
+        )
+    }
+
+    private fun invalidPackageFailure(packageName: String): PrivilegedOperationResult? =
+        if (PACKAGE_NAME_REGEX.matches(packageName) && packageName.length in 3..255) {
+            null
+        } else {
+            PrivilegedOperationResult(
+                ok = false,
+                code = "invalid_package_name",
+                message = "The package name is invalid.",
+            )
+        }
+
+    @Volatile
+    private var lastExecutionFailure = PrivilegedOperationResult(
+        ok = false,
+        code = "shizuku_spawn_failed",
+        message = "Privileged command did not start.",
+    )
+
+    private suspend fun executeOrFailure(
+        argv: Array<String>,
+        timeoutCode: String,
+        timeoutMessage: String,
+    ): FixedCommandResult? {
+        return try {
+            executeFixedCommand(argv)
+        } catch (_: TimeoutCancellationException) {
+            lastExecutionFailure = PrivilegedOperationResult(
+                ok = false,
+                code = timeoutCode,
+                message = timeoutMessage,
+            )
+            null
+        } catch (error: Throwable) {
+            lastExecutionFailure = PrivilegedOperationResult(
+                ok = false,
+                code = "shizuku_spawn_failed",
+                message = (error.message ?: error::class.java.simpleName).take(200),
+            )
+            null
         }
     }
 
@@ -183,7 +231,13 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         val exitCode: Int,
         val stdout: String,
         val stderr: String,
-    )
+    ) {
+        fun firstOutputLine(): String? = sequenceOf(stderr, stdout)
+            .flatMap { it.lineSequence() }
+            .map(String::trim)
+            .firstOrNull(String::isNotEmpty)
+            ?.take(200)
+    }
 
     companion object {
         private const val EXEC_TIMEOUT_MS = 30_000L
@@ -216,7 +270,11 @@ object DisabledPrivilegedAppsBackend : PrivilegedAppsBackend {
     override suspend fun uninstall(
         packageName: String,
         keepData: Boolean,
-    ) = PrivilegedOperationResult(
+    ) = unavailable()
+
+    override suspend fun forceStop(packageName: String) = unavailable()
+
+    private fun unavailable() = PrivilegedOperationResult(
         ok = false,
         code = "shizuku_unavailable",
         message = "Privileged app backend is not configured.",
