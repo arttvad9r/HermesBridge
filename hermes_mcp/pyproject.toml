@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermes-bridge-mcp"
+version = "0.1.0"
+description = "Narrow MCP adapter for a local Hermes Bridge relay"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2,<3",
+]
+
+[project.scripts]
+hermes-bridge-mcp = "hermes_bridge_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hermes_bridge_mcp"]
