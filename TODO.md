@@ -48,6 +48,7 @@
 - [x] `app_usage` with optional 1–365 day window, launcher-only visibility and Android Usage Access gate.
 - [x] `app_permissions` for one launcher-visible package without broad package visibility.
 - [x] `permissions_audit` with bounded launcher-only scan of granted Android-dangerous permissions.
+- [x] `revoke_app_permission` for one currently granted Android-dangerous runtime permission behind exact local approval.
 - [x] `list_files` inside the user-granted SAF tree.
 - [x] `analyze_files` with bounded recursive SAF storage analysis.
 - [x] `delete_path` behind Android-side exact-target approval.
@@ -66,6 +67,7 @@
 - [x] `apps.permissions` reads requested/granted metadata only after a launcher-visible package check.
 - [x] `apps.permissionsAudit` scans at most 200 launcher-visible apps and returns only granted Android-`dangerous` permissions with explicit truncation state.
 - [x] Permission-audit output bounded below the relay WebSocket frame limit.
+- [x] `apps.revokePermission` accepts only one launcher-visible package + one requested/granted Android-`dangerous` permission, derives the Android user on-device and requires exact one-use approval.
 - [x] `files.list` limited to a user-selected SAF directory tree.
 - [x] `files.analyze` with bounded traversal, total size and largest-file summaries inside the granted tree.
 - [x] `files.delete` with root protection and approval bound to target metadata.
@@ -97,7 +99,8 @@
 - [x] Install APK through verified staged bytes streamed to `pm install` stdin.
 - [x] Uninstall app.
 - [x] Force-stop app.
-- [ ] Selected permission grant/revoke operations, only if a safe exact-target policy is defined.
+- [x] Revoke one already-granted Android `dangerous` runtime permission from a launcher-visible app after exact local approval.
+- [ ] Permission grant operations, only if a separate safe exact-target policy is justified.
 - [ ] Selected safe settings operations.
 - [x] First selected diagnostic: bounded read-only Batterystats power-use and partial-wakelock snapshot.
 - [ ] Additional selected diagnostics (`dumpsys`) wrapped in typed tools as justified.
@@ -111,6 +114,7 @@
 - [x] Approval binds to exact canonical normalized arguments.
 - [x] Install approval binds to verified APK content/package/signing metadata rather than ephemeral transfer tokens.
 - [x] File deletion approval binds to validated path plus current target metadata.
+- [x] Permission-revoke approval binds to package + permission + derived Android user ID.
 - [x] Approved tickets are one-use only.
 - [ ] Hermes/Telegram approval routing.
 - [ ] Per-tool "always allow" only where explicitly safe.
@@ -133,7 +137,7 @@
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Usage Access behavior/revocation tests on physical device.
 - [ ] Shizuku reboot/reactivation tests on physical device.
-- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit E2E through the deployed VPS relay.
+- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
 - [ ] Signed reproducible release process.
