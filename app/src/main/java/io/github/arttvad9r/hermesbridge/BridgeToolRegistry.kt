@@ -202,7 +202,9 @@ class BridgeToolRegistry(
             put("rootName", listing.rootName)
             put(
                 "pathSegments",
-                buildJsonArray { listing.pathSegments.forEach { add(it) } },
+                buildJsonArray {
+                    listing.pathSegments.forEach { add(JsonPrimitive(it)) }
+                },
             )
             put("count", listing.entries.size)
             put(
@@ -214,7 +216,9 @@ class BridgeToolRegistry(
                                 put("name", entry.name)
                                 put(
                                     "pathSegments",
-                                    buildJsonArray { entry.pathSegments.forEach { add(it) } },
+                                    buildJsonArray {
+                                        entry.pathSegments.forEach { add(JsonPrimitive(it)) }
+                                    },
                                 )
                                 put("directory", entry.directory)
                                 if (entry.mimeType == null) put("mimeType", JsonNull)
