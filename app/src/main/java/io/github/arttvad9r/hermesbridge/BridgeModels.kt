@@ -23,6 +23,7 @@ data class BridgeUiState(
     val pairingCode: String = "",
     val health: DeviceHealthSnapshot? = null,
     val fileAccessConfigured: Boolean = false,
+    val usageAccessGranted: Boolean = false,
     val pendingApprovals: List<ApprovalTicket> = emptyList(),
     val shizuku: ShizukuAccessState = ShizukuAccessState(),
     val message: String? = null,
