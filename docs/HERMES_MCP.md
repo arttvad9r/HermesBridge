@@ -13,13 +13,13 @@ python -m venv .venv
 pip install .
 ```
 
-This installs the executable:
+This installs:
 
 ```text
 hermes-bridge-mcp
 ```
 
-The adapter requires the MCP Python SDK v2 (`mcp>=2,<3`).
+The adapter requires MCP Python SDK v2 (`mcp>=2,<3`).
 
 ## Required environment
 
@@ -32,11 +32,9 @@ HERMES_BRIDGE_ADMIN_TOKEN=<relay admin token>
 
 Plain HTTP is accepted only for exact loopback hosts (`127.0.0.1`, `::1`, `localhost`). Any non-loopback relay URL must use HTTPS. URLs containing user info, a path, query or fragment are rejected.
 
-The admin token must be at least 24 characters and should be the same secret configured for the relay service.
-
 ## Hermes configuration
 
-Hermes Agent supports local stdio MCP servers through `~/.hermes/config.yaml`. Add a dedicated entry:
+Example `~/.hermes/config.yaml` entry:
 
 ```yaml
 mcp_servers:
@@ -48,17 +46,13 @@ mcp_servers:
     enabled: true
 ```
 
-Hermes prefixes discovered MCP tools with the server name, so the tools appear under names such as `mcp_hermes_bridge_device_health`.
-
-After changing MCP config, reload MCP servers in Hermes with `/reload-mcp`, start a new session, or restart Hermes.
-
-Hermes also supports `hermes mcp add` for custom servers. The direct `config.yaml` form is documented here because it makes the command path and environment boundary explicit.
+Reload MCP servers in Hermes after configuration changes.
 
 ## Current MCP tools
 
 ### `list_devices()`
 
-Lists paired relay devices and whether they are currently connected.
+Lists paired relay devices and whether each is currently connected.
 
 ### `create_pairing_code()`
 
@@ -66,72 +60,95 @@ Creates a short-lived one-time pairing code for the Android app.
 
 ### `device_health(device_id)`
 
-Maps only to Android tool:
-
-```text
-device.health
-```
-
-Returns battery percentage plus memory/storage totals.
+Maps only to Android tool `device.health`. Returns battery percentage plus memory/storage totals.
 
 ### `list_apps(device_id)`
 
-Maps only to Android tool:
+Maps only to `apps.list`. Returns launcher-visible applications. Hermes Bridge does not request `QUERY_ALL_PACKAGES`.
 
-```text
-apps.list
-```
+### `list_files(device_id, path_segments=[])`
 
-Returns launcher-visible applications. Hermes Bridge does not request `QUERY_ALL_PACKAGES`.
+Maps only to `files.list`. It works only inside the directory tree explicitly selected by the user through Android Storage Access Framework.
 
-### `list_files(device_id, path_segments=[] )`
-
-Maps only to Android tool:
-
-```text
-files.list
-```
-
-It works only after the user selects a directory in the Android app through the Storage Access Framework.
-
-`path_segments` is an array such as:
+`path_segments` is a logical array such as:
 
 ```json
 ["Documents", "Notes"]
 ```
 
-It is not a raw filesystem path. Both the MCP adapter and Android app reject traversal markers, path separators, excessive depth and oversized segments.
+It is not a raw filesystem path. Both MCP and Android reject traversal markers, separators, excessive depth and oversized segments.
 
-The tool is read-only. It cannot open arbitrary content URIs, write, rename or delete files.
+### `uninstall_app(device_id, package_name, keep_data=false)`
+
+Maps only to `apps.uninstall`.
+
+Properties:
+
+- requires Shizuku to be active and authorized;
+- requires explicit Android-side approval;
+- approval is bound to normalized `packageName + keepData`;
+- approval expires and is one-use only;
+- Hermes Bridge cannot uninstall itself;
+- invalid package names are rejected in both MCP and Android layers.
+
+The first call normally returns a structured `approval_required` result. The phone displays the exact requested operation. After the user approves it, Hermes must retry the same normalized call. Changing the package or `keep_data` requires a new approval.
+
+### `force_stop_app(device_id, package_name)`
+
+Maps only to `apps.forceStop`.
+
+It follows the same approval boundary as uninstall. Hermes Bridge also refuses to force-stop its own package because doing so would terminate the active device connection.
+
+## Approval behavior
+
+Mutating/privileged tools do not execute while the Android approval is pending.
+
+The approval fingerprint includes:
+
+```text
+tool name + canonical normalized arguments
+```
+
+Consequences:
+
+- approving one package does not authorize another package;
+- approving uninstall does not authorize force-stop;
+- an approved ticket cannot be replayed after one successful consumption;
+- expired approvals require a new user decision.
+
+Current approval is local to the Android app. Telegram/Hermes-side approval routing is planned separately.
 
 ## Security boundary
 
-The MCP adapter intentionally has no public equivalent of:
+The MCP adapter intentionally has no equivalent of:
 
 ```text
 run_command(tool, arguments)
+run_shell(command)
 ```
 
-Each public MCP function hardcodes one Android tool name. A caller cannot turn `device_health()` or `list_files()` into `run_shell`, uninstall, arbitrary intent execution, or another unregistered operation by changing arguments.
+Each public MCP function hardcodes one Android tool name. The Android app applies another independent allowlist and risk policy before execution.
 
 Keep these properties:
 
 - MCP runs locally beside Hermes;
 - relay admin API stays loopback-only;
-- Android device transport uses WSS through the public reverse proxy;
-- only read-only tools are currently exposed;
-- future mutating/privileged tools must be separate typed functions and require the approval layer first.
+- Android transport uses WSS through the public reverse proxy;
+- read-only tools execute without approval;
+- mutating/privileged tools are separate typed functions;
+- no arbitrary shell, intent, content URI or raw filesystem path is exposed.
 
 ## Smoke test
 
-After the relay is running and the MCP entry is configured:
+After relay and MCP are configured:
 
 1. Reload MCP in Hermes.
-2. Call the device-list tool.
-3. If the phone is not paired, create a pairing code and enter it in the Android app.
-4. Verify the device reports connected.
-5. Call device health.
-6. Call app listing.
-7. Select a folder in the Android app and call file listing with an empty segment list to list the granted root.
+2. Call `list_devices`.
+3. If needed, call `create_pairing_code` and enter it in the Android app.
+4. Verify the phone reports connected.
+5. Call `device_health` and `list_apps`.
+6. Select a folder in the Android app and call `list_files`.
+7. Activate/authorize Shizuku in the app.
+8. Call `force_stop_app` or `uninstall_app` for a disposable test package, approve the displayed card on the phone, then retry the same tool call.
 
-If `files.list` returns `file_access_not_configured`, the Android SAF folder has not yet been selected or its persisted grant is no longer valid.
+A physical-device end-to-end test is still required before privileged actions should be treated as production-ready.
