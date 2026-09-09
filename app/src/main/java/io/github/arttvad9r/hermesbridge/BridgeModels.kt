@@ -20,5 +20,6 @@ data class BridgeUiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val pairingCode: String = "",
     val health: DeviceHealthSnapshot? = null,
+    val fileAccessConfigured: Boolean = false,
     val message: String? = null,
 )
