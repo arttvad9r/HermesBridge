@@ -43,9 +43,11 @@ Mitigations:
 
 - capability groups shown separately;
 - base mode works without Shizuku/Accessibility;
-- optional permissions are not requested at first launch unless required;
+- Android 13+ notification permission is requested explicitly and does not gate the relay;
+- Usage Access and SAF are separate opt-in capabilities;
 - UI control is a separate opt-in capability;
-- Shizuku is a separate opt-in capability.
+- Shizuku is a separate opt-in capability;
+- no `QUERY_ALL_PACKAGES`; Shizuku recovery uses one exact package query only.
 
 ### Compromised VPS
 
@@ -128,6 +130,14 @@ The audit history intentionally does **not** persist raw command arguments or ra
 
 The history screen is an internal non-exported activity and can be cleared locally by the user. The foreground-service notification provides a local shortcut to it when notifications are available.
 
+## Reboot and Shizuku recovery
+
+The base relay and Shizuku are separate security/capability layers. Losing Shizuku after reboot must not silently widen access, weaken authentication, or be represented as loss of the base Hermes connection.
+
+Hermes Bridge stores only a boolean that Shizuku previously reached `READY`; it does not persist a Shizuku credential or shell capability. After `BOOT_COMPLETED`, the base authenticated relay reconnect starts independently. A delayed check may show a local restoration notification only when Shizuku had previously been configured and notification permission is currently granted.
+
+The restoration notification contains no pairing code, relay token, raw command argument, file content or package data. It can open Hermes Bridge and may launch only the exact official Shizuku package declared in package visibility. `MY_PACKAGE_REPLACED` does not trigger the reboot reminder. When Shizuku returns to `READY`, the reminder is cancelled.
+
 ## Android component exposure
 
 - activities/services/receivers are `exported=false` unless Android requires otherwise;
@@ -135,6 +145,7 @@ The history screen is an internal non-exported activity and can be cleared local
 - the audit-history activity is `exported=false`;
 - no cleartext network traffic;
 - no externally reachable local MCP server in the default product topology;
+- package visibility remains launcher-scoped plus the exact official Shizuku package used for recovery UX;
 - any deep link used for pairing must validate origin and nonce.
 
 ## Dependency policy
