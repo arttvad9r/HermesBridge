@@ -64,6 +64,7 @@ class BridgeForegroundService : Service() {
             }
 
             ACTION_CONNECT -> launchCommand { transport.resume() }
+            ACTION_REVOKE -> revokePairing()
             ACTION_STOP -> stopBridge()
         }
         return START_STICKY
@@ -90,6 +91,24 @@ class BridgeForegroundService : Service() {
                     error.message ?: "Не удалось подключиться к relay.",
                 )
             }
+        }
+    }
+
+    private fun revokePairing() {
+        commandJob?.cancel()
+        commandJob = serviceScope.launch {
+            transport.revokePairing()
+                .onSuccess {
+                    BridgeRuntime.update(ConnectionState.DISCONNECTED)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
+                .onFailure { error ->
+                    onTransportState(
+                        ConnectionState.ERROR,
+                        error.message ?: "Не удалось отозвать привязку телефона.",
+                    )
+                }
         }
     }
 
@@ -170,6 +189,7 @@ class BridgeForegroundService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_CONNECT = "io.github.arttvad9r.hermesbridge.CONNECT"
         private const val ACTION_PAIR = "io.github.arttvad9r.hermesbridge.PAIR"
+        private const val ACTION_REVOKE = "io.github.arttvad9r.hermesbridge.REVOKE_PAIRING"
         private const val ACTION_STOP = "io.github.arttvad9r.hermesbridge.STOP"
         private const val EXTRA_PAIRING_CODE = "pairing_code"
 
@@ -186,6 +206,13 @@ class BridgeForegroundService : Service() {
                 Intent(context, BridgeForegroundService::class.java)
                     .setAction(ACTION_PAIR)
                     .putExtra(EXTRA_PAIRING_CODE, code),
+            )
+        }
+
+        fun revokePairing(context: Context) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, BridgeForegroundService::class.java).setAction(ACTION_REVOKE),
             )
         }
     }
