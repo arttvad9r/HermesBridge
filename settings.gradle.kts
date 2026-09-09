@@ -16,4 +16,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "HermesBridge"
-include(":app")
+include(":app", ":protocol", ":relay")
