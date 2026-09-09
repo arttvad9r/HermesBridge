@@ -454,7 +454,7 @@ class ShizukuBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
 }
 
 internal fun buildBatteryStatsCommand(): Array<String> =
-    arrayOf("dumpsys", "batterystats", "--charged", "--checkin")
+    arrayOf("dumpsys", "batterystats", "-c", "--charged")
 
 object DisabledBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
     override fun readiness() = PrivilegedBackendReadiness(
