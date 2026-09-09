@@ -6,22 +6,48 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 class BridgeViewModel(application: Application) : AndroidViewModel(application) {
+    private val app = application
     private val healthRepository: DeviceHealthRepository =
         AndroidDeviceHealthRepository(application)
-    private val transport: AgentTransport = RelayAgentTransport(
-        context = application,
-        relayWsUrl = BuildConfig.RELAY_WS_URL,
-        healthRepository = healthRepository,
-    )
+    private val pairingStore = PairingStore(application)
 
     private val _state = MutableStateFlow(
         BridgeUiState(health = healthRepository.snapshot())
     )
     val state: StateFlow<BridgeUiState> = _state.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            BridgeRuntime.state.collectLatest { runtime ->
+                _state.update { current ->
+                    current.copy(
+                        connectionState = runtime.connectionState,
+                        pairingCode = if (runtime.connectionState == ConnectionState.CONNECTED) {
+                            ""
+                        } else {
+                            current.pairingCode
+                        },
+                        message = runtime.message,
+                    )
+                }
+            }
+        }
+
+        if (pairingStore.deviceId() != null) {
+            runCatching { BridgeForegroundService.connect(app) }
+                .onFailure { error ->
+                    BridgeRuntime.update(
+                        ConnectionState.ERROR,
+                        error.message ?: "Не удалось запустить фоновое соединение.",
+                    )
+                }
+        }
+    }
 
     fun updatePairingCode(value: String) {
         _state.update {
@@ -43,32 +69,13 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        viewModelScope.launch {
-            _state.update {
-                it.copy(
-                    connectionState = ConnectionState.PAIRING,
-                    message = null,
+        BridgeRuntime.update(ConnectionState.PAIRING)
+        runCatching { BridgeForegroundService.pair(app, code) }
+            .onFailure { error ->
+                BridgeRuntime.update(
+                    ConnectionState.ERROR,
+                    error.message ?: "Не удалось запустить привязку устройства.",
                 )
             }
-
-            transport.pair(code)
-                .onSuccess {
-                    _state.update {
-                        it.copy(
-                            connectionState = ConnectionState.CONNECTED,
-                            pairingCode = "",
-                            message = null,
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(
-                            connectionState = ConnectionState.ERROR,
-                            message = error.message,
-                        )
-                    }
-                }
-        }
     }
 }
