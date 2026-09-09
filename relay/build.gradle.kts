@@ -21,4 +21,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("io.ktor:ktor-server-test-host:3.1.2")
 }
