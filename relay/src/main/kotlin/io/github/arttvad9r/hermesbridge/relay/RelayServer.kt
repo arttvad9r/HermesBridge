@@ -23,7 +23,10 @@ import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
+import io.ktor.server.request.receiveStream
 import io.ktor.server.request.receiveText
+import io.ktor.server.response.header
+import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -40,6 +43,8 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -122,10 +127,14 @@ private class DeviceSessionHub {
     }
 }
 
-private class RelayRuntime(deviceRegistryPath: Path?) {
+private class RelayRuntime(
+    deviceRegistryPath: Path?,
+    artifactDirectory: Path?,
+) {
     val pairingCodes = PairingCodeStore()
     val devices = DeviceRegistry(deviceRegistryPath)
     val sessions = DeviceSessionHub()
+    val apkArtifacts = ApkArtifactStore(artifactDirectory)
 }
 
 internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = when {
@@ -147,15 +156,20 @@ fun main() {
     )
 
     embeddedServer(Netty, port = port, host = "0.0.0.0") {
-        relayModule(token, stateDirectory.resolve("devices.json"))
+        relayModule(
+            adminToken = token,
+            deviceRegistryPath = stateDirectory.resolve("devices.json"),
+            artifactDirectory = stateDirectory.resolve("apk-artifacts"),
+        )
     }.start(wait = true)
 }
 
 fun Application.relayModule(
     adminToken: String,
     deviceRegistryPath: Path? = null,
+    artifactDirectory: Path? = null,
 ) {
-    val runtime = RelayRuntime(deviceRegistryPath)
+    val runtime = RelayRuntime(deviceRegistryPath, artifactDirectory)
 
     install(WebSockets) {
         pingPeriodMillis = 20_000L
@@ -191,6 +205,81 @@ fun Application.relayModule(
                 PairingCodeResponse(pairing.code, pairing.expiresAtEpochMillis)
             )
             call.respondText(body, ContentType.Application.Json)
+        }
+
+        post("/api/v1/apk-artifacts") {
+            if (!call.requireAdmin(adminToken)) return@post
+            val fileName = call.request.headers[APK_NAME_HEADER]
+            if (fileName.isNullOrBlank()) {
+                call.respondText(
+                    "{\"error\":\"missing_apk_name\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.BadRequest,
+                )
+                return@post
+            }
+
+            val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            if (declaredLength != null && declaredLength !in 1..ApkArtifactStore.MAX_APK_BYTES) {
+                call.respondText(
+                    "{\"error\":\"apk_too_large\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.PayloadTooLarge,
+                )
+                return@post
+            }
+
+            val staged = try {
+                call.receiveStream().use { input ->
+                    withContext(Dispatchers.IO) {
+                        runtime.apkArtifacts.stage(fileName, input, declaredLength)
+                    }
+                }
+            } catch (error: ApkArtifactTooLargeException) {
+                call.respondText(
+                    "{\"error\":\"apk_too_large\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.PayloadTooLarge,
+                )
+                return@post
+            } catch (error: InvalidApkArtifactException) {
+                call.respondText(
+                    "{\"error\":\"invalid_apk_artifact\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.BadRequest,
+                )
+                return@post
+            }
+
+            call.respondText(
+                BridgeProtocol.json.encodeToString(staged),
+                ContentType.Application.Json,
+                HttpStatusCode.Created,
+            )
+        }
+
+        get("/device-artifacts/{artifactId}") {
+            val artifactId = call.parameters["artifactId"]
+            val suppliedToken = call.request.headers[HttpHeaders.Authorization]
+                ?.removePrefix("Bearer ")
+                ?.takeIf { it.isNotBlank() }
+            if (artifactId.isNullOrBlank() || suppliedToken == null) {
+                call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                return@get
+            }
+
+            val artifact = runtime.apkArtifacts.findAuthorized(artifactId, suppliedToken)
+            if (artifact == null) {
+                call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                return@get
+            }
+
+            call.response.header(HttpHeaders.CacheControl, "no-store")
+            call.response.header("X-Content-Type-Options", "nosniff")
+            call.respondFile(
+                file = artifact.path.toFile(),
+                contentType = APK_CONTENT_TYPE,
+            )
         }
 
         post("/api/v1/devices/{deviceId}/commands") {
@@ -426,3 +515,6 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
         )
     )
 }
+
+private const val APK_NAME_HEADER = "X-Hermes-Apk-Name"
+private val APK_CONTENT_TYPE = ContentType("application", "vnd.android.package-archive")
