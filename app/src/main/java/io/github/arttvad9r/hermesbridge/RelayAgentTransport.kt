@@ -114,6 +114,13 @@ class RelayAgentTransport(
             val authenticated = runCatching {
                 runSession(pairingCode, ready)
             }.getOrElse { error ->
+                if (pairingStore.deviceId() == null) {
+                    mutableConnectionState.value = ConnectionState.ERROR
+                    if (!ready.isCompleted) {
+                        ready.complete(Result.failure(error))
+                    }
+                    return
+                }
                 if (!ready.isCompleted) {
                     mutableConnectionState.value = ConnectionState.ERROR
                     ready.complete(Result.failure(error))
@@ -130,7 +137,9 @@ class RelayAgentTransport(
                 return
             }
             if (pairingStore.deviceId() == null) {
-                mutableConnectionState.value = ConnectionState.DISCONNECTED
+                if (mutableConnectionState.value != ConnectionState.ERROR) {
+                    mutableConnectionState.value = ConnectionState.DISCONNECTED
+                }
                 return
             }
 
@@ -231,6 +240,11 @@ class RelayAgentTransport(
 
                     MessageType.ERROR -> {
                         val payload = BridgeProtocol.decodePayload<ErrorPayload>(envelope)
+                        if (payload.code == "unknown_device") {
+                            pairingStore.clear()
+                            mutableConnectionState.value = ConnectionState.ERROR
+                            error("Relay no longer recognizes this device. Pair it again.")
+                        }
                         error("${payload.code}: ${payload.message}")
                     }
                 }
