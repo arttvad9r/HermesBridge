@@ -83,21 +83,27 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
             add(packageName)
         }.toTypedArray()
 
-        val command = executeOrFailure(
-            argv = argv,
-            timeoutCode = "uninstall_timeout",
-            timeoutMessage = "Package manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
-        ) ?: return@withContext lastExecutionFailure
-
-        if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
-            PrivilegedOperationResult(ok = true)
-        } else {
-            PrivilegedOperationResult(
-                ok = false,
-                code = "uninstall_failed",
-                message = command.firstOutputLine()
-                    ?: "Package manager rejected the uninstall request.",
+        when (
+            val attempt = executeAttempt(
+                argv = argv,
+                timeoutCode = "uninstall_timeout",
+                timeoutMessage = "Package manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
             )
+        ) {
+            is FixedCommandAttempt.Failure -> attempt.result
+            is FixedCommandAttempt.Success -> {
+                val command = attempt.result
+                if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
+                    PrivilegedOperationResult(ok = true)
+                } else {
+                    PrivilegedOperationResult(
+                        ok = false,
+                        code = "uninstall_failed",
+                        message = command.firstOutputLine()
+                            ?: "Package manager rejected the uninstall request.",
+                    )
+                }
+            }
         }
     }
 
@@ -106,21 +112,27 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
             readinessFailure()?.let { return@withContext it }
             invalidPackageFailure(packageName)?.let { return@withContext it }
 
-            val command = executeOrFailure(
-                argv = arrayOf("am", "force-stop", packageName),
-                timeoutCode = "force_stop_timeout",
-                timeoutMessage = "Activity manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
-            ) ?: return@withContext lastExecutionFailure
-
-            if (command.exitCode == 0) {
-                PrivilegedOperationResult(ok = true)
-            } else {
-                PrivilegedOperationResult(
-                    ok = false,
-                    code = "force_stop_failed",
-                    message = command.firstOutputLine()
-                        ?: "Activity manager rejected the force-stop request.",
+            when (
+                val attempt = executeAttempt(
+                    argv = arrayOf("am", "force-stop", packageName),
+                    timeoutCode = "force_stop_timeout",
+                    timeoutMessage = "Activity manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
                 )
+            ) {
+                is FixedCommandAttempt.Failure -> attempt.result
+                is FixedCommandAttempt.Success -> {
+                    val command = attempt.result
+                    if (command.exitCode == 0) {
+                        PrivilegedOperationResult(ok = true)
+                    } else {
+                        PrivilegedOperationResult(
+                            ok = false,
+                            code = "force_stop_failed",
+                            message = command.firstOutputLine()
+                                ?: "Activity manager rejected the force-stop request.",
+                        )
+                    }
+                }
             }
         }
 
@@ -144,34 +156,29 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
             )
         }
 
-    @Volatile
-    private var lastExecutionFailure = PrivilegedOperationResult(
-        ok = false,
-        code = "shizuku_spawn_failed",
-        message = "Privileged command did not start.",
-    )
-
-    private suspend fun executeOrFailure(
+    private suspend fun executeAttempt(
         argv: Array<String>,
         timeoutCode: String,
         timeoutMessage: String,
-    ): FixedCommandResult? {
+    ): FixedCommandAttempt {
         return try {
-            executeFixedCommand(argv)
+            FixedCommandAttempt.Success(executeFixedCommand(argv))
         } catch (_: TimeoutCancellationException) {
-            lastExecutionFailure = PrivilegedOperationResult(
-                ok = false,
-                code = timeoutCode,
-                message = timeoutMessage,
+            FixedCommandAttempt.Failure(
+                PrivilegedOperationResult(
+                    ok = false,
+                    code = timeoutCode,
+                    message = timeoutMessage,
+                )
             )
-            null
         } catch (error: Throwable) {
-            lastExecutionFailure = PrivilegedOperationResult(
-                ok = false,
-                code = "shizuku_spawn_failed",
-                message = (error.message ?: error::class.java.simpleName).take(200),
+            FixedCommandAttempt.Failure(
+                PrivilegedOperationResult(
+                    ok = false,
+                    code = "shizuku_spawn_failed",
+                    message = (error.message ?: error::class.java.simpleName).take(200),
+                )
             )
-            null
         }
     }
 
@@ -225,6 +232,11 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         } catch (error: ReflectiveOperationException) {
             throw IllegalStateException("Shizuku.newProcess reflection failed: ${error.message}", error)
         }
+    }
+
+    private sealed interface FixedCommandAttempt {
+        data class Success(val result: FixedCommandResult) : FixedCommandAttempt
+        data class Failure(val result: PrivilegedOperationResult) : FixedCommandAttempt
     }
 
     private data class FixedCommandResult(
