@@ -181,9 +181,17 @@ class RelayAgentTransport(
                 runSession(pairingCode, ready)
             }.getOrElse { error ->
                 if (error is DeviceIdentityUnavailableException && pairingStore.deviceId() != null) {
-                    pairingCredentials.invalidateAfterSigningFailure()
+                    val resetFailure = pairingCredentials.invalidateAfterSigningFailure().exceptionOrNull()
+                    val terminalError = if (resetFailure == null) {
+                        error
+                    } else {
+                        DeviceIdentityUnavailableException(
+                            "Hermes Bridge cleared the stale pairing but could not reset the Android Keystore identity. Restart the app and pair again; if the identity is still unavailable, Android app data must be reset before a new pairing can succeed.",
+                            resetFailure,
+                        )
+                    }
                     mutableConnectionState.value = ConnectionState.ERROR
-                    if (!ready.isCompleted) ready.complete(Result.failure(error))
+                    if (!ready.isCompleted) ready.complete(Result.failure(terminalError))
                     return
                 }
                 if (pairingStore.deviceId() == null) {
