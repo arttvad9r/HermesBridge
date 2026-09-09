@@ -6,6 +6,7 @@ import io.github.arttvad9r.hermesbridge.protocol.AuthChallengePayload
 import io.github.arttvad9r.hermesbridge.protocol.AuthResponsePayload
 import io.github.arttvad9r.hermesbridge.protocol.BridgeProtocol
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
+import io.github.arttvad9r.hermesbridge.protocol.DeviceRevokeOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.ErrorPayload
 import io.github.arttvad9r.hermesbridge.protocol.MessageType
 import io.github.arttvad9r.hermesbridge.protocol.PairOkPayload
@@ -13,9 +14,12 @@ import io.github.arttvad9r.hermesbridge.protocol.PairRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.SessionHelloPayload
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import kotlin.math.min
@@ -72,6 +76,12 @@ class RelayAgentTransport(
     @Volatile
     private var connectionJob: Job? = null
 
+    @Volatile
+    private var activeSession: DefaultClientWebSocketSession? = null
+
+    @Volatile
+    private var revokeAck: CompletableDeferred<Result<Unit>>? = null
+
     override suspend fun pair(code: String): Result<Unit> = startConnection(code)
 
     override suspend fun resume(): Result<Unit> {
@@ -87,9 +97,45 @@ class RelayAgentTransport(
         mutableConnectionState.value = ConnectionState.DISCONNECTED
     }
 
+    suspend fun revokePairing(): Result<Unit> {
+        val deviceId = pairingStore.deviceId() ?: return Result.success(Unit)
+        if (mutableConnectionState.value != ConnectionState.CONNECTED) {
+            return Result.failure(
+                IllegalStateException("Connect to Hermes before revoking this device pairing.")
+            )
+        }
+        val session = activeSession
+            ?: return Result.failure(IllegalStateException("Authenticated relay session is unavailable."))
+
+        val ack = synchronized(this) {
+            val existing = revokeAck
+            if (existing != null && !existing.isCompleted) {
+                return Result.failure(IllegalStateException("Device revocation is already in progress."))
+            }
+            CompletableDeferred<Result<Unit>>().also { revokeAck = it }
+        }
+
+        return try {
+            session.sendEnvelope(
+                type = MessageType.DEVICE_REVOKE_REQUEST,
+                deviceId = deviceId,
+            )
+            withTimeout(REVOKE_TIMEOUT_MILLIS) { ack.await().getOrThrow() }
+            Result.success(Unit)
+        } catch (error: Throwable) {
+            Result.failure(error)
+        } finally {
+            synchronized(this) {
+                if (revokeAck === ack) revokeAck = null
+            }
+        }
+    }
+
     fun close() {
+        revokeAck?.complete(Result.failure(IllegalStateException("Relay transport closed.")))
         connectionJob?.cancel()
         connectionJob = null
+        activeSession = null
         mutableConnectionState.value = ConnectionState.DISCONNECTED
         client.close()
         scope.cancel()
@@ -152,9 +198,7 @@ class RelayAgentTransport(
                 return
             }
             if (pairingStore.deviceId() == null) {
-                if (mutableConnectionState.value != ConnectionState.ERROR) {
-                    mutableConnectionState.value = ConnectionState.DISCONNECTED
-                }
+                mutableConnectionState.value = ConnectionState.DISCONNECTED
                 return
             }
 
@@ -175,101 +219,126 @@ class RelayAgentTransport(
         var authenticated = false
 
         client.webSocket(relayWsUrl) {
-            val existingDeviceId = pairingStore.deviceId()
-            if (existingDeviceId == null) {
-                val code = pairingCode
-                    ?: error("A pairing code is required for an unpaired device.")
-                val pairPayload = PairRequestPayload(
-                    code = code,
-                    publicKey = identity.publicKeyBase64(),
-                    appVersion = BuildConfig.VERSION_NAME,
-                    deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(80),
-                )
-                sendEnvelope(
-                    type = MessageType.PAIR_REQUEST,
-                    payload = BridgeProtocol.payload(pairPayload),
-                )
-            } else {
-                sendEnvelope(
-                    type = MessageType.SESSION_HELLO,
-                    deviceId = existingDeviceId,
-                    payload = BridgeProtocol.payload(SessionHelloPayload(existingDeviceId)),
-                )
-            }
+            activeSession = this
+            try {
+                val existingDeviceId = pairingStore.deviceId()
+                if (existingDeviceId == null) {
+                    val code = pairingCode
+                        ?: error("A pairing code is required for an unpaired device.")
+                    val pairPayload = PairRequestPayload(
+                        code = code,
+                        publicKey = identity.publicKeyBase64(),
+                        appVersion = BuildConfig.VERSION_NAME,
+                        deviceLabel = "${Build.MANUFACTURER} ${Build.MODEL}".trim().take(80),
+                    )
+                    sendEnvelope(
+                        type = MessageType.PAIR_REQUEST,
+                        payload = BridgeProtocol.payload(pairPayload),
+                    )
+                } else {
+                    sendEnvelope(
+                        type = MessageType.SESSION_HELLO,
+                        deviceId = existingDeviceId,
+                        payload = BridgeProtocol.payload(SessionHelloPayload(existingDeviceId)),
+                    )
+                }
 
-            for (frame in incoming) {
-                if (frame !is Frame.Text) continue
-                val envelope = BridgeProtocol.decode(frame.readText())
-                when (envelope.type) {
-                    MessageType.PAIR_OK -> {
-                        val payload = BridgeProtocol.decodePayload<PairOkPayload>(envelope)
-                        if (envelope.deviceId != payload.deviceId) {
-                            error("Relay returned inconsistent device identity.")
+                for (frame in incoming) {
+                    if (frame !is Frame.Text) continue
+                    val envelope = BridgeProtocol.decode(frame.readText())
+                    when (envelope.type) {
+                        MessageType.PAIR_OK -> {
+                            val payload = BridgeProtocol.decodePayload<PairOkPayload>(envelope)
+                            if (envelope.deviceId != payload.deviceId) {
+                                error("Relay returned inconsistent device identity.")
+                            }
+                            pairingStore.saveDeviceId(payload.deviceId)
                         }
-                        pairingStore.saveDeviceId(payload.deviceId)
-                    }
 
-                    MessageType.AUTH_CHALLENGE -> {
-                        val deviceId = envelope.deviceId ?: pairingStore.deviceId()
-                            ?: error("Authentication challenge has no device ID.")
-                        if (pairingStore.deviceId() != deviceId) {
-                            error("Authentication challenge targets another device.")
+                        MessageType.AUTH_CHALLENGE -> {
+                            val deviceId = envelope.deviceId ?: pairingStore.deviceId()
+                                ?: error("Authentication challenge has no device ID.")
+                            if (pairingStore.deviceId() != deviceId) {
+                                error("Authentication challenge targets another device.")
+                            }
+                            val payload = BridgeProtocol.decodePayload<AuthChallengePayload>(envelope)
+                            val signature = identity.sign(
+                                BridgeProtocol.authSigningBytes(deviceId, payload.challenge)
+                            )
+                            sendEnvelope(
+                                type = MessageType.AUTH_RESPONSE,
+                                deviceId = deviceId,
+                                payload = BridgeProtocol.payload(AuthResponsePayload(signature)),
+                            )
                         }
-                        val payload = BridgeProtocol.decodePayload<AuthChallengePayload>(envelope)
-                        val signature = identity.sign(
-                            BridgeProtocol.authSigningBytes(deviceId, payload.challenge)
-                        )
-                        sendEnvelope(
-                            type = MessageType.AUTH_RESPONSE,
-                            deviceId = deviceId,
-                            payload = BridgeProtocol.payload(AuthResponsePayload(signature)),
-                        )
-                    }
 
-                    MessageType.AUTH_OK -> {
-                        authenticated = true
-                        mutableConnectionState.value = ConnectionState.CONNECTED
-                        if (!ready.isCompleted) ready.complete(Result.success(Unit))
-                    }
-
-                    MessageType.COMMAND_REQUEST -> {
-                        val deviceId = pairingStore.deviceId()
-                        if (!authenticated || deviceId == null || envelope.deviceId != deviceId) {
-                            continue
+                        MessageType.AUTH_OK -> {
+                            authenticated = true
+                            mutableConnectionState.value = ConnectionState.CONNECTED
+                            if (!ready.isCompleted) ready.complete(Result.success(Unit))
                         }
-                        val request = BridgeProtocol.decodePayload<CommandRequestPayload>(envelope)
-                        val result = toolRegistry.execute(request)
-                        sendEnvelope(
-                            type = MessageType.COMMAND_RESULT,
-                            deviceId = deviceId,
-                            payload = BridgeProtocol.payload(result),
-                        )
-                    }
 
-                    MessageType.HEARTBEAT_PING -> {
-                        sendEnvelope(
-                            type = MessageType.HEARTBEAT_PONG,
-                            deviceId = pairingStore.deviceId(),
-                        )
-                    }
+                        MessageType.COMMAND_REQUEST -> {
+                            val deviceId = pairingStore.deviceId()
+                            if (!authenticated || deviceId == null || envelope.deviceId != deviceId) {
+                                continue
+                            }
+                            val request = BridgeProtocol.decodePayload<CommandRequestPayload>(envelope)
+                            val result = toolRegistry.execute(request)
+                            sendEnvelope(
+                                type = MessageType.COMMAND_RESULT,
+                                deviceId = deviceId,
+                                payload = BridgeProtocol.payload(result),
+                            )
+                        }
 
-                    MessageType.ERROR -> {
-                        val payload = BridgeProtocol.decodePayload<ErrorPayload>(envelope)
-                        if (payload.code == "unknown_device") {
+                        MessageType.DEVICE_REVOKE_OK -> {
+                            val deviceId = pairingStore.deviceId()
+                                ?: error("Device revoke acknowledgement arrived without local pairing state.")
+                            val payload = BridgeProtocol.decodePayload<DeviceRevokeOkPayload>(envelope)
+                            if (envelope.deviceId != deviceId || payload.deviceId != deviceId) {
+                                error("Relay returned inconsistent device revoke acknowledgement.")
+                            }
                             pairingStore.clear()
-                            mutableConnectionState.value = ConnectionState.ERROR
-                            error("Relay no longer recognizes this device. Pair it again.")
+                            mutableConnectionState.value = ConnectionState.DISCONNECTED
+                            revokeAck?.complete(Result.success(Unit))
+                            close(CloseReason(CloseReason.Codes.NORMAL, "Pairing revoked"))
+                            return@webSocket
                         }
-                        error("${payload.code}: ${payload.message}")
+
+                        MessageType.HEARTBEAT_PING -> {
+                            sendEnvelope(
+                                type = MessageType.HEARTBEAT_PONG,
+                                deviceId = pairingStore.deviceId(),
+                            )
+                        }
+
+                        MessageType.ERROR -> {
+                            val payload = BridgeProtocol.decodePayload<ErrorPayload>(envelope)
+                            revokeAck?.takeIf { !it.isCompleted }?.complete(
+                                Result.failure(IllegalStateException("${payload.code}: ${payload.message}"))
+                            )
+                            if (payload.code == "unknown_device") {
+                                pairingStore.clear()
+                                mutableConnectionState.value = ConnectionState.ERROR
+                                error("Relay no longer recognizes this device. Pair it again.")
+                            }
+                            error("${payload.code}: ${payload.message}")
+                        }
                     }
                 }
+            } finally {
+                if (activeSession === this) activeSession = null
+                revokeAck?.takeIf { !it.isCompleted }?.complete(
+                    Result.failure(IllegalStateException("Relay session closed before revocation completed."))
+                )
             }
         }
 
         return authenticated
     }
 
-    private suspend fun io.ktor.client.plugins.websocket.DefaultClientWebSocketSession.sendEnvelope(
+    private suspend fun DefaultClientWebSocketSession.sendEnvelope(
         type: String,
         deviceId: String? = null,
         payload: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()),
@@ -281,5 +350,9 @@ class RelayAgentTransport(
                 )
             )
         )
+    }
+
+    private companion object {
+        const val REVOKE_TIMEOUT_MILLIS = 15_000L
     }
 }
