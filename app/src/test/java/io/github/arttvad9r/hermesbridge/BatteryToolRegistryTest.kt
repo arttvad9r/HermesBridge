@@ -48,7 +48,10 @@ class BatteryToolRegistryTest {
                 ?.get("batteryCapacityMah")
                 ?.toString(),
         )
-        assertTrue(result.result?.toString()?.contains("com.example.app") == true)
+        val serialized = result.result?.toString().orEmpty()
+        assertTrue(serialized.contains("com.example.app"))
+        assertTrue(serialized.contains("ExampleLock"))
+        assertTrue(serialized.contains("120000"))
     }
 
     @Test
@@ -122,6 +125,17 @@ class BatteryToolRegistryTest {
                             uid = 10123,
                             packageNames = listOf("com.example.app"),
                             mah = 55.0,
+                        )
+                    ),
+                    topPartialWakeLocks = listOf(
+                        BatteryWakeLockSnapshot(
+                            uid = 10123,
+                            packageNames = listOf("com.example.app"),
+                            name = "ExampleLock",
+                            partialTimeMillis = 120000L,
+                            partialCount = 17,
+                            backgroundPartialTimeMillis = 90000L,
+                            backgroundPartialCount = 12,
                         )
                     ),
                 ),
