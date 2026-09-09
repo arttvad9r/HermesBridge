@@ -9,9 +9,9 @@ The intended UX is deliberately simple:
 3. Grant only the capabilities you want.
 4. Close the app and give tasks to Hermes normally.
 
-Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with explicit approvals planned for destructive actions.
+Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with exact-argument approvals for mutating/privileged actions.
 
-> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, foreground service, Hermes MCP adapter, device health, launcher-visible app listing, and scoped read-only file browsing are implemented. Privileged/mutating actions are intentionally not enabled yet.
+> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, foreground service, Hermes MCP adapter, read-only diagnostics/files, local approvals and the first Shizuku-backed privileged app operations are implemented. A physical phone/VPS end-to-end privileged-action test is still required.
 
 ## Current capabilities
 
@@ -23,8 +23,13 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - Local stdio MCP adapter for Hermes.
 - `device_health` — battery, memory and storage totals.
 - `list_apps` — launcher-visible apps without `QUERY_ALL_PACKAGES`.
-- `list_files` — directory browsing only inside a folder explicitly selected by the user through Android's Storage Access Framework.
+- `list_files` — directory browsing only inside a folder explicitly selected through Android Storage Access Framework.
 - Explicit local revoke/change control for the SAF folder grant.
+- Shizuku detection/authorization status in the Android app.
+- One-use, expiring approvals bound to canonical tool arguments.
+- `uninstall_app` — Shizuku-backed package uninstall after local approval.
+- `force_stop_app` — Shizuku-backed force-stop after local approval.
+- Hermes Bridge protects its own package from uninstall/force-stop.
 
 ## Goals
 
@@ -34,7 +39,7 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - No routine ADB, IP, port, Termux or raw shell workflow.
 - Read-only diagnostics without prompts.
 - Mutating and privileged actions require explicit policy/approval.
-- Shizuku is the planned first privileged backend; root is not required.
+- Shizuku is the optional privileged backend; root is not required.
 - Build on existing Android/MCP components where they fit instead of reimplementing everything.
 
 ## Architecture
@@ -57,7 +62,8 @@ Hermes on VPS
                    +-- Android APIs
                    +-- PackageManager (limited visibility)
                    +-- Storage Access Framework (user-selected tree)
-                   +-- Shizuku (planned, optional)
+                   +-- approval policy
+                   +-- Shizuku (optional privileged backend)
                    +-- Accessibility (planned, optional)
 ```
 
@@ -73,6 +79,7 @@ See:
 - [Relay deployment](docs/DEPLOYMENT.md)
 - [Hermes MCP integration](docs/HERMES_MCP.md)
 - [Implementation roadmap](TODO.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Security baseline
 
@@ -85,11 +92,12 @@ The project keeps these non-negotiable rules:
 - no root requirement;
 - default-deny tool registration;
 - read-only tools are narrowly typed and argument-validated;
-- destructive actions are not enabled until an approval model exists;
+- privileged/mutating commands require one-use exact-argument approval;
 - long-term device credentials are stored in Android Keystore;
 - production device transport requires WSS;
 - the Hermes-side admin token stays local to the VPS process boundary where possible;
-- SAF file access is limited to a directory explicitly chosen by the user.
+- SAF file access is limited to a directory explicitly chosen by the user;
+- privileged package operations validate package names and protect Hermes Bridge itself.
 
 More detail: [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -105,7 +113,10 @@ More detail: [docs/SECURITY.md](docs/SECURITY.md).
 - Ktor WebSockets
 - kotlinx.serialization
 - AndroidX DocumentFile 1.1.0 for SAF tree traversal
+- Shizuku API/provider 13.1.5
 - Python MCP SDK v2 adapter for Hermes
+
+The narrow privileged process logic is adapted from Apache-2.0 `droid-mcp` source pinned in `THIRD_PARTY_NOTICES.md`; no JitPack runtime/build dependency is used.
 
 ## Build
 
@@ -126,4 +137,4 @@ CI runs:
 
 ## Repository policy
 
-No license has been selected yet. Until one is added, normal copyright rules apply.
+No project-wide license has been selected yet. Third-party adapted code retains its upstream attribution/license notice. Until a project license is added, normal copyright rules apply to Hermes Bridge's own code.
