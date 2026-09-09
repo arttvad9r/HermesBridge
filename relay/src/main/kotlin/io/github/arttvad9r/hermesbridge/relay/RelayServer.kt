@@ -38,7 +38,6 @@ import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
@@ -134,8 +133,8 @@ fun Application.relayModule(adminToken: String) {
     val runtime = RelayRuntime()
 
     install(WebSockets) {
-        pingPeriod = 20.seconds
-        timeout = 30.seconds
+        pingPeriodMillis = 20_000L
+        timeoutMillis = 30_000L
         maxFrameSize = 256 * 1024L
         masking = false
     }
