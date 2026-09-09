@@ -144,8 +144,11 @@ internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = w
     else -> HttpStatusCode.OK
 }
 
-internal fun commandTimeoutMillis(tool: String): Long =
-    if (tool == "apps.install") 300_000L else 20_000L
+internal fun commandTimeoutMillis(tool: String): Long = when (tool) {
+    "apps.install" -> 300_000L
+    "files.analyze" -> 60_000L
+    else -> 20_000L
+}
 
 fun main() {
     val token = System.getenv("HERMES_BRIDGE_ADMIN_TOKEN")
