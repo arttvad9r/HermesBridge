@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
                     onCodeChange = vm::updatePairingCode,
                     onPair = vm::pair,
                     onRevokePairing = vm::revokePairing,
+                    onFinishSetup = vm::finishSetup,
+                    onRestartSetup = vm::restartSetup,
                     onRefreshHealth = vm::refreshHealth,
                     onChooseFileTree = { fileTreeLauncher.launch(null) },
                     onRevokeFileAccess = vm::revokeFileAccess,
@@ -111,6 +113,8 @@ private fun BridgeScreen(
     onCodeChange: (String) -> Unit,
     onPair: () -> Unit,
     onRevokePairing: () -> Unit,
+    onFinishSetup: () -> Unit,
+    onRestartSetup: () -> Unit,
     onRefreshHealth: () -> Unit,
     onChooseFileTree: () -> Unit,
     onRevokeFileAccess: () -> Unit,
@@ -184,45 +188,159 @@ private fun BridgeScreen(
                 )
             }
 
-            PairingCard(
-                code = state.pairingCode,
-                enabled = state.connectionState == ConnectionState.DISCONNECTED ||
-                    state.connectionState == ConnectionState.ERROR,
-                message = state.message,
-                onCodeChange = onCodeChange,
-                onPair = onPair,
-            )
+            if (!state.setupCompleted) {
+                SetupHeaderCard(connected = state.connectionState == ConnectionState.CONNECTED)
 
-            HealthCard(
-                health = state.health,
-                onRefresh = onRefreshHealth,
-            )
+                if (state.connectionState != ConnectionState.CONNECTED) {
+                    PairingCard(
+                        code = state.pairingCode,
+                        enabled = state.connectionState == ConnectionState.DISCONNECTED ||
+                            state.connectionState == ConnectionState.ERROR,
+                        message = state.message,
+                        onCodeChange = onCodeChange,
+                        onPair = onPair,
+                    )
+                } else {
+                    FileAccessCard(
+                        configured = state.fileAccessConfigured,
+                        onChoose = onChooseFileTree,
+                        onRevoke = onRevokeFileAccess,
+                    )
 
-            FileAccessCard(
-                configured = state.fileAccessConfigured,
-                onChoose = onChooseFileTree,
-                onRevoke = onRevokeFileAccess,
-            )
+                    UsageAccessCard(
+                        granted = state.usageAccessGranted,
+                        onOpenSettings = onOpenUsageAccessSettings,
+                        onRefresh = onRefreshUsageAccess,
+                    )
 
-            UsageAccessCard(
-                granted = state.usageAccessGranted,
-                onOpenSettings = onOpenUsageAccessSettings,
-                onRefresh = onRefreshUsageAccess,
-            )
+                    ShizukuCard(
+                        state = state.shizuku,
+                        onRequestPermission = onRequestShizukuPermission,
+                        onRefresh = onRefreshShizuku,
+                    )
 
-            ShizukuCard(
-                state = state.shizuku,
-                onRequestPermission = onRequestShizukuPermission,
-                onRefresh = onRefreshShizuku,
-            )
+                    FinishSetupCard(
+                        fileAccessConfigured = state.fileAccessConfigured,
+                        usageAccessGranted = state.usageAccessGranted,
+                        shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
+                        onFinish = onFinishSetup,
+                    )
+                }
+            } else {
+                if (state.connectionState != ConnectionState.CONNECTED) {
+                    PairingCard(
+                        code = state.pairingCode,
+                        enabled = state.connectionState == ConnectionState.DISCONNECTED ||
+                            state.connectionState == ConnectionState.ERROR,
+                        message = state.message,
+                        onCodeChange = onCodeChange,
+                        onPair = onPair,
+                    )
+                }
 
-            CapabilitiesCard(
-                fileAccessConfigured = state.fileAccessConfigured,
-                usageAccessGranted = state.usageAccessGranted,
-                shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
-            )
+                HealthCard(
+                    health = state.health,
+                    onRefresh = onRefreshHealth,
+                )
+
+                FileAccessCard(
+                    configured = state.fileAccessConfigured,
+                    onChoose = onChooseFileTree,
+                    onRevoke = onRevokeFileAccess,
+                )
+
+                UsageAccessCard(
+                    granted = state.usageAccessGranted,
+                    onOpenSettings = onOpenUsageAccessSettings,
+                    onRefresh = onRefreshUsageAccess,
+                )
+
+                ShizukuCard(
+                    state = state.shizuku,
+                    onRequestPermission = onRequestShizukuPermission,
+                    onRefresh = onRefreshShizuku,
+                )
+
+                CapabilitiesCard(
+                    fileAccessConfigured = state.fileAccessConfigured,
+                    usageAccessGranted = state.usageAccessGranted,
+                    shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
+                )
+
+                TextButton(
+                    onClick = onRestartSetup,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Повторить мастер настройки")
+                }
+            }
 
             Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun SetupHeaderCard(connected: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                if (connected) "Шаг 2 из 2 · Доступ" else "Шаг 1 из 2 · Подключение",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
+                if (connected) "Выберите, что Hermes сможет делать" else "Подключите телефон к Hermes",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                if (connected) {
+                    "Дополнительные права можно выдать сейчас или позже. Изменяющие данные действия всё равно требуют отдельного подтверждения."
+                } else {
+                    "Получите одноразовый код у Hermes и введите его ниже. После этого телефон будет переподключаться автоматически."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FinishSetupCard(
+    fileAccessConfigured: Boolean,
+    usageAccessGranted: Boolean,
+    shizukuReady: Boolean,
+    onFinish: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Готово к работе",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            CapabilityRow("Базовая диагностика", "Доступно")
+            CapabilityRow("Файлы", if (fileAccessConfigured) "Настроено" else "Можно позже")
+            CapabilityRow("Статистика приложений", if (usageAccessGranted) "Настроено" else "Можно позже")
+            CapabilityRow("Shizuku", if (shizukuReady) "Настроено" else "Можно позже")
+            Text(
+                "Нажмите «Завершить», чтобы перейти к обычной панели. Все эти разрешения можно изменить позже.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onFinish,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Завершить настройку")
+            }
         }
     }
 }
