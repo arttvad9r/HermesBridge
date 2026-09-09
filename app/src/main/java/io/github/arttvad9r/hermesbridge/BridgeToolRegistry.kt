@@ -25,10 +25,12 @@ class BridgeToolRegistry(
     private val privilegedAppsBackend: PrivilegedAppsBackend = DisabledPrivilegedAppsBackend,
     private val apkArtifactRepository: ApkArtifactRepository? = null,
     private val apkPackageInspector: ApkPackageInspector? = null,
+    private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         return when (request.tool) {
             DEVICE_HEALTH -> executeDeviceHealth(request)
+            BATTERY_USAGE -> executeBatteryUsage(request)
             APPS_LIST -> executeAppsList(request)
             FILES_LIST -> executeFilesList(request)
             FILES_ANALYZE -> executeFilesAnalyze(request)
@@ -67,6 +69,99 @@ class BridgeToolRegistry(
                 put("totalMemoryBytes", health.totalMemoryBytes)
                 put("availableStorageBytes", health.availableStorageBytes)
                 put("totalStorageBytes", health.totalStorageBytes)
+            },
+        )
+    }
+
+    private suspend fun executeBatteryUsage(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.isNotEmpty()) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "battery.usage does not accept arguments.",
+            )
+        }
+        if (!isReadOnlyAllowed(BATTERY_USAGE)) {
+            return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
+        }
+
+        val readiness = batteryDiagnosticsBackend.readiness()
+        if (!readiness.ready) {
+            return failure(
+                request.requestId,
+                readiness.code ?: "shizuku_unavailable",
+                readiness.message ?: "Shizuku is not ready for battery diagnostics.",
+            )
+        }
+
+        val diagnostics = batteryDiagnosticsBackend.readUsage()
+        if (!diagnostics.ok) {
+            return failure(
+                request.requestId,
+                diagnostics.code ?: "battery_stats_failed",
+                diagnostics.message ?: "Battery diagnostics failed.",
+            )
+        }
+        val snapshot = diagnostics.snapshot
+            ?: return failure(
+                request.requestId,
+                "battery_stats_failed",
+                "Battery diagnostics returned no parsed snapshot.",
+            )
+
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("source", "batterystats_charged_checkin")
+                if (snapshot.checkinVersion == null) put("checkinVersion", JsonNull)
+                else put("checkinVersion", snapshot.checkinVersion)
+                val summary = snapshot.powerSummary
+                if (summary == null) {
+                    put("powerSummary", JsonNull)
+                } else {
+                    put(
+                        "powerSummary",
+                        buildJsonObject {
+                            put("batteryCapacityMah", summary.batteryCapacityMah)
+                            put("computedPowerMah", summary.computedPowerMah)
+                            put("minDrainedPowerMah", summary.minDrainedPowerMah)
+                            put("maxDrainedPowerMah", summary.maxDrainedPowerMah)
+                        },
+                    )
+                }
+                put(
+                    "systemPowerItems",
+                    buildJsonArray {
+                        snapshot.systemPowerItems.forEach { item ->
+                            add(
+                                buildJsonObject {
+                                    put("label", item.label)
+                                    put("mah", item.mah)
+                                }
+                            )
+                        }
+                    },
+                )
+                put(
+                    "topUids",
+                    buildJsonArray {
+                        snapshot.topUids.forEach { item ->
+                            add(
+                                buildJsonObject {
+                                    put("uid", item.uid)
+                                    put(
+                                        "packageNames",
+                                        buildJsonArray {
+                                            item.packageNames.forEach { add(JsonPrimitive(it)) }
+                                        },
+                                    )
+                                    put("mah", item.mah)
+                                }
+                            )
+                        }
+                    },
+                )
             },
         )
     }
@@ -669,6 +764,7 @@ class BridgeToolRegistry(
 
     companion object {
         const val DEVICE_HEALTH = "device.health"
+        const val BATTERY_USAGE = "battery.usage"
         const val APPS_LIST = "apps.list"
         const val FILES_LIST = "files.list"
         const val FILES_ANALYZE = "files.analyze"
