@@ -11,7 +11,11 @@ class BridgeBootReceiver : BroadcastReceiver() {
             return
         }
 
-        if (PairingStore(context.applicationContext).deviceId() != null) {
+        if (PairingStore(context.applicationContext).deviceId() == null) return
+
+        if (action == Intent.ACTION_BOOT_COMPLETED) {
+            BridgeForegroundService.connectAfterBoot(context.applicationContext)
+        } else {
             BridgeForegroundService.connect(context.applicationContext)
         }
     }
