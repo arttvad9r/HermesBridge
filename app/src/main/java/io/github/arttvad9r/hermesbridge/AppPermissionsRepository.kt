@@ -59,8 +59,10 @@ class AndroidAppPermissionsRepository(context: Context) : AppPermissionsReposito
                     protection = protection,
                     dangerous = protection == PROTECTION_DANGEROUS_LABEL,
                     group = permissionInfo?.group?.take(MAX_PERMISSION_GROUP_LENGTH),
-                    implicit = requestedFlags and PackageInfo.REQUESTED_PERMISSION_IMPLICIT != 0,
-                    neverForLocation = requestedFlags and PackageInfo.REQUESTED_PERMISSION_NEVER_FOR_LOCATION != 0,
+                    implicit = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+                        requestedFlags and PackageInfo.REQUESTED_PERMISSION_IMPLICIT != 0,
+                    neverForLocation = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        requestedFlags and PackageInfo.REQUESTED_PERMISSION_NEVER_FOR_LOCATION != 0,
                 )
             }
             .distinctBy { it.name }
@@ -100,11 +102,17 @@ class AndroidAppPermissionsRepository(context: Context) : AppPermissionsReposito
 
     private fun protectionLabel(permissionInfo: PermissionInfo?): String {
         if (permissionInfo == null) return PROTECTION_UNKNOWN_LABEL
-        return when (permissionInfo.protectionLevel and PermissionInfo.PROTECTION_MASK_BASE) {
+        val base = permissionInfo.protectionLevel and PermissionInfo.PROTECTION_MASK_BASE
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            base == PermissionInfo.PROTECTION_INTERNAL
+        ) {
+            return "internal"
+        }
+        return when (base) {
             PermissionInfo.PROTECTION_NORMAL -> "normal"
             PermissionInfo.PROTECTION_DANGEROUS -> PROTECTION_DANGEROUS_LABEL
             PermissionInfo.PROTECTION_SIGNATURE -> "signature"
-            PermissionInfo.PROTECTION_INTERNAL -> "internal"
             else -> "other"
         }
     }
