@@ -115,18 +115,42 @@ class HermesBridgeMcpTest(unittest.TestCase):
             },
         )
 
-    def test_uninstall_app_rejects_invalid_package_before_request(self) -> None:
+    def test_force_stop_maps_only_to_approved_typed_tool(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None):
+            calls.append((method, path, payload))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.force_stop_app(DEVICE_ID, "com.example.app")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "tool": "apps.forceStop",
+                "arguments": {"packageName": "com.example.app"},
+            },
+        )
+
+    def test_package_mutations_reject_invalid_package_before_request(self) -> None:
         with patch.object(server, "_request_json") as request:
             for package_name in ("../other", "com/example/app", "single", ""):
                 with self.subTest(package_name=package_name):
                     with self.assertRaises(ValueError):
                         server.uninstall_app(DEVICE_ID, package_name)
+                    with self.assertRaises(ValueError):
+                        server.force_stop_app(DEVICE_ID, package_name)
             request.assert_not_called()
 
-    def test_uninstall_app_rejects_bridge_self_uninstall(self) -> None:
+    def test_package_mutations_reject_bridge_package(self) -> None:
         with patch.object(server, "_request_json") as request:
             with self.assertRaises(ValueError):
                 server.uninstall_app(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
+            with self.assertRaises(ValueError):
+                server.force_stop_app(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
             request.assert_not_called()
 
     def test_invalid_device_id_is_rejected_before_request(self) -> None:
