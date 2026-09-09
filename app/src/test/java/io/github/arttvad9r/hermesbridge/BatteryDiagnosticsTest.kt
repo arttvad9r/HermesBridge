@@ -7,7 +7,7 @@ import org.junit.Test
 
 class BatteryDiagnosticsTest {
     @Test
-    fun parserExtractsDocumentedPowerSectionsAndUidPackages() {
+    fun parserExtractsDocumentedPowerSectionsUidPackagesAndWakeLocks() {
         val snapshot = BatteryStatsCheckinParser.parse(
             """
             9,0,i,vers,11,116,S,T
@@ -20,7 +20,8 @@ class BatteryDiagnosticsTest {
             9,0,l,pwi,uid,300
             9,10123,l,pwi,uid,180.25,0,20,5
             9,10124,l,pwi,uid,80
-            9,0,l,wl,ignored,1,2,3
+            9,10123,l,wl,VideoPlayer,0,f,0,-1,-1,-1,125000,p,42,0,5000,125000,90000,bp,30,0,4000,90000,0,w,0,-1,-1,-1
+            9,10124,l,wl,ChatSync,0,f,0,-1,-1,-1,25000,p,10,0,3000,25000,0,bp,0,0,0,0,0,w,0,-1,-1,-1
             """.trimIndent()
         )
 
@@ -36,10 +37,37 @@ class BatteryDiagnosticsTest {
             snapshot.topUids.first().packageNames,
         )
         assertEquals(10124, snapshot.topUids[1].uid)
+
+        val wakeLock = snapshot.topPartialWakeLocks.first()
+        assertEquals(10123, wakeLock.uid)
+        assertEquals("VideoPlayer", wakeLock.name)
+        assertEquals(125000L, wakeLock.partialTimeMillis)
+        assertEquals(42, wakeLock.partialCount)
+        assertEquals(90000L, wakeLock.backgroundPartialTimeMillis)
+        assertEquals(30, wakeLock.backgroundPartialCount)
+        assertEquals(
+            listOf("com.example.video", "com.example.video.helper"),
+            wakeLock.packageNames,
+        )
+        assertEquals("ChatSync", snapshot.topPartialWakeLocks[1].name)
     }
 
     @Test
-    fun parserIgnoresMalformedUnsupportedLinesButRequiresPowerData() {
+    fun parserAcceptsOlderCompactWakeLockTimerGroups() {
+        val snapshot = BatteryStatsCheckinParser.parse(
+            """
+            9,0,i,uid,10123,com.example.app
+            9,10123,l,wl,LegacyLock,0,f,0,6500,p,7,0,w,0
+            """.trimIndent()
+        )
+
+        assertEquals(1, snapshot.topPartialWakeLocks.size)
+        assertEquals(6500L, snapshot.topPartialWakeLocks.single().partialTimeMillis)
+        assertEquals(7, snapshot.topPartialWakeLocks.single().partialCount)
+    }
+
+    @Test
+    fun parserIgnoresMalformedUnsupportedLinesButRequiresSupportedDiagnostics() {
         val snapshot = BatteryStatsCheckinParser.parse(
             """
             malformed
