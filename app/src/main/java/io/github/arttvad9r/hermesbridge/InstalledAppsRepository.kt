@@ -3,7 +3,6 @@ package io.github.arttvad9r.hermesbridge
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import androidx.core.content.pm.PackageInfoCompat
 import java.util.Locale
 
@@ -49,7 +48,7 @@ class AndroidInstalledAppsRepository(context: Context) : InstalledAppsRepository
             }
             .distinctBy { it.packageName }
             .sortedWith(
-                compareBy(String.CASE_INSENSITIVE_ORDER) { it.label }
+                compareBy<InstalledAppSnapshot> { it.label.lowercase(Locale.ROOT) }
                     .thenBy { it.packageName.lowercase(Locale.ROOT) }
             )
             .take(MAX_APPS)
