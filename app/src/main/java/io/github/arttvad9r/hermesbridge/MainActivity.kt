@@ -3,8 +3,10 @@ package io.github.arttvad9r.hermesbridge
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -49,12 +51,18 @@ class MainActivity : ComponentActivity() {
             HermesBridgeTheme {
                 val vm: BridgeViewModel = viewModel()
                 val state by vm.state.collectAsState()
+                val fileTreeLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.OpenDocumentTree(),
+                    onResult = { uri -> uri?.let(vm::grantFileTree) },
+                )
 
                 BridgeScreen(
                     state = state,
                     onCodeChange = vm::updatePairingCode,
                     onPair = vm::pair,
                     onRefreshHealth = vm::refreshHealth,
+                    onChooseFileTree = { fileTreeLauncher.launch(null) },
+                    onRevokeFileAccess = vm::revokeFileAccess,
                 )
             }
         }
@@ -84,6 +92,8 @@ private fun BridgeScreen(
     onCodeChange: (String) -> Unit,
     onPair: () -> Unit,
     onRefreshHealth: () -> Unit,
+    onChooseFileTree: () -> Unit,
+    onRevokeFileAccess: () -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -122,7 +132,13 @@ private fun BridgeScreen(
                 onRefresh = onRefreshHealth,
             )
 
-            CapabilitiesCard()
+            FileAccessCard(
+                configured = state.fileAccessConfigured,
+                onChoose = onChooseFileTree,
+                onRevoke = onRevokeFileAccess,
+            )
+
+            CapabilitiesCard(state.fileAccessConfigured)
 
             Spacer(Modifier.height(20.dp))
         }
@@ -238,6 +254,46 @@ private fun HealthCard(
 }
 
 @Composable
+private fun FileAccessCard(
+    configured: Boolean,
+    onChoose: () -> Unit,
+    onRevoke: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Файлы",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                if (configured) {
+                    "Hermes может только просматривать содержимое выбранной папки и её подпапок."
+                } else {
+                    "Выберите папку, содержимое которой Hermes сможет просматривать. Остальное хранилище останется недоступно."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onChoose,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (configured) "Сменить папку" else "Выбрать папку")
+            }
+            if (configured) {
+                TextButton(
+                    onClick = onRevoke,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Отключить доступ к файлам")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MetricRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -249,12 +305,13 @@ private fun MetricRow(label: String, value: String) {
 }
 
 @Composable
-private fun CapabilitiesCard() {
+private fun CapabilitiesCard(fileAccessConfigured: Boolean) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Доступ", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             CapabilityRow("Диагностика устройства", "Доступно")
-            CapabilityRow("Приложения и файлы", "Запланировано")
+            CapabilityRow("Список приложений", "Доступно")
+            CapabilityRow("Просмотр файлов", if (fileAccessConfigured) "Доступно" else "Не настроено")
             CapabilityRow("Расширенный доступ Shizuku", "Запланировано")
             CapabilityRow("Управление интерфейсом", "Опционально")
         }
