@@ -50,7 +50,14 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        viewModelScope.launch {
+            ShizukuRuntime.state.collectLatest { shizuku ->
+                _state.update { it.copy(shizuku = shizuku) }
+            }
+        }
+
         BridgeApprovalRuntime.refresh()
+        ShizukuRuntime.refresh()
 
         if (pairingStore.deviceId() != null) {
             runCatching { BridgeForegroundService.connect(app) }
@@ -82,6 +89,14 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun denyAction(approvalId: String) {
         BridgeApprovalRuntime.deny(approvalId)
+    }
+
+    fun requestShizukuPermission() {
+        ShizukuRuntime.requestPermission()
+    }
+
+    fun refreshShizuku() {
+        ShizukuRuntime.refresh()
     }
 
     fun grantFileTree(uri: Uri) {
