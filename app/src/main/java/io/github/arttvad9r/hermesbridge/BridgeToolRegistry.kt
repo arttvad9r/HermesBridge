@@ -10,6 +10,7 @@ import io.github.arttvad9r.hermesbridge.security.ToolRisk
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -18,12 +19,14 @@ class BridgeToolRegistry(
     private val healthRepository: DeviceHealthRepository,
     private val appsRepository: InstalledAppsRepository,
     private val filesRepository: SafFilesRepository,
+    private val privilegedAppsBackend: PrivilegedAppsBackend = DisabledPrivilegedAppsBackend,
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         return when (request.tool) {
             DEVICE_HEALTH -> executeDeviceHealth(request)
             APPS_LIST -> executeAppsList(request)
             FILES_LIST -> executeFilesList(request)
+            APPS_UNINSTALL -> executeAppsUninstall(request)
             else -> failure(
                 request.requestId,
                 "unknown_tool",
@@ -41,7 +44,7 @@ class BridgeToolRegistry(
             )
         }
 
-        if (!isAllowed(DEVICE_HEALTH)) {
+        if (!isReadOnlyAllowed(DEVICE_HEALTH)) {
             return failure(
                 request.requestId,
                 "policy_denied",
@@ -77,7 +80,7 @@ class BridgeToolRegistry(
             )
         }
 
-        if (!isAllowed(APPS_LIST)) {
+        if (!isReadOnlyAllowed(APPS_LIST)) {
             return failure(
                 request.requestId,
                 "policy_denied",
@@ -118,7 +121,7 @@ class BridgeToolRegistry(
     }
 
     private fun executeFilesList(request: CommandRequestPayload): CommandResultPayload {
-        if (!isAllowed(FILES_LIST)) {
+        if (!isReadOnlyAllowed(FILES_LIST)) {
             return failure(
                 request.requestId,
                 "policy_denied",
@@ -243,10 +246,128 @@ class BridgeToolRegistry(
         )
     }
 
-    private fun isAllowed(toolName: String): Boolean =
+    private suspend fun executeAppsUninstall(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys.any { it != PACKAGE_NAME && it != KEEP_DATA }) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "apps.uninstall accepts only packageName and optional keepData.",
+            )
+        }
+
+        val packageNamePrimitive = request.arguments[PACKAGE_NAME] as? JsonPrimitive
+            ?: return failure(
+                request.requestId,
+                "invalid_arguments",
+                "packageName is required and must be a string.",
+            )
+        if (!packageNamePrimitive.isString) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "packageName must be a string.",
+            )
+        }
+        val packageName = packageNamePrimitive.content.trim()
+        if (!isValidPackageName(packageName)) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "packageName is not a valid Android package name.",
+            )
+        }
+        if (packageName == HERMES_BRIDGE_PACKAGE) {
+            return failure(
+                request.requestId,
+                "protected_package",
+                "Hermes Bridge cannot uninstall itself.",
+            )
+        }
+
+        val keepData = when (val value = request.arguments[KEEP_DATA]) {
+            null -> false
+            is JsonPrimitive -> value.booleanOrNull
+                ?: return failure(
+                    request.requestId,
+                    "invalid_arguments",
+                    "keepData must be a boolean.",
+                )
+            else -> return failure(
+                request.requestId,
+                "invalid_arguments",
+                "keepData must be a boolean.",
+            )
+        }
+
+        val policyDecision = DefaultToolPolicy.decision(
+            BridgeTool(APPS_UNINSTALL, ToolRisk.MUTATING)
+        )
+        if (policyDecision != ApprovalDecision.REQUIRE_APPROVAL) {
+            return failure(
+                request.requestId,
+                "policy_denied",
+                "Local policy does not permit this mutating tool.",
+            )
+        }
+
+        val readiness = privilegedAppsBackend.readiness()
+        if (!readiness.ready) {
+            return failure(
+                request.requestId,
+                readiness.code ?: "shizuku_unavailable",
+                readiness.message ?: "Shizuku is not ready.",
+            )
+        }
+
+        val normalizedArguments = buildJsonObject {
+            put(PACKAGE_NAME, packageName)
+            put(KEEP_DATA, keepData)
+        }
+        if (BridgeApprovalRuntime.consumeApproved(APPS_UNINSTALL, normalizedArguments) == null) {
+            val ticket = BridgeApprovalRuntime.request(
+                tool = APPS_UNINSTALL,
+                risk = ToolRisk.MUTATING,
+                arguments = normalizedArguments,
+                displaySummary = if (keepData) {
+                    "Удалить $packageName, сохранив данные приложения"
+                } else {
+                    "Удалить $packageName и его данные"
+                },
+            )
+            return failure(
+                request.requestId,
+                "approval_required",
+                "User approval is required (${ticket.id}). Retry the same command after approval.",
+            )
+        }
+
+        val outcome = privilegedAppsBackend.uninstall(packageName, keepData)
+        if (!outcome.ok) {
+            return failure(
+                request.requestId,
+                outcome.code ?: "uninstall_failed",
+                outcome.message ?: "The app could not be uninstalled.",
+            )
+        }
+
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PACKAGE_NAME, packageName)
+                put(KEEP_DATA, keepData)
+                put("uninstalled", true)
+            },
+        )
+    }
+
+    private fun isReadOnlyAllowed(toolName: String): Boolean =
         DefaultToolPolicy.decision(
             BridgeTool(toolName, ToolRisk.READ_ONLY)
         ) == ApprovalDecision.ALLOW
+
+    private fun isValidPackageName(value: String): Boolean =
+        value.length in 3..255 && PACKAGE_NAME_REGEX.matches(value)
 
     private fun failure(requestId: String, code: String, message: String) =
         CommandResultPayload(
@@ -259,6 +380,14 @@ class BridgeToolRegistry(
         const val DEVICE_HEALTH = "device.health"
         const val APPS_LIST = "apps.list"
         const val FILES_LIST = "files.list"
+        const val APPS_UNINSTALL = "apps.uninstall"
+
         private const val PATH_SEGMENTS = "pathSegments"
+        private const val PACKAGE_NAME = "packageName"
+        private const val KEEP_DATA = "keepData"
+        private const val HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
+        private val PACKAGE_NAME_REGEX = Regex(
+            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+        )
     }
 }
