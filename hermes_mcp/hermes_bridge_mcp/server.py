@@ -89,6 +89,20 @@ def _request_json(
         raise RuntimeError("Relay returned invalid JSON.") from exc
 
 
+def _device_command(device_id: str, tool: str) -> dict[str, Any]:
+    if not DEVICE_ID_RE.fullmatch(device_id):
+        raise ValueError("device_id has an invalid format.")
+
+    result = _request_json(
+        "POST",
+        f"/api/v1/devices/{quote(device_id, safe='')}/commands",
+        {"tool": tool, "arguments": {}},
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("Relay returned an invalid command response.")
+    return result
+
+
 @mcp.tool()
 def list_devices() -> list[dict[str, Any]]:
     """List phones paired with Hermes Bridge and whether each is currently connected."""
@@ -110,17 +124,13 @@ def create_pairing_code() -> dict[str, Any]:
 @mcp.tool()
 def device_health(device_id: str) -> dict[str, Any]:
     """Read battery, memory and storage health from one paired Android phone."""
-    if not DEVICE_ID_RE.fullmatch(device_id):
-        raise ValueError("device_id has an invalid format.")
+    return _device_command(device_id, "device.health")
 
-    result = _request_json(
-        "POST",
-        f"/api/v1/devices/{quote(device_id, safe='')}/commands",
-        {"tool": "device.health", "arguments": {}},
-    )
-    if not isinstance(result, dict):
-        raise RuntimeError("Relay returned an invalid command response.")
-    return result
+
+@mcp.tool()
+def list_apps(device_id: str) -> dict[str, Any]:
+    """List launcher-visible apps on one paired Android phone without broad package access."""
+    return _device_command(device_id, "apps.list")
 
 
 def main() -> None:
