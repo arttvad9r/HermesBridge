@@ -1,5 +1,7 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from hermes_bridge_mcp import server
@@ -38,8 +40,8 @@ class HermesBridgeMcpTest(unittest.TestCase):
     def test_device_health_cannot_select_arbitrary_tool(self) -> None:
         calls = []
 
-        def fake_request(method, path, payload=None):
-            calls.append((method, path, payload))
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
             return {"ok": True, "result": {"batteryPercent": 80}}
 
         with patch.object(server, "_request_json", side_effect=fake_request):
@@ -47,7 +49,7 @@ class HermesBridgeMcpTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(len(calls), 1)
-        method, path, payload = calls[0]
+        method, path, payload, _ = calls[0]
         self.assertEqual(method, "POST")
         self.assertEqual(path, f"/api/v1/devices/{DEVICE_ID}/commands")
         self.assertEqual(payload, {"tool": "device.health", "arguments": {}})
@@ -55,8 +57,8 @@ class HermesBridgeMcpTest(unittest.TestCase):
     def test_list_apps_maps_only_to_apps_list(self) -> None:
         calls = []
 
-        def fake_request(method, path, payload=None):
-            calls.append((method, path, payload))
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
             return {"ok": True, "result": {"count": 1, "apps": []}}
 
         with patch.object(server, "_request_json", side_effect=fake_request):
@@ -69,8 +71,8 @@ class HermesBridgeMcpTest(unittest.TestCase):
     def test_list_files_maps_only_to_scoped_files_list(self) -> None:
         calls = []
 
-        def fake_request(method, path, payload=None):
-            calls.append((method, path, payload))
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
             return {"ok": True, "result": {"count": 1, "entries": []}}
 
         with patch.object(server, "_request_json", side_effect=fake_request):
@@ -92,11 +94,72 @@ class HermesBridgeMcpTest(unittest.TestCase):
                 server.list_files(DEVICE_ID, [".."])
             request.assert_not_called()
 
+    def test_install_apk_maps_staged_artifact_only_to_install_tool(self) -> None:
+        staged = {
+            "artifactId": "apk_123e4567-e89b-12d3-a456-426614174000",
+            "downloadToken": "A" * 43,
+            "fileName": "example.apk",
+            "sizeBytes": 1234,
+            "sha256": "a" * 64,
+            "expiresAtEpochMillis": 123456789,
+        }
+        calls = []
+
+        def fake_device_command(device_id, tool, arguments=None, **kwargs):
+            calls.append((device_id, tool, arguments, kwargs))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with (
+            patch.object(server, "_stage_apk", return_value=staged) as stage,
+            patch.object(server, "_device_command", side_effect=fake_device_command),
+        ):
+            result = server.install_apk(DEVICE_ID, "example.apk", replace=False)
+
+        self.assertFalse(result["ok"])
+        stage.assert_called_once_with("example.apk")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], DEVICE_ID)
+        self.assertEqual(calls[0][1], "apps.install")
+        self.assertEqual(
+            calls[0][2],
+            {
+                "artifactId": staged["artifactId"],
+                "downloadToken": staged["downloadToken"],
+                "fileName": staged["fileName"],
+                "sizeBytes": staged["sizeBytes"],
+                "sha256": staged["sha256"],
+                "replace": False,
+            },
+        )
+        self.assertEqual(calls[0][3], {"timeout": 300})
+
+    def test_apk_name_is_confined_to_dedicated_staging_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "ok.apk").write_bytes(b"apk")
+            (root / "not-apk.txt").write_bytes(b"text")
+            with patch.dict(
+                os.environ,
+                {"HERMES_BRIDGE_APK_DIR": directory},
+                clear=False,
+            ):
+                self.assertEqual(server._resolve_apk_file("ok.apk"), root / "ok.apk")
+                for name in ("../ok.apk", "sub/ok.apk", "not-apk.txt", ""):
+                    with self.subTest(name=name):
+                        with self.assertRaises((ValueError, FileNotFoundError)):
+                            server._resolve_apk_file(name)
+
+    def test_install_rejects_non_boolean_replace_before_staging(self) -> None:
+        with patch.object(server, "_stage_apk") as stage:
+            with self.assertRaises(ValueError):
+                server.install_apk(DEVICE_ID, "example.apk", replace="yes")
+            stage.assert_not_called()
+
     def test_uninstall_app_maps_only_to_approved_typed_tool(self) -> None:
         calls = []
 
-        def fake_request(method, path, payload=None):
-            calls.append((method, path, payload))
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
             return {"ok": False, "error": {"code": "approval_required"}}
 
         with patch.object(server, "_request_json", side_effect=fake_request):
@@ -118,8 +181,8 @@ class HermesBridgeMcpTest(unittest.TestCase):
     def test_force_stop_maps_only_to_approved_typed_tool(self) -> None:
         calls = []
 
-        def fake_request(method, path, payload=None):
-            calls.append((method, path, payload))
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
             return {"ok": False, "error": {"code": "approval_required"}}
 
         with patch.object(server, "_request_json", side_effect=fake_request):
