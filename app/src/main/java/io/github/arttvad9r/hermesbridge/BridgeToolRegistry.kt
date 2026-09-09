@@ -31,6 +31,8 @@ class BridgeToolRegistry(
             DEVICE_HEALTH -> executeDeviceHealth(request)
             APPS_LIST -> executeAppsList(request)
             FILES_LIST -> executeFilesList(request)
+            FILES_ANALYZE -> executeFilesAnalyze(request)
+            FILES_DELETE -> executeFilesDelete(request)
             APPS_INSTALL -> executeAppsInstall(request)
             APPS_UNINSTALL -> executeAppsUninstall(request)
             APPS_FORCE_STOP -> executeAppsForceStop(request)
@@ -113,72 +115,13 @@ class BridgeToolRegistry(
         if (!isReadOnlyAllowed(FILES_LIST)) {
             return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
         }
-        if (request.arguments.keys.any { it != PATH_SEGMENTS }) {
-            return failure(
-                request.requestId,
-                "invalid_arguments",
-                "files.list accepts only the optional pathSegments array.",
-            )
-        }
-
-        val pathSegments = when (val value = request.arguments[PATH_SEGMENTS]) {
-            null -> emptyList()
-            is JsonArray -> {
-                val parsed = value.map { element ->
-                    val primitive = element as? JsonPrimitive
-                        ?: return failure(
-                            request.requestId,
-                            "invalid_arguments",
-                            "pathSegments must contain only strings.",
-                        )
-                    if (!primitive.isString) {
-                        return failure(
-                            request.requestId,
-                            "invalid_arguments",
-                            "pathSegments must contain only strings.",
-                        )
-                    }
-                    primitive.content
-                }
-                runCatching { AndroidSafFilesRepository.validatePathSegments(parsed) }
-                    .getOrElse {
-                        return failure(
-                            request.requestId,
-                            "invalid_arguments",
-                            it.message ?: "Invalid pathSegments.",
-                        )
-                    }
-                parsed
-            }
-            else -> return failure(
-                request.requestId,
-                "invalid_arguments",
-                "pathSegments must be an array of strings.",
-            )
-        }
+        val pathSegments = parseOnlyPathSegments(request, allowEmpty = true)
+            ?: return invalidPathArguments(request, "files.list")
 
         val listing = try {
             filesRepository.list(pathSegments)
-        } catch (_: FileAccessNotConfiguredException) {
-            return failure(
-                request.requestId,
-                "file_access_not_configured",
-                "Choose a folder in the Hermes Bridge app before using files.list.",
-            )
-        } catch (_: FilePathNotFoundException) {
-            return failure(
-                request.requestId,
-                "path_not_found",
-                "The requested path does not exist inside the granted folder.",
-            )
-        } catch (_: FilePathNotDirectoryException) {
-            return failure(request.requestId, "not_directory", "The requested path is not a directory.")
-        } catch (error: SecurityException) {
-            return failure(
-                request.requestId,
-                "file_access_revoked",
-                error.message ?: "The persisted SAF permission is no longer available.",
-            )
+        } catch (error: Throwable) {
+            return fileFailure(request, error, "files.list")
         }
 
         return CommandResultPayload(
@@ -186,10 +129,7 @@ class BridgeToolRegistry(
             ok = true,
             result = buildJsonObject {
                 put("rootName", listing.rootName)
-                put(
-                    "pathSegments",
-                    buildJsonArray { listing.pathSegments.forEach { add(JsonPrimitive(it)) } },
-                )
+                put("pathSegments", pathArray(listing.pathSegments))
                 put("count", listing.entries.size)
                 put(
                     "entries",
@@ -198,12 +138,7 @@ class BridgeToolRegistry(
                             add(
                                 buildJsonObject {
                                     put("name", entry.name)
-                                    put(
-                                        "pathSegments",
-                                        buildJsonArray {
-                                            entry.pathSegments.forEach { add(JsonPrimitive(it)) }
-                                        },
-                                    )
+                                    put("pathSegments", pathArray(entry.pathSegments))
                                     put("directory", entry.directory)
                                     if (entry.mimeType == null) put("mimeType", JsonNull)
                                     else put("mimeType", entry.mimeType)
@@ -219,6 +154,104 @@ class BridgeToolRegistry(
                         }
                     },
                 )
+            },
+        )
+    }
+
+    private fun executeFilesAnalyze(request: CommandRequestPayload): CommandResultPayload {
+        if (!isReadOnlyAllowed(FILES_ANALYZE)) {
+            return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
+        }
+        val pathSegments = parseOnlyPathSegments(request, allowEmpty = true)
+            ?: return invalidPathArguments(request, "files.analyze")
+
+        val analysis = try {
+            filesRepository.analyze(pathSegments)
+        } catch (error: Throwable) {
+            return fileFailure(request, error, "files.analyze")
+        }
+
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("rootName", analysis.rootName)
+                put("pathSegments", pathArray(analysis.pathSegments))
+                put("scannedEntries", analysis.scannedEntries)
+                put("fileCount", analysis.fileCount)
+                put("directoryCount", analysis.directoryCount)
+                put("totalBytes", analysis.totalBytes)
+                put("truncated", analysis.truncated)
+                put(
+                    "largestFiles",
+                    buildJsonArray {
+                        analysis.largestFiles.forEach { file ->
+                            add(
+                                buildJsonObject {
+                                    put("name", file.name)
+                                    put("pathSegments", pathArray(file.pathSegments))
+                                    if (file.mimeType == null) put("mimeType", JsonNull)
+                                    else put("mimeType", file.mimeType)
+                                    put("sizeBytes", file.sizeBytes)
+                                    if (file.lastModifiedEpochMillis == null) {
+                                        put("lastModifiedEpochMillis", JsonNull)
+                                    } else {
+                                        put("lastModifiedEpochMillis", file.lastModifiedEpochMillis)
+                                    }
+                                }
+                            )
+                        }
+                    },
+                )
+            },
+        )
+    }
+
+    private fun executeFilesDelete(request: CommandRequestPayload): CommandResultPayload {
+        val pathSegments = parseOnlyPathSegments(request, allowEmpty = false)
+            ?: return invalidPathArguments(request, "files.delete")
+
+        val target = try {
+            filesRepository.stat(pathSegments)
+        } catch (error: Throwable) {
+            return fileFailure(request, error, "files.delete")
+        }
+
+        val normalizedArguments = buildJsonObject {
+            put(PATH_SEGMENTS, pathArray(target.pathSegments))
+            put("directory", target.directory)
+            if (target.mimeType == null) put("mimeType", JsonNull)
+            else put("mimeType", target.mimeType)
+            if (target.sizeBytes == null) put("sizeBytes", JsonNull)
+            else put("sizeBytes", target.sizeBytes)
+            if (target.lastModifiedEpochMillis == null) put("lastModifiedEpochMillis", JsonNull)
+            else put("lastModifiedEpochMillis", target.lastModifiedEpochMillis)
+        }
+        requireApproval(
+            request = request,
+            tool = FILES_DELETE,
+            risk = ToolRisk.MUTATING,
+            normalizedArguments = normalizedArguments,
+            summary = if (target.directory) {
+                "Удалить папку ${target.pathSegments.joinToString("/")}"
+            } else {
+                "Удалить файл ${target.pathSegments.joinToString("/")}"
+            },
+        )?.let { return it }
+
+        try {
+            filesRepository.delete(pathSegments)
+        } catch (error: Throwable) {
+            return fileFailure(request, error, "files.delete")
+        }
+
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PATH_SEGMENTS, pathArray(pathSegments))
+                put("directory", target.directory)
+                put("deleted", true)
             },
         )
     }
@@ -479,6 +512,80 @@ class BridgeToolRegistry(
         )
     }
 
+    private fun parseOnlyPathSegments(
+        request: CommandRequestPayload,
+        allowEmpty: Boolean,
+    ): List<String>? {
+        if (request.arguments.keys.any { it != PATH_SEGMENTS }) return null
+        val value = request.arguments[PATH_SEGMENTS] ?: return if (allowEmpty) emptyList() else null
+        if (value !is JsonArray) return null
+        val parsed = value.map { element ->
+            val primitive = element as? JsonPrimitive ?: return null
+            if (!primitive.isString) return null
+            primitive.content
+        }
+        if (!allowEmpty && parsed.isEmpty()) return null
+        return runCatching {
+            AndroidSafFilesRepository.validatePathSegments(parsed)
+            parsed
+        }.getOrNull()
+    }
+
+    private fun invalidPathArguments(
+        request: CommandRequestPayload,
+        tool: String,
+    ) = failure(
+        request.requestId,
+        "invalid_arguments",
+        "$tool accepts only a validated pathSegments array inside the granted SAF tree.",
+    )
+
+    private fun fileFailure(
+        request: CommandRequestPayload,
+        error: Throwable,
+        tool: String,
+    ): CommandResultPayload = when (error) {
+        is FileAccessNotConfiguredException -> failure(
+            request.requestId,
+            "file_access_not_configured",
+            "Choose a folder in the Hermes Bridge app before using $tool.",
+        )
+        is FilePathNotFoundException -> failure(
+            request.requestId,
+            "path_not_found",
+            "The requested path does not exist inside the granted folder.",
+        )
+        is FilePathNotDirectoryException -> failure(
+            request.requestId,
+            "not_directory",
+            "A directory component of the requested path is not a directory.",
+        )
+        is FileDeleteFailedException -> failure(
+            request.requestId,
+            "delete_failed",
+            "The Android document provider refused to delete the requested target.",
+        )
+        is UnsupportedOperationException -> failure(
+            request.requestId,
+            "file_operation_unavailable",
+            "The requested file operation is unavailable in this build.",
+        )
+        is SecurityException -> failure(
+            request.requestId,
+            "file_access_revoked",
+            error.message ?: "The persisted SAF permission is no longer available.",
+        )
+        else -> failure(
+            request.requestId,
+            "file_operation_failed",
+            (error.message ?: "The file operation failed.").take(200),
+        )
+    }
+
+    private fun pathArray(pathSegments: List<String>): JsonArray = buildJsonArray {
+        pathSegments.forEach { add(JsonPrimitive(it)) }
+    }
+
     private fun parseApkArtifactDescriptor(request: CommandRequestPayload): ApkArtifactDescriptor? {
         fun string(name: String): String? {
             val value = request.arguments[name] as? JsonPrimitive ?: return null
@@ -564,6 +671,8 @@ class BridgeToolRegistry(
         const val DEVICE_HEALTH = "device.health"
         const val APPS_LIST = "apps.list"
         const val FILES_LIST = "files.list"
+        const val FILES_ANALYZE = "files.analyze"
+        const val FILES_DELETE = "files.delete"
         const val APPS_INSTALL = "apps.install"
         const val APPS_UNINSTALL = "apps.uninstall"
         const val APPS_FORCE_STOP = "apps.forceStop"
