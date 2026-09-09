@@ -92,6 +92,43 @@ class HermesBridgeMcpTest(unittest.TestCase):
                 server.list_files(DEVICE_ID, [".."])
             request.assert_not_called()
 
+    def test_uninstall_app_maps_only_to_approved_typed_tool(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None):
+            calls.append((method, path, payload))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.uninstall_app(DEVICE_ID, "com.example.app", keep_data=True)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "tool": "apps.uninstall",
+                "arguments": {
+                    "packageName": "com.example.app",
+                    "keepData": True,
+                },
+            },
+        )
+
+    def test_uninstall_app_rejects_invalid_package_before_request(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            for package_name in ("../other", "com/example/app", "single", ""):
+                with self.subTest(package_name=package_name):
+                    with self.assertRaises(ValueError):
+                        server.uninstall_app(DEVICE_ID, package_name)
+            request.assert_not_called()
+
+    def test_uninstall_app_rejects_bridge_self_uninstall(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            with self.assertRaises(ValueError):
+                server.uninstall_app(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
+            request.assert_not_called()
+
     def test_invalid_device_id_is_rejected_before_request(self) -> None:
         with patch.object(server, "_request_json") as request:
             with self.assertRaises(ValueError):
