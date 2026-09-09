@@ -29,8 +29,9 @@
 - [x] Relay service beside Hermes.
 - [x] VPS deployment examples for systemd + TLS reverse proxy.
 - [x] Recover cleanly when relay state no longer recognizes a paired device.
+- [x] Admin-only persistent device revocation endpoint.
+- [x] Authenticated device self-revocation and local clean re-pair flow.
 - [ ] End-to-end test over unrelated networks/mobile data on the physical phone.
-- [ ] Explicit device revocation endpoint and local re-pair flow.
 
 ## P0 — Hermes MCP boundary
 
@@ -56,7 +57,7 @@
 
 - [x] Explicit Hermes Bridge Android tool allowlist.
 - [x] `device.health`.
-- [x] `battery.usage` through fixed `dumpsys batterystats --charged --checkin`, parsed locally and read-only.
+- [x] `battery.usage` through fixed read-only `dumpsys batterystats -c --charged`, parsed locally.
 - [x] Bounded top partial-wakelock diagnostics from the same Batterystats snapshot.
 - [x] `apps.list` with launcher-only package visibility; no `QUERY_ALL_PACKAGES`.
 - [x] `apps.usage` intersects UsageStats with launcher-visible packages so special access does not widen package visibility.
@@ -75,6 +76,7 @@
 ## P1 — Android setup wizard
 
 - [x] Pairing UI.
+- [x] Confirmed "Отвязать телефон" flow that revokes the server-side pairing before clearing local state.
 - [x] File-access step using Storage Access Framework.
 - [x] Persisted SAF grant with explicit revoke/change controls.
 - [x] Reboot recovery state for the base relay connection.
@@ -107,7 +109,7 @@
 - [x] Approved tickets are one-use only.
 - [ ] Hermes/Telegram approval routing.
 - [ ] Per-tool "always allow" only where explicitly safe.
-- [ ] Emergency disconnect/revoke button for the Hermes pairing itself.
+- [x] Emergency disconnect/revoke button for the Hermes pairing itself.
 
 ## P2 — UI automation
 
