@@ -20,6 +20,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
+import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.request.receiveText
@@ -61,12 +62,13 @@ private class DeviceSessionHub {
     private val sessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<CommandResultPayload>>()
 
-    fun register(deviceId: String, session: DefaultWebSocketServerSession) {
-        sessions.put(deviceId, session)?.let { old ->
-            if (old !== session) {
-                runCatching {
-                    old.close(CloseReason(CloseReason.Codes.NORMAL, "Replaced by a newer session"))
-                }
+    suspend fun register(deviceId: String, session: DefaultWebSocketServerSession) {
+        val old = sessions.put(deviceId, session)
+        if (old != null && old !== session) {
+            try {
+                old.close(CloseReason(CloseReason.Codes.NORMAL, "Replaced by a newer session"))
+            } catch (_: Exception) {
+                // The old socket may already be closed. The new authenticated session wins.
             }
         }
     }
@@ -163,9 +165,10 @@ fun Application.relayModule(adminToken: String) {
                 )
                 return@post
             }
-            val request = runCatching {
+
+            val request = try {
                 BridgeProtocol.json.decodeFromString<RelayCommandRequest>(call.receiveText())
-            }.getOrElse {
+            } catch (_: Exception) {
                 call.respondText(
                     "{\"error\":\"invalid_request\"}",
                     ContentType.Application.Json,
@@ -174,14 +177,15 @@ fun Application.relayModule(adminToken: String) {
                 return@post
             }
 
-            val result = runCatching { runtime.sessions.sendCommand(deviceId, request) }
-                .getOrElse {
-                    CommandResultPayload(
-                        requestId = "",
-                        ok = false,
-                        error = ProtocolError("command_timeout", "Device did not return a result in time."),
-                    )
-                }
+            val result = try {
+                runtime.sessions.sendCommand(deviceId, request)
+            } catch (_: Exception) {
+                CommandResultPayload(
+                    requestId = "",
+                    ok = false,
+                    error = ProtocolError("command_timeout", "Device did not return a result in time."),
+                )
+            }
             val status = if (result.ok) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable
             call.respondText(
                 BridgeProtocol.json.encodeToString(result),
@@ -211,12 +215,15 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
     try {
         for (frame in incoming) {
             if (frame !is Frame.Text) continue
-            val envelope = runCatching { BridgeProtocol.decode(frame.readText()) }
-                .getOrElse {
-                    sendError("invalid_json", "Message is not a valid protocol envelope.")
-                    close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Invalid envelope"))
-                    return
-                }
+
+            val envelope = try {
+                BridgeProtocol.decode(frame.readText())
+            } catch (_: Exception) {
+                sendError("invalid_json", "Message is not a valid protocol envelope.")
+                close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Invalid envelope"))
+                return
+            }
+
             if (envelope.v != PROTOCOL_VERSION) {
                 sendError("unsupported_version", "Unsupported protocol version.")
                 close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Unsupported protocol"))
@@ -229,28 +236,34 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         sendError("invalid_state", "Pairing is not valid in the current session state.")
                         continue
                     }
-                    val payload = runCatching {
+
+                    val payload = try {
                         BridgeProtocol.decodePayload<PairRequestPayload>(envelope)
-                    }.getOrElse {
+                    } catch (_: Exception) {
                         sendError("invalid_payload", "Invalid pairing payload.")
                         continue
                     }
+
                     if (payload.protocolVersion != PROTOCOL_VERSION) {
                         sendError("unsupported_version", "Unsupported pairing protocol version.")
                         continue
                     }
-                    val publicKey = runCatching { AuthCrypto.decodeEcPublicKey(payload.publicKey) }
-                        .getOrElse {
-                            sendError("invalid_public_key", "Device public key is invalid.")
-                            continue
-                        }
+
+                    val publicKey = try {
+                        AuthCrypto.decodeEcPublicKey(payload.publicKey)
+                    } catch (_: Exception) {
+                        sendError("invalid_public_key", "Device public key is invalid.")
+                        continue
+                    }
+
                     if (!runtime.pairingCodes.consume(payload.code)) {
                         sendError("invalid_pairing_code", "Pairing code is invalid or expired.")
                         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid pairing code"))
                         return
                     }
-                    pendingDevice = runtime.devices.register(publicKey, payload.deviceLabel)
-                    val device = pendingDevice!!
+
+                    val device = runtime.devices.register(publicKey, payload.deviceLabel)
+                    pendingDevice = device
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.PAIR_OK,
@@ -258,12 +271,13 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                             payload = BridgeProtocol.payload(PairOkPayload(device.deviceId)),
                         )
                     )
-                    challenge = AuthCrypto.newChallenge()
+                    val newChallenge = AuthCrypto.newChallenge()
+                    challenge = newChallenge
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.AUTH_CHALLENGE,
                             deviceId = device.deviceId,
-                            payload = BridgeProtocol.payload(AuthChallengePayload(challenge!!)),
+                            payload = BridgeProtocol.payload(AuthChallengePayload(newChallenge)),
                         )
                     )
                 }
@@ -273,25 +287,29 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         sendError("invalid_state", "Session hello is not valid in the current state.")
                         continue
                     }
-                    val payload = runCatching {
+
+                    val payload = try {
                         BridgeProtocol.decodePayload<SessionHelloPayload>(envelope)
-                    }.getOrElse {
+                    } catch (_: Exception) {
                         sendError("invalid_payload", "Invalid session hello payload.")
                         continue
                     }
+
                     val device = runtime.devices.find(payload.deviceId)
                     if (device == null || envelope.deviceId != payload.deviceId) {
                         sendError("unknown_device", "Device is not registered.")
                         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Unknown device"))
                         return
                     }
+
                     pendingDevice = device
-                    challenge = AuthCrypto.newChallenge()
+                    val newChallenge = AuthCrypto.newChallenge()
+                    challenge = newChallenge
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.AUTH_CHALLENGE,
                             deviceId = device.deviceId,
-                            payload = BridgeProtocol.payload(AuthChallengePayload(challenge!!)),
+                            payload = BridgeProtocol.payload(AuthChallengePayload(newChallenge)),
                         )
                     )
                 }
@@ -303,17 +321,23 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         sendError("invalid_state", "Authentication challenge is not active.")
                         continue
                     }
-                    val payload = runCatching {
+
+                    val payload = try {
                         BridgeProtocol.decodePayload<AuthResponsePayload>(envelope)
-                    }.getOrElse {
+                    } catch (_: Exception) {
                         sendError("invalid_payload", "Invalid authentication response.")
                         continue
                     }
-                    if (envelope.deviceId != device.deviceId || !AuthCrypto.verify(device, nonce, payload.signature)) {
+
+                    if (
+                        envelope.deviceId != device.deviceId ||
+                        !AuthCrypto.verify(device, nonce, payload.signature)
+                    ) {
                         sendError("auth_failed", "Device signature verification failed.")
                         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Authentication failed"))
                         return
                     }
+
                     authenticatedDeviceId = device.deviceId
                     challenge = null
                     runtime.sessions.register(device.deviceId, this)
@@ -332,9 +356,10 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         sendError("not_authenticated", "Authenticate before returning command results.")
                         continue
                     }
-                    val payload = runCatching {
+
+                    val payload = try {
                         BridgeProtocol.decodePayload<CommandResultPayload>(envelope)
-                    }.getOrElse {
+                    } catch (_: Exception) {
                         sendError("invalid_payload", "Invalid command result payload.")
                         continue
                     }
