@@ -44,9 +44,9 @@
 - [x] `device_health`.
 - [x] `list_apps`.
 - [x] `list_files` inside the user-granted SAF tree.
+- [x] Typed `install_apk` with dedicated VPS staging directory, relay artifact transfer and Android-side verified-content approval.
 - [x] Typed `uninstall_app` behind Android-side exact-argument approval.
 - [x] Typed `force_stop_app` behind Android-side exact-argument approval.
-- [ ] Safe APK-transfer/install MCP flow.
 
 ## P0 — tool boundary
 
@@ -54,6 +54,7 @@
 - [x] `device.health`.
 - [x] `apps.list` with launcher-only package visibility; no `QUERY_ALL_PACKAGES`.
 - [x] `files.list` limited to a user-selected SAF directory tree.
+- [x] `apps.install` with staged artifact validation, size/SHA-256 verification, Android package/signing inspection, self-protection and approval.
 - [x] `apps.uninstall` with strict package validation, self-protection and approval.
 - [x] `apps.forceStop` with strict package validation, self-protection and approval.
 - [x] Structured result/error envelopes.
@@ -78,7 +79,7 @@
 ## P1 — privileged actions
 
 - [x] Shizuku API/provider dependency and typed privileged backend.
-- [ ] Install APK.
+- [x] Install APK through verified staged bytes streamed to `pm install` stdin.
 - [x] Uninstall app.
 - [x] Force-stop app.
 - [ ] Selected permission operations.
@@ -92,6 +93,7 @@
 - [x] Local Android approval UI.
 - [x] Approval expiry.
 - [x] Approval binds to exact canonical normalized arguments.
+- [x] Install approval binds to verified APK content/package/signing metadata rather than ephemeral transfer tokens.
 - [x] Approved tickets are one-use only.
 - [ ] Hermes/Telegram approval routing.
 - [ ] Per-tool "always allow" only where explicitly safe.
@@ -113,6 +115,7 @@
 - [ ] Process-death/reboot/network-handover tests on device.
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Shizuku reboot/reactivation tests on device.
+- [ ] Physical-device install/uninstall/force-stop E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
 - [ ] Signed reproducible release process.
