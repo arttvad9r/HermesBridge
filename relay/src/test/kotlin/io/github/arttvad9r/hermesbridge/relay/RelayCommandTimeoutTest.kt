@@ -10,10 +10,9 @@ class RelayCommandTimeoutTest {
     }
 
     @Test
-    fun boundedReadAndPermissionToolsGetExtendedTimeout() {
+    fun boundedReadAnalysisToolsGetExtendedTimeout() {
         assertEquals(60_000L, commandTimeoutMillis("files.analyze"))
         assertEquals(60_000L, commandTimeoutMillis("battery.usage"))
-        assertEquals(60_000L, commandTimeoutMillis("apps.revokePermission"))
     }
 
     @Test
@@ -22,5 +21,6 @@ class RelayCommandTimeoutTest {
         assertEquals(20_000L, commandTimeoutMillis("files.delete"))
         assertEquals(20_000L, commandTimeoutMillis("apps.uninstall"))
         assertEquals(20_000L, commandTimeoutMillis("apps.forceStop"))
+        assertEquals(20_000L, commandTimeoutMillis("apps.revokePermission"))
     }
 }
