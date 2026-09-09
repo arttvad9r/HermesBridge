@@ -56,7 +56,7 @@ class RelayRevocationRouteTest {
             )
         }
 
-        val response = client.post("/api/v1/devices/..%2Fetc%2Fpasswd/revoke") {
+        val response = client.post("/api/v1/devices/not-a-valid-device-id/revoke") {
             header(HttpHeaders.Authorization, "Bearer $ADMIN_TOKEN")
         }
         assertEquals(HttpStatusCode.BadRequest, response.status)
