@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class BridgeForegroundService : Service() {
@@ -34,13 +35,21 @@ class BridgeForegroundService : Service() {
             context = applicationContext,
             relayWsUrl = BuildConfig.RELAY_WS_URL,
             healthRepository = healthRepository,
-            onConnectionState = ::onTransportState,
         )
 
         startAsForeground(
             title = "Hermes Bridge",
             text = "Подготовка защищённого соединения…",
         )
+
+        serviceScope.launch {
+            transport.connectionState.collectLatest { state ->
+                if (state == ConnectionState.ERROR && BridgeRuntime.state.value.message != null) {
+                    return@collectLatest
+                }
+                onTransportState(state, null)
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -54,7 +63,7 @@ class BridgeForegroundService : Service() {
                 }
             }
 
-            ACTION_CONNECT -> launchCommand { transport.connect() }
+            ACTION_CONNECT -> launchCommand { transport.resume() }
             ACTION_STOP -> stopBridge()
         }
         return START_STICKY
@@ -72,6 +81,7 @@ class BridgeForegroundService : Service() {
 
     private fun launchCommand(block: suspend () -> Result<Unit>) {
         commandJob?.cancel()
+        BridgeRuntime.update(ConnectionState.PAIRING)
         commandJob = serviceScope.launch {
             val result = block()
             result.onFailure { error ->
@@ -84,6 +94,7 @@ class BridgeForegroundService : Service() {
     }
 
     private fun stopBridge() {
+        commandJob?.cancel()
         BridgeRuntime.update(ConnectionState.DISCONNECTED)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
