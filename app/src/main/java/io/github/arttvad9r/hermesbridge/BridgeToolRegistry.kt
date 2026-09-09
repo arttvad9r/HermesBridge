@@ -162,6 +162,37 @@ class BridgeToolRegistry(
                         }
                     },
                 )
+                put(
+                    "topPartialWakeLocks",
+                    buildJsonArray {
+                        snapshot.topPartialWakeLocks.forEach { item ->
+                            add(
+                                buildJsonObject {
+                                    put("uid", item.uid)
+                                    put(
+                                        "packageNames",
+                                        buildJsonArray {
+                                            item.packageNames.forEach { add(JsonPrimitive(it)) }
+                                        },
+                                    )
+                                    put("name", item.name)
+                                    put("partialTimeMillis", item.partialTimeMillis)
+                                    put("partialCount", item.partialCount)
+                                    if (item.backgroundPartialTimeMillis == null) {
+                                        put("backgroundPartialTimeMillis", JsonNull)
+                                    } else {
+                                        put("backgroundPartialTimeMillis", item.backgroundPartialTimeMillis)
+                                    }
+                                    if (item.backgroundPartialCount == null) {
+                                        put("backgroundPartialCount", JsonNull)
+                                    } else {
+                                        put("backgroundPartialCount", item.backgroundPartialCount)
+                                    }
+                                }
+                            )
+                        }
+                    },
+                )
             },
         )
     }
