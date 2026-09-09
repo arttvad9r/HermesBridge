@@ -5,6 +5,9 @@ from unittest.mock import patch
 from hermes_bridge_mcp import server
 
 
+DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
+
+
 class HermesBridgeMcpTest(unittest.TestCase):
     def test_relay_defaults_to_loopback(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -40,17 +43,28 @@ class HermesBridgeMcpTest(unittest.TestCase):
             return {"ok": True, "result": {"batteryPercent": 80}}
 
         with patch.object(server, "_request_json", side_effect=fake_request):
-            result = server.device_health("device_123e4567-e89b-12d3-a456-426614174000")
+            result = server.device_health(DEVICE_ID)
 
         self.assertTrue(result["ok"])
         self.assertEqual(len(calls), 1)
         method, path, payload = calls[0]
         self.assertEqual(method, "POST")
-        self.assertEqual(
-            path,
-            "/api/v1/devices/device_123e4567-e89b-12d3-a456-426614174000/commands",
-        )
+        self.assertEqual(path, f"/api/v1/devices/{DEVICE_ID}/commands")
         self.assertEqual(payload, {"tool": "device.health", "arguments": {}})
+
+    def test_list_apps_maps_only_to_apps_list(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None):
+            calls.append((method, path, payload))
+            return {"ok": True, "result": {"count": 1, "apps": []}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.list_apps(DEVICE_ID)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][2], {"tool": "apps.list", "arguments": {}})
 
     def test_invalid_device_id_is_rejected_before_request(self) -> None:
         with patch.object(server, "_request_json") as request:
