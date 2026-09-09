@@ -11,7 +11,7 @@ The intended UX is deliberately simple:
 
 Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with exact-argument approvals for mutating/privileged actions.
 
-> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, foreground service, Hermes MCP adapter, read-only diagnostics/files, local approvals and the first Shizuku-backed privileged app operations are implemented. A physical phone/VPS end-to-end privileged-action test is still required.
+> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, foreground service, Hermes MCP adapter, read-only diagnostics/files, local approvals and Shizuku-backed install/uninstall/force-stop operations are implemented. A physical phone/VPS end-to-end privileged-action test is still required.
 
 ## Current capabilities
 
@@ -27,9 +27,10 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - Explicit local revoke/change control for the SAF folder grant.
 - Shizuku detection/authorization status in the Android app.
 - One-use, expiring approvals bound to canonical tool arguments.
+- `install_apk` — APK from a dedicated VPS staging directory, streamed through a short-lived relay artifact, then verified on Android by size/SHA-256/package/version/signing certificates before approval and Shizuku installation.
 - `uninstall_app` — Shizuku-backed package uninstall after local approval.
 - `force_stop_app` — Shizuku-backed force-stop after local approval.
-- Hermes Bridge protects its own package from uninstall/force-stop.
+- Hermes Bridge protects its own package from install replacement, uninstall and force-stop through agent tools.
 
 ## Goals
 
@@ -55,7 +56,7 @@ Hermes on VPS
       |          v
       +----> Hermes Bridge relay
                    ^
-                   | outbound WSS
+                   | outbound WSS + tokenized artifact HTTPS
                    |
              Android app
                    |
@@ -67,7 +68,7 @@ Hermes on VPS
                    +-- Accessibility (planned, optional)
 ```
 
-The relay admin API is intended to remain on localhost beside Hermes. Only the device WebSocket and health endpoint need to be exposed through the TLS reverse proxy.
+The relay admin API is intended to remain on localhost beside Hermes. The public TLS surface is limited to health, the device WebSocket, and short-lived token-authenticated artifact downloads used for APK installation.
 
 See:
 
@@ -88,11 +89,13 @@ The project keeps these non-negotiable rules:
 - no raw `run_shell` exposed to the agent;
 - no generic command passthrough in the Hermes MCP surface;
 - no arbitrary Android intents or arbitrary content URIs;
+- no arbitrary APK URL or arbitrary VPS/device filesystem path for installation;
 - no PIN/password capture or unlock automation;
 - no root requirement;
 - default-deny tool registration;
 - read-only tools are narrowly typed and argument-validated;
 - privileged/mutating commands require one-use exact-argument approval;
+- APK install approval is bound to verified content/package/signing metadata rather than transport tokens;
 - long-term device credentials are stored in Android Keystore;
 - production device transport requires WSS;
 - the Hermes-side admin token stays local to the VPS process boundary where possible;
