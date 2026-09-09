@@ -1,6 +1,6 @@
 package io.github.arttvad9r.hermesbridge
 
-import android.os.UserHandle
+import android.os.Process
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
 import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
@@ -17,7 +17,7 @@ class AppPermissionRevokeToolHandler(
     private val appsRepository: InstalledAppsRepository,
     private val permissionsRepository: AppPermissionsRepository?,
     private val privilegedBackend: PrivilegedAppsBackend,
-    private val userIdProvider: () -> Int = { UserHandle.myUserId() },
+    private val userIdProvider: () -> Int = { androidUserIdFromUid(Process.myUid()) },
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys.any { it != PACKAGE_NAME && it != PERMISSION_NAME }) {
@@ -219,3 +219,14 @@ class AppPermissionRevokeToolHandler(
         )
     }
 }
+
+/**
+ * Android encodes the user ID in the high range of every application UID.
+ * Keep this constant aligned with AOSP UserHandle.PER_USER_RANGE.
+ */
+internal fun androidUserIdFromUid(uid: Int): Int {
+    require(uid >= 0) { "UID must be non-negative." }
+    return uid / ANDROID_PER_USER_RANGE
+}
+
+private const val ANDROID_PER_USER_RANGE = 100_000
