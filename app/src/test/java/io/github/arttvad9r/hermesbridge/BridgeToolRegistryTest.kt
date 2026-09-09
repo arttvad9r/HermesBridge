@@ -69,7 +69,6 @@ class BridgeToolRegistryTest {
                 requestId = "request-1",
             )
         )
-
         assertTrue(result.ok)
         assertEquals("73", result.result?.get("batteryPercent")?.toString())
     }
@@ -82,7 +81,6 @@ class BridgeToolRegistryTest {
                 requestId = "request-apps",
             )
         )
-
         assertTrue(result.ok)
         assertEquals("1", result.result?.get("count")?.toString())
         assertTrue(result.result?.get("apps")?.toString()?.contains("com.example.app") == true)
@@ -97,7 +95,6 @@ class BridgeToolRegistryTest {
                 arguments = buildJsonObject { put("unexpected", true) },
             )
         )
-
         assertFalse(result.ok)
         assertEquals("invalid_arguments", result.error?.code)
     }
@@ -119,7 +116,6 @@ class BridgeToolRegistryTest {
                 },
             )
         )
-
         assertTrue(result.ok)
         assertEquals("1", result.result?.get("count")?.toString())
         assertTrue(result.result?.toString()?.contains("notes.txt") == true)
@@ -132,16 +128,10 @@ class BridgeToolRegistryTest {
                 tool = BridgeToolRegistry.FILES_LIST,
                 requestId = "request-files-traversal",
                 arguments = buildJsonObject {
-                    put(
-                        "pathSegments",
-                        buildJsonArray {
-                            add(JsonPrimitive(".."))
-                        },
-                    )
+                    put("pathSegments", buildJsonArray { add(JsonPrimitive("..")) })
                 },
             )
         )
-
         assertFalse(result.ok)
         assertEquals("invalid_arguments", result.error?.code)
     }
@@ -155,7 +145,6 @@ class BridgeToolRegistryTest {
                 arguments = buildJsonObject { put("path", "../") },
             )
         )
-
         assertFalse(result.ok)
         assertEquals("invalid_arguments", result.error?.code)
     }
@@ -168,7 +157,6 @@ class BridgeToolRegistryTest {
         val request = uninstallRequest("request-uninstall", keepData = false)
 
         val first = registry.execute(request)
-
         assertFalse(first.ok)
         assertEquals("approval_required", first.error?.code)
         assertEquals(0, backend.uninstallCalls)
@@ -176,7 +164,6 @@ class BridgeToolRegistryTest {
         BridgeApprovalRuntime.approve(ticket.id)
 
         val second = registry.execute(request.copy(requestId = "request-uninstall-retry"))
-
         assertTrue(second.ok)
         assertEquals(1, backend.uninstallCalls)
         assertEquals("com.example.app", backend.lastPackageName)
@@ -195,22 +182,16 @@ class BridgeToolRegistryTest {
         val ticket = BridgeApprovalRuntime.pendingTickets.value.single()
         BridgeApprovalRuntime.approve(ticket.id)
 
-        val changedArguments = registry.execute(
-            uninstallRequest("request-changed", keepData = true)
-        )
+        val changedArguments = registry.execute(uninstallRequest("request-changed", keepData = true))
         assertFalse(changedArguments.ok)
         assertEquals("approval_required", changedArguments.error?.code)
         assertEquals(0, backend.uninstallCalls)
 
-        val approvedOriginal = registry.execute(
-            initial.copy(requestId = "request-approved-original")
-        )
+        val approvedOriginal = registry.execute(initial.copy(requestId = "request-approved-original"))
         assertTrue(approvedOriginal.ok)
         assertEquals(1, backend.uninstallCalls)
 
-        val replay = registry.execute(
-            initial.copy(requestId = "request-replay")
-        )
+        val replay = registry.execute(initial.copy(requestId = "request-replay"))
         assertFalse(replay.ok)
         assertEquals("approval_required", replay.error?.code)
         assertEquals(1, backend.uninstallCalls)
@@ -219,10 +200,7 @@ class BridgeToolRegistryTest {
     @Test
     fun uninstallDoesNotCreateApprovalWhenShizukuIsUnavailable() = runBlocking {
         BridgeApprovalRuntime.clear()
-        val result = registry().execute(
-            uninstallRequest("request-no-shizuku", keepData = false)
-        )
-
+        val result = registry().execute(uninstallRequest("request-no-shizuku", keepData = false))
         assertFalse(result.ok)
         assertEquals("shizuku_unavailable", result.error?.code)
         assertTrue(BridgeApprovalRuntime.pendingTickets.value.isEmpty())
@@ -242,7 +220,6 @@ class BridgeToolRegistryTest {
                 },
             )
         )
-
         assertFalse(result.ok)
         assertEquals("protected_package", result.error?.code)
         assertEquals(0, backend.uninstallCalls)
@@ -257,26 +234,75 @@ class BridgeToolRegistryTest {
             CommandRequestPayload(
                 tool = BridgeToolRegistry.APPS_UNINSTALL,
                 requestId = "request-invalid-package",
-                arguments = buildJsonObject {
-                    put("packageName", "../other")
-                },
+                arguments = buildJsonObject { put("packageName", "../other") },
             )
         )
-
         assertFalse(result.ok)
         assertEquals("invalid_arguments", result.error?.code)
         assertEquals(0, backend.uninstallCalls)
     }
 
     @Test
-    fun unknownToolFailsClosed() = runBlocking {
-        val result = registry().execute(
+    fun forceStopRequiresApprovalBeforeBackendExecution() = runBlocking {
+        BridgeApprovalRuntime.clear()
+        val backend = RecordingPrivilegedAppsBackend()
+        val registry = registry(backend)
+        val request = forceStopRequest("request-force-stop")
+
+        val first = registry.execute(request)
+        assertFalse(first.ok)
+        assertEquals("approval_required", first.error?.code)
+        assertEquals(0, backend.forceStopCalls)
+
+        val ticket = BridgeApprovalRuntime.pendingTickets.value.single()
+        BridgeApprovalRuntime.approve(ticket.id)
+        val second = registry.execute(request.copy(requestId = "request-force-stop-retry"))
+
+        assertTrue(second.ok)
+        assertEquals(1, backend.forceStopCalls)
+        assertEquals("com.example.app", backend.lastForceStoppedPackage)
+    }
+
+    @Test
+    fun forceStopApprovalIsSingleUse() = runBlocking {
+        BridgeApprovalRuntime.clear()
+        val backend = RecordingPrivilegedAppsBackend()
+        val registry = registry(backend)
+        val request = forceStopRequest("request-force-stop")
+
+        registry.execute(request)
+        BridgeApprovalRuntime.approve(BridgeApprovalRuntime.pendingTickets.value.single().id)
+        assertTrue(registry.execute(request.copy(requestId = "request-approved")).ok)
+
+        val replay = registry.execute(request.copy(requestId = "request-replay"))
+        assertFalse(replay.ok)
+        assertEquals("approval_required", replay.error?.code)
+        assertEquals(1, backend.forceStopCalls)
+    }
+
+    @Test
+    fun forceStopRejectsBridgeSelfStop() = runBlocking {
+        BridgeApprovalRuntime.clear()
+        val backend = RecordingPrivilegedAppsBackend()
+        val result = registry(backend).execute(
             CommandRequestPayload(
-                tool = "run_shell",
-                requestId = "request-2",
+                tool = BridgeToolRegistry.APPS_FORCE_STOP,
+                requestId = "request-self-stop",
+                arguments = buildJsonObject {
+                    put("packageName", "io.github.arttvad9r.hermesbridge")
+                },
             )
         )
+        assertFalse(result.ok)
+        assertEquals("protected_package", result.error?.code)
+        assertEquals(0, backend.forceStopCalls)
+    }
 
+    @Test
+    fun unknownToolFailsClosed() = runBlocking {
+        val result = registry().execute(
+            CommandRequestPayload(tool = "run_shell", requestId = "request-2")
+        )
         assertFalse(result.ok)
         assertEquals("unknown_tool", result.error?.code)
     }
@@ -290,7 +316,6 @@ class BridgeToolRegistryTest {
                 arguments = buildJsonObject { put("unexpected", true) },
             )
         )
-
         assertFalse(result.ok)
         assertEquals("invalid_arguments", result.error?.code)
     }
@@ -305,10 +330,19 @@ class BridgeToolRegistryTest {
             },
         )
 
+    private fun forceStopRequest(requestId: String) =
+        CommandRequestPayload(
+            tool = BridgeToolRegistry.APPS_FORCE_STOP,
+            requestId = requestId,
+            arguments = buildJsonObject { put("packageName", "com.example.app") },
+        )
+
     private class RecordingPrivilegedAppsBackend : PrivilegedAppsBackend {
         var uninstallCalls = 0
+        var forceStopCalls = 0
         var lastPackageName = ""
         var lastKeepData = false
+        var lastForceStoppedPackage = ""
 
         override fun readiness() = PrivilegedBackendReadiness(ready = true)
 
@@ -319,6 +353,12 @@ class BridgeToolRegistryTest {
             uninstallCalls += 1
             lastPackageName = packageName
             lastKeepData = keepData
+            return PrivilegedOperationResult(ok = true)
+        }
+
+        override suspend fun forceStop(packageName: String): PrivilegedOperationResult {
+            forceStopCalls += 1
+            lastForceStoppedPackage = packageName
             return PrivilegedOperationResult(ok = true)
         }
     }
