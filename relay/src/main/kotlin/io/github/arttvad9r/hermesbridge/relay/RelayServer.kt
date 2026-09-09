@@ -279,10 +279,7 @@ fun Application.relayModule(
 
             call.response.header(HttpHeaders.CacheControl, "no-store")
             call.response.header("X-Content-Type-Options", "nosniff")
-            call.respondFile(
-                file = artifact.path.toFile(),
-                contentType = APK_CONTENT_TYPE,
-            )
+            call.respondFile(file = artifact.path.toFile())
         }
 
         post("/api/v1/devices/{deviceId}/commands") {
@@ -520,4 +517,3 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
 }
 
 private const val APK_NAME_HEADER = "X-Hermes-Apk-Name"
-private val APK_CONTENT_TYPE = ContentType("application", "vnd.android.package-archive")
