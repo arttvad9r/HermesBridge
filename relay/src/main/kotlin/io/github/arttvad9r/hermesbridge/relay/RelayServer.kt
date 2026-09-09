@@ -6,6 +6,7 @@ import io.github.arttvad9r.hermesbridge.protocol.AuthResponsePayload
 import io.github.arttvad9r.hermesbridge.protocol.BridgeProtocol
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
+import io.github.arttvad9r.hermesbridge.protocol.DeviceRevokeOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.ErrorPayload
 import io.github.arttvad9r.hermesbridge.protocol.MessageType
 import io.github.arttvad9r.hermesbridge.protocol.PROTOCOL_VERSION
@@ -525,6 +526,36 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                             payload = BridgeProtocol.payload(AuthOkPayload(UUID.randomUUID().toString())),
                         )
                     )
+                }
+
+                MessageType.DEVICE_REVOKE_REQUEST -> {
+                    val deviceId = authenticatedDeviceId
+                    if (
+                        deviceId == null ||
+                        envelope.deviceId != deviceId ||
+                        envelope.payload.isNotEmpty()
+                    ) {
+                        sendError("not_authenticated", "Only the authenticated device may revoke its own pairing.")
+                        continue
+                    }
+
+                    if (!runtime.devices.revoke(deviceId)) {
+                        sendError("unknown_device", "Device is no longer registered.")
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Unknown device"))
+                        return
+                    }
+
+                    runtime.sessions.unregister(deviceId, this)
+                    authenticatedDeviceId = null
+                    sendEnvelope(
+                        BridgeProtocol.envelope(
+                            type = MessageType.DEVICE_REVOKE_OK,
+                            deviceId = deviceId,
+                            payload = BridgeProtocol.payload(DeviceRevokeOkPayload(deviceId)),
+                        )
+                    )
+                    close(CloseReason(CloseReason.Codes.NORMAL, "Device pairing revoked by device"))
+                    return
                 }
 
                 MessageType.COMMAND_RESULT -> {
