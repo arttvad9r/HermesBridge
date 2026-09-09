@@ -109,7 +109,7 @@ class BridgeForegroundService : Service() {
             ConnectionState.CONNECTED -> "Hermes подключён к телефону"
             ConnectionState.ERROR -> message ?: "Ошибка соединения"
         }
-        updateNotification(text)
+        startAsForeground("Hermes Bridge", text)
     }
 
     private fun startAsForeground(title: String, text: String) {
@@ -124,11 +124,6 @@ class BridgeForegroundService : Service() {
             buildNotification(title, text),
             type,
         )
-    }
-
-    private fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification("Hermes Bridge", text))
     }
 
     private fun buildNotification(title: String, text: String): Notification {
