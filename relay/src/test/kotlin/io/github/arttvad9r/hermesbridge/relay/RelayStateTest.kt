@@ -1,10 +1,13 @@
 package io.github.arttvad9r.hermesbridge.relay
 
 import io.github.arttvad9r.hermesbridge.protocol.BridgeProtocol
+import java.nio.file.Files
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.util.Base64
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -36,5 +39,22 @@ class RelayStateTest {
 
         assertTrue(AuthCrypto.verify(device, challenge, signature))
         assertFalse(AuthCrypto.verify(device, "other-challenge", signature))
+    }
+
+    @Test
+    fun registeredDeviceSurvivesRegistryRestart() {
+        val directory = Files.createTempDirectory("hermes-bridge-relay-test")
+        val store = directory.resolve("devices.json")
+        val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+
+        val firstRegistry = DeviceRegistry(store)
+        val registered = firstRegistry.register(keyPair.public, "My phone")
+
+        val restoredRegistry = DeviceRegistry(store)
+        val restored = restoredRegistry.find(registered.deviceId)
+
+        assertNotNull(restored)
+        assertEquals("My phone", restored?.label)
+        assertTrue(keyPair.public.encoded.contentEquals(restored?.publicKey?.encoded))
     }
 }
