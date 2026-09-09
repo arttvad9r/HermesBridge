@@ -11,43 +11,90 @@ import java.security.spec.ECGenParameterSpec
 private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
 private const val DEVICE_KEY_ALIAS = "hermes_bridge_device_identity_v1"
 
-class AndroidKeystoreDeviceIdentity {
+interface DeviceIdentity {
+    fun hasStoredKey(): Boolean
+    fun publicKeyBase64(): String
+    fun sign(payload: ByteArray): String
+    fun reset()
+}
+
+class DeviceIdentityUnavailableException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
+class AndroidKeystoreDeviceIdentity : DeviceIdentity {
     private val keyStore: KeyStore
         get() = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
 
-    fun publicKeyBase64(): String {
+    override fun hasStoredKey(): Boolean = keyStore.containsAlias(DEVICE_KEY_ALIAS)
+
+    override fun publicKeyBase64(): String {
         ensureKeyExists()
-        val certificate = requireNotNull(keyStore.getCertificate(DEVICE_KEY_ALIAS))
+        val certificate = requireNotNull(keyStore.getCertificate(DEVICE_KEY_ALIAS)) {
+            "Hermes Bridge device certificate is unavailable."
+        }
         return Base64.encodeToString(certificate.publicKey.encoded, Base64.NO_WRAP)
     }
 
-    fun sign(payload: ByteArray): String {
-        ensureKeyExists()
-        val entry = keyStore.getEntry(DEVICE_KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
-            ?: error("Hermes Bridge device key is unavailable.")
-        val signature = Signature.getInstance("SHA256withECDSA").run {
-            initSign(entry.privateKey)
-            update(payload)
-            sign()
+    override fun sign(payload: ByteArray): String {
+        val store = keyStore
+        if (!store.containsAlias(DEVICE_KEY_ALIAS)) {
+            throw DeviceIdentityUnavailableException(
+                "Hermes Bridge device identity is missing. Pair the phone again."
+            )
         }
-        return Base64.encodeToString(signature, Base64.NO_WRAP)
+
+        return try {
+            val entry = store.getEntry(DEVICE_KEY_ALIAS, null) as? KeyStore.PrivateKeyEntry
+                ?: throw DeviceIdentityUnavailableException(
+                    "Hermes Bridge device key is unavailable. Pair the phone again."
+                )
+            val signature = Signature.getInstance("SHA256withECDSA").run {
+                initSign(entry.privateKey)
+                update(payload)
+                sign()
+            }
+            Base64.encodeToString(signature, Base64.NO_WRAP)
+        } catch (error: DeviceIdentityUnavailableException) {
+            throw error
+        } catch (error: Throwable) {
+            throw DeviceIdentityUnavailableException(
+                "Hermes Bridge device key cannot sign. Pair the phone again.",
+                error,
+            )
+        }
+    }
+
+    override fun reset() {
+        val store = keyStore
+        if (store.containsAlias(DEVICE_KEY_ALIAS)) {
+            store.deleteEntry(DEVICE_KEY_ALIAS)
+        }
     }
 
     private fun ensureKeyExists() {
-        if (keyStore.containsAlias(DEVICE_KEY_ALIAS)) return
+        if (hasStoredKey()) return
 
-        val generator = KeyPairGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_EC,
-            KEYSTORE_PROVIDER,
-        )
-        val spec = KeyGenParameterSpec.Builder(
-            DEVICE_KEY_ALIAS,
-            KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
-        )
-            .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
-            .setDigests(KeyProperties.DIGEST_SHA256)
-            .build()
-        generator.initialize(spec)
-        generator.generateKeyPair()
+        try {
+            val generator = KeyPairGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_EC,
+                KEYSTORE_PROVIDER,
+            )
+            val spec = KeyGenParameterSpec.Builder(
+                DEVICE_KEY_ALIAS,
+                KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY,
+            )
+                .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                .setDigests(KeyProperties.DIGEST_SHA256)
+                .build()
+            generator.initialize(spec)
+            generator.generateKeyPair()
+        } catch (error: Throwable) {
+            throw DeviceIdentityUnavailableException(
+                "Hermes Bridge could not create its Android Keystore identity.",
+                error,
+            )
+        }
     }
 }
