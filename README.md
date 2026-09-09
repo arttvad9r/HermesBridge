@@ -11,7 +11,7 @@ The intended UX is deliberately simple:
 
 Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with exact-argument approvals for mutating/privileged actions.
 
-> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, guided setup, safe re-pair/revocation, Hermes MCP integration, read-only diagnostics/app metadata/files, bounded permission and storage audits, approved SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end validation is still required before treating privileged operations as production-ready.
+> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, guided setup, safe re-pair/revocation, Hermes MCP integration, read-only diagnostics/app metadata/files, bounded permission and storage audits, approved dangerous-permission revocation, SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end validation is still required before treating privileged operations as production-ready.
 
 ## Current capabilities
 
@@ -29,6 +29,7 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - `app_usage` — bounded UsageStats for launcher-visible apps after the user enables Android Usage Access.
 - `app_permissions` — requested/granted permission metadata for one launcher-visible app.
 - `permissions_audit` — bounded launcher-only scan returning permissions that are both granted and classified by Android as `dangerous`, with explicit truncation state.
+- `revoke_app_permission` — revoke one currently granted Android-`dangerous` runtime permission from one launcher-visible app after exact one-use local approval; Android user ID is derived on-device and Hermes cannot provide `pm` flags.
 - `list_files` — directory browsing only inside a folder explicitly selected through Android Storage Access Framework.
 - `analyze_files` — bounded recursive SAF analysis with total size, counts, truncation status and largest-file summaries.
 - `delete_path` — deletion of one validated SAF file/directory after local approval bound to the target's current metadata; the granted root itself is protected.
@@ -38,7 +39,7 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - `install_apk` — APK from a dedicated VPS staging directory, streamed through a short-lived relay artifact, then verified on Android by size/SHA-256/package/version/signing certificates before approval and Shizuku installation.
 - `uninstall_app` — Shizuku-backed package uninstall after local approval.
 - `force_stop_app` — Shizuku-backed force-stop after local approval.
-- Hermes Bridge protects its own package from install replacement, uninstall and force-stop through agent tools.
+- Hermes Bridge protects its own package from install replacement, uninstall, force-stop and agent-driven permission changes.
 
 ## Goals
 
@@ -106,6 +107,7 @@ The project keeps these non-negotiable rules:
 - read-only tools are narrowly typed, argument-validated and output-bounded;
 - app metadata/audits stay launcher-scoped and do not request `QUERY_ALL_PACKAGES`;
 - permission audit uses Android's own `dangerous` protection classification rather than an invented risk score;
+- agent-driven permission changes are revoke-only, launcher-scoped, limited to currently granted Android-`dangerous` permissions and exact locally approved targets;
 - privileged/mutating commands require one-use exact-argument approval;
 - APK install approval is bound to verified content/package/signing metadata rather than transport tokens;
 - SAF deletion approval is bound to the validated target path and current metadata;
