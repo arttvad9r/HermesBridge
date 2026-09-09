@@ -12,10 +12,13 @@ from mcp.server import MCPServer
 
 
 DEVICE_ID_RE = re.compile(r"^device_[A-Za-z0-9-]+$")
+PACKAGE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$")
 DEFAULT_RELAY_URL = "http://127.0.0.1:8080"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 MAX_PATH_DEPTH = 32
 MAX_PATH_SEGMENT_LENGTH = 255
+MAX_PACKAGE_NAME_LENGTH = 255
+HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
 
 mcp = MCPServer("Hermes Bridge")
 
@@ -121,6 +124,15 @@ def _validate_path_segments(path_segments: list[str]) -> None:
             raise ValueError("path_segments contains a forbidden segment.")
 
 
+def _validate_package_name(package_name: str) -> str:
+    value = package_name.strip()
+    if not (3 <= len(value) <= MAX_PACKAGE_NAME_LENGTH) or not PACKAGE_NAME_RE.fullmatch(value):
+        raise ValueError("package_name is not a valid Android package name.")
+    if value == HERMES_BRIDGE_PACKAGE:
+        raise ValueError("Hermes Bridge cannot uninstall itself.")
+    return value
+
+
 @mcp.tool()
 def list_devices() -> list[dict[str, Any]]:
     """List phones paired with Hermes Bridge and whether each is currently connected."""
@@ -163,6 +175,26 @@ def list_files(
         device_id,
         "files.list",
         {"pathSegments": segments},
+    )
+
+
+@mcp.tool()
+def uninstall_app(
+    device_id: str,
+    package_name: str,
+    keep_data: bool = False,
+) -> dict[str, Any]:
+    """Request uninstall of one Android package. The phone requires explicit local approval before execution."""
+    package = _validate_package_name(package_name)
+    if not isinstance(keep_data, bool):
+        raise ValueError("keep_data must be a boolean.")
+    return _device_command(
+        device_id,
+        "apps.uninstall",
+        {
+            "packageName": package,
+            "keepData": keep_data,
+        },
     )
 
 
