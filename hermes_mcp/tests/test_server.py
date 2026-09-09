@@ -66,6 +66,32 @@ class HermesBridgeMcpTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][2], {"tool": "apps.list", "arguments": {}})
 
+    def test_list_files_maps_only_to_scoped_files_list(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None):
+            calls.append((method, path, payload))
+            return {"ok": True, "result": {"count": 1, "entries": []}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.list_files(DEVICE_ID, ["Documents", "Notes"])
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "tool": "files.list",
+                "arguments": {"pathSegments": ["Documents", "Notes"]},
+            },
+        )
+
+    def test_list_files_rejects_traversal_before_request(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            with self.assertRaises(ValueError):
+                server.list_files(DEVICE_ID, [".."])
+            request.assert_not_called()
+
     def test_invalid_device_id_is_rejected_before_request(self) -> None:
         with patch.object(server, "_request_json") as request:
             with self.assertRaises(ValueError):
