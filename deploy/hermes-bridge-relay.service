@@ -1,0 +1,37 @@
+[Unit]
+Description=Hermes Bridge Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes-bridge
+Group=hermes-bridge
+EnvironmentFile=/etc/hermes-bridge/relay.env
+WorkingDirectory=/var/lib/hermes-bridge
+ExecStart=/opt/hermes-bridge/relay/bin/relay
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+
+# The relay persists trusted device public keys here.
+StateDirectory=hermes-bridge
+StateDirectoryMode=0700
+
+# Basic service hardening. Network access is required for HTTPS/WSS proxying.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/hermes-bridge
+
+[Install]
+WantedBy=multi-user.target
