@@ -19,6 +19,19 @@ class HermesBridgeMcpTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 server._relay_url()
 
+    def test_loopback_prefix_spoof_is_rejected(self) -> None:
+        for url in (
+            "http://localhost.evil.example:8080",
+            "http://127.0.0.1.evil.example:8080",
+        ):
+            with self.subTest(url=url), patch.dict(
+                os.environ,
+                {"HERMES_BRIDGE_RELAY_URL": url},
+                clear=True,
+            ):
+                with self.assertRaises(RuntimeError):
+                    server._relay_url()
+
     def test_device_health_cannot_select_arbitrary_tool(self) -> None:
         calls = []
 
