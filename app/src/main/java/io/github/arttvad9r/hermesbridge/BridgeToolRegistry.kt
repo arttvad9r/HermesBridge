@@ -27,6 +27,7 @@ class BridgeToolRegistry(
             APPS_LIST -> executeAppsList(request)
             FILES_LIST -> executeFilesList(request)
             APPS_UNINSTALL -> executeAppsUninstall(request)
+            APPS_FORCE_STOP -> executeAppsForceStop(request)
             else -> failure(
                 request.requestId,
                 "unknown_tool",
@@ -43,31 +44,22 @@ class BridgeToolRegistry(
                 "device.health does not accept arguments.",
             )
         }
-
         if (!isReadOnlyAllowed(DEVICE_HEALTH)) {
-            return failure(
-                request.requestId,
-                "policy_denied",
-                "Local policy did not allow the tool.",
-            )
+            return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
         }
 
         val health = healthRepository.snapshot()
-        val result = buildJsonObject {
-            if (health.batteryPercent == null) {
-                put("batteryPercent", JsonNull)
-            } else {
-                put("batteryPercent", health.batteryPercent)
-            }
-            put("availableMemoryBytes", health.availableMemoryBytes)
-            put("totalMemoryBytes", health.totalMemoryBytes)
-            put("availableStorageBytes", health.availableStorageBytes)
-            put("totalStorageBytes", health.totalStorageBytes)
-        }
         return CommandResultPayload(
             requestId = request.requestId,
             ok = true,
-            result = result,
+            result = buildJsonObject {
+                if (health.batteryPercent == null) put("batteryPercent", JsonNull)
+                else put("batteryPercent", health.batteryPercent)
+                put("availableMemoryBytes", health.availableMemoryBytes)
+                put("totalMemoryBytes", health.totalMemoryBytes)
+                put("availableStorageBytes", health.availableStorageBytes)
+                put("totalStorageBytes", health.totalStorageBytes)
+            },
         )
     }
 
@@ -79,56 +71,42 @@ class BridgeToolRegistry(
                 "apps.list does not accept arguments.",
             )
         }
-
         if (!isReadOnlyAllowed(APPS_LIST)) {
-            return failure(
-                request.requestId,
-                "policy_denied",
-                "Local policy did not allow the tool.",
-            )
+            return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
         }
 
         val apps = appsRepository.listLaunchableApps()
-        val result = buildJsonObject {
-            put("count", apps.size)
-            put(
-                "apps",
-                buildJsonArray {
-                    apps.forEach { app ->
-                        add(
-                            buildJsonObject {
-                                put("packageName", app.packageName)
-                                put("label", app.label)
-                                if (app.versionName == null) {
-                                    put("versionName", JsonNull)
-                                } else {
-                                    put("versionName", app.versionName)
-                                }
-                                put("versionCode", app.versionCode)
-                                put("systemApp", app.systemApp)
-                                put("enabled", app.enabled)
-                            }
-                        )
-                    }
-                },
-            )
-        }
         return CommandResultPayload(
             requestId = request.requestId,
             ok = true,
-            result = result,
+            result = buildJsonObject {
+                put("count", apps.size)
+                put(
+                    "apps",
+                    buildJsonArray {
+                        apps.forEach { app ->
+                            add(
+                                buildJsonObject {
+                                    put("packageName", app.packageName)
+                                    put("label", app.label)
+                                    if (app.versionName == null) put("versionName", JsonNull)
+                                    else put("versionName", app.versionName)
+                                    put("versionCode", app.versionCode)
+                                    put("systemApp", app.systemApp)
+                                    put("enabled", app.enabled)
+                                }
+                            )
+                        }
+                    },
+                )
+            },
         )
     }
 
     private fun executeFilesList(request: CommandRequestPayload): CommandResultPayload {
         if (!isReadOnlyAllowed(FILES_LIST)) {
-            return failure(
-                request.requestId,
-                "policy_denied",
-                "Local policy did not allow the tool.",
-            )
+            return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
         }
-
         if (request.arguments.keys.any { it != PATH_SEGMENTS }) {
             return failure(
                 request.requestId,
@@ -188,11 +166,7 @@ class BridgeToolRegistry(
                 "The requested path does not exist inside the granted folder.",
             )
         } catch (_: FilePathNotDirectoryException) {
-            return failure(
-                request.requestId,
-                "not_directory",
-                "The requested path is not a directory.",
-            )
+            return failure(request.requestId, "not_directory", "The requested path is not a directory.")
         } catch (error: SecurityException) {
             return failure(
                 request.requestId,
@@ -201,48 +175,45 @@ class BridgeToolRegistry(
             )
         }
 
-        val result = buildJsonObject {
-            put("rootName", listing.rootName)
-            put(
-                "pathSegments",
-                buildJsonArray {
-                    listing.pathSegments.forEach { add(JsonPrimitive(it)) }
-                },
-            )
-            put("count", listing.entries.size)
-            put(
-                "entries",
-                buildJsonArray {
-                    listing.entries.forEach { entry ->
-                        add(
-                            buildJsonObject {
-                                put("name", entry.name)
-                                put(
-                                    "pathSegments",
-                                    buildJsonArray {
-                                        entry.pathSegments.forEach { add(JsonPrimitive(it)) }
-                                    },
-                                )
-                                put("directory", entry.directory)
-                                if (entry.mimeType == null) put("mimeType", JsonNull)
-                                else put("mimeType", entry.mimeType)
-                                if (entry.sizeBytes == null) put("sizeBytes", JsonNull)
-                                else put("sizeBytes", entry.sizeBytes)
-                                if (entry.lastModifiedEpochMillis == null) {
-                                    put("lastModifiedEpochMillis", JsonNull)
-                                } else {
-                                    put("lastModifiedEpochMillis", entry.lastModifiedEpochMillis)
-                                }
-                            }
-                        )
-                    }
-                },
-            )
-        }
         return CommandResultPayload(
             requestId = request.requestId,
             ok = true,
-            result = result,
+            result = buildJsonObject {
+                put("rootName", listing.rootName)
+                put(
+                    "pathSegments",
+                    buildJsonArray { listing.pathSegments.forEach { add(JsonPrimitive(it)) } },
+                )
+                put("count", listing.entries.size)
+                put(
+                    "entries",
+                    buildJsonArray {
+                        listing.entries.forEach { entry ->
+                            add(
+                                buildJsonObject {
+                                    put("name", entry.name)
+                                    put(
+                                        "pathSegments",
+                                        buildJsonArray {
+                                            entry.pathSegments.forEach { add(JsonPrimitive(it)) }
+                                        },
+                                    )
+                                    put("directory", entry.directory)
+                                    if (entry.mimeType == null) put("mimeType", JsonNull)
+                                    else put("mimeType", entry.mimeType)
+                                    if (entry.sizeBytes == null) put("sizeBytes", JsonNull)
+                                    else put("sizeBytes", entry.sizeBytes)
+                                    if (entry.lastModifiedEpochMillis == null) {
+                                        put("lastModifiedEpochMillis", JsonNull)
+                                    } else {
+                                        put("lastModifiedEpochMillis", entry.lastModifiedEpochMillis)
+                                    }
+                                }
+                            )
+                        }
+                    },
+                )
+            },
         )
     }
 
@@ -254,28 +225,7 @@ class BridgeToolRegistry(
                 "apps.uninstall accepts only packageName and optional keepData.",
             )
         }
-
-        val packageNamePrimitive = request.arguments[PACKAGE_NAME] as? JsonPrimitive
-            ?: return failure(
-                request.requestId,
-                "invalid_arguments",
-                "packageName is required and must be a string.",
-            )
-        if (!packageNamePrimitive.isString) {
-            return failure(
-                request.requestId,
-                "invalid_arguments",
-                "packageName must be a string.",
-            )
-        }
-        val packageName = packageNamePrimitive.content.trim()
-        if (!isValidPackageName(packageName)) {
-            return failure(
-                request.requestId,
-                "invalid_arguments",
-                "packageName is not a valid Android package name.",
-            )
-        }
+        val packageName = parsePackageName(request, APPS_UNINSTALL) ?: return packageNameFailure(request)
         if (packageName == HERMES_BRIDGE_PACKAGE) {
             return failure(
                 request.requestId,
@@ -287,59 +237,25 @@ class BridgeToolRegistry(
         val keepData = when (val value = request.arguments[KEEP_DATA]) {
             null -> false
             is JsonPrimitive -> value.booleanOrNull
-                ?: return failure(
-                    request.requestId,
-                    "invalid_arguments",
-                    "keepData must be a boolean.",
-                )
-            else -> return failure(
-                request.requestId,
-                "invalid_arguments",
-                "keepData must be a boolean.",
-            )
+                ?: return failure(request.requestId, "invalid_arguments", "keepData must be a boolean.")
+            else -> return failure(request.requestId, "invalid_arguments", "keepData must be a boolean.")
         }
-
-        val policyDecision = DefaultToolPolicy.decision(
-            BridgeTool(APPS_UNINSTALL, ToolRisk.MUTATING)
-        )
-        if (policyDecision != ApprovalDecision.REQUIRE_APPROVAL) {
-            return failure(
-                request.requestId,
-                "policy_denied",
-                "Local policy does not permit this mutating tool.",
-            )
-        }
-
-        val readiness = privilegedAppsBackend.readiness()
-        if (!readiness.ready) {
-            return failure(
-                request.requestId,
-                readiness.code ?: "shizuku_unavailable",
-                readiness.message ?: "Shizuku is not ready.",
-            )
-        }
-
         val normalizedArguments = buildJsonObject {
             put(PACKAGE_NAME, packageName)
             put(KEEP_DATA, keepData)
         }
-        if (BridgeApprovalRuntime.consumeApproved(APPS_UNINSTALL, normalizedArguments) == null) {
-            val ticket = BridgeApprovalRuntime.request(
-                tool = APPS_UNINSTALL,
-                risk = ToolRisk.MUTATING,
-                arguments = normalizedArguments,
-                displaySummary = if (keepData) {
-                    "Удалить $packageName, сохранив данные приложения"
-                } else {
-                    "Удалить $packageName и его данные"
-                },
-            )
-            return failure(
-                request.requestId,
-                "approval_required",
-                "User approval is required (${ticket.id}). Retry the same command after approval.",
-            )
-        }
+        requirePrivilegedBackend(request)?.let { return it }
+        requireApproval(
+            request = request,
+            tool = APPS_UNINSTALL,
+            risk = ToolRisk.MUTATING,
+            normalizedArguments = normalizedArguments,
+            summary = if (keepData) {
+                "Удалить $packageName, сохранив данные приложения"
+            } else {
+                "Удалить $packageName и его данные"
+            },
+        )?.let { return it }
 
         val outcome = privilegedAppsBackend.uninstall(packageName, keepData)
         if (!outcome.ok) {
@@ -349,7 +265,6 @@ class BridgeToolRegistry(
                 outcome.message ?: "The app could not be uninstalled.",
             )
         }
-
         return CommandResultPayload(
             requestId = request.requestId,
             ok = true,
@@ -361,10 +276,104 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeAppsForceStop(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys.any { it != PACKAGE_NAME }) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "apps.forceStop accepts only packageName.",
+            )
+        }
+        val packageName = parsePackageName(request, APPS_FORCE_STOP) ?: return packageNameFailure(request)
+        if (packageName == HERMES_BRIDGE_PACKAGE) {
+            return failure(
+                request.requestId,
+                "protected_package",
+                "Hermes Bridge cannot force-stop itself because that would terminate the agent connection.",
+            )
+        }
+
+        val normalizedArguments = buildJsonObject { put(PACKAGE_NAME, packageName) }
+        requirePrivilegedBackend(request)?.let { return it }
+        requireApproval(
+            request = request,
+            tool = APPS_FORCE_STOP,
+            risk = ToolRisk.PRIVILEGED,
+            normalizedArguments = normalizedArguments,
+            summary = "Принудительно остановить $packageName",
+        )?.let { return it }
+
+        val outcome = privilegedAppsBackend.forceStop(packageName)
+        if (!outcome.ok) {
+            return failure(
+                request.requestId,
+                outcome.code ?: "force_stop_failed",
+                outcome.message ?: "The app could not be force-stopped.",
+            )
+        }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PACKAGE_NAME, packageName)
+                put("forceStopped", true)
+            },
+        )
+    }
+
+    private fun parsePackageName(request: CommandRequestPayload, tool: String): String? {
+        val primitive = request.arguments[PACKAGE_NAME] as? JsonPrimitive ?: return null
+        if (!primitive.isString) return null
+        val packageName = primitive.content.trim()
+        return packageName.takeIf(::isValidPackageName)
+    }
+
+    private fun packageNameFailure(request: CommandRequestPayload) = failure(
+        request.requestId,
+        "invalid_arguments",
+        "packageName is required and must be a valid Android package name.",
+    )
+
+    private fun requirePrivilegedBackend(request: CommandRequestPayload): CommandResultPayload? {
+        val readiness = privilegedAppsBackend.readiness()
+        return if (readiness.ready) null else failure(
+            request.requestId,
+            readiness.code ?: "shizuku_unavailable",
+            readiness.message ?: "Shizuku is not ready.",
+        )
+    }
+
+    private fun requireApproval(
+        request: CommandRequestPayload,
+        tool: String,
+        risk: ToolRisk,
+        normalizedArguments: kotlinx.serialization.json.JsonObject,
+        summary: String,
+    ): CommandResultPayload? {
+        if (DefaultToolPolicy.decision(BridgeTool(tool, risk)) != ApprovalDecision.REQUIRE_APPROVAL) {
+            return failure(
+                request.requestId,
+                "policy_denied",
+                "Local policy does not permit this privileged tool.",
+            )
+        }
+        if (BridgeApprovalRuntime.consumeApproved(tool, normalizedArguments) != null) return null
+
+        val ticket = BridgeApprovalRuntime.request(
+            tool = tool,
+            risk = risk,
+            arguments = normalizedArguments,
+            displaySummary = summary,
+        )
+        return failure(
+            request.requestId,
+            "approval_required",
+            "User approval is required (${ticket.id}). Retry the same command after approval.",
+        )
+    }
+
     private fun isReadOnlyAllowed(toolName: String): Boolean =
-        DefaultToolPolicy.decision(
-            BridgeTool(toolName, ToolRisk.READ_ONLY)
-        ) == ApprovalDecision.ALLOW
+        DefaultToolPolicy.decision(BridgeTool(toolName, ToolRisk.READ_ONLY)) == ApprovalDecision.ALLOW
 
     private fun isValidPackageName(value: String): Boolean =
         value.length in 3..255 && PACKAGE_NAME_REGEX.matches(value)
@@ -381,6 +390,7 @@ class BridgeToolRegistry(
         const val APPS_LIST = "apps.list"
         const val FILES_LIST = "files.list"
         const val APPS_UNINSTALL = "apps.uninstall"
+        const val APPS_FORCE_STOP = "apps.forceStop"
 
         private const val PATH_SEGMENTS = "pathSegments"
         private const val PACKAGE_NAME = "packageName"
