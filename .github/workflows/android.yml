@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -35,8 +35,21 @@ jobs:
         with:
           gradle-version: "8.14.4"
 
+      - name: Generate pinned Gradle Wrapper once
+        if: ${{ hashFiles('gradle/wrapper/gradle-wrapper.jar') == '' }}
+        run: |
+          gradle --no-daemon wrapper \
+            --gradle-version 8.14.4 \
+            --distribution-type bin \
+            --gradle-distribution-sha256-sum f1771298a70f6db5a29daf62378c4e18a17fc33c9ba6b14362e0cdf40610380d
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradlew gradlew.bat gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties
+          git commit -m "build: add pinned Gradle wrapper"
+          git push origin HEAD:main
+
       - name: Unit tests
-        run: gradle --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
+        run: ./gradlew --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
 
       - name: Test Hermes MCP adapter
         run: |
@@ -44,13 +57,13 @@ jobs:
           python -m unittest discover -s hermes_mcp/tests -v
 
       - name: Lint
-        run: gradle --no-daemon :app:lintDebug
+        run: ./gradlew --no-daemon :app:lintDebug
 
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:assembleDebug
 
       - name: Build relay distribution
-        run: gradle --no-daemon :relay:distTar
+        run: ./gradlew --no-daemon :relay:distTar
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
