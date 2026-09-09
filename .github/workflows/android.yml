@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -30,23 +30,8 @@ jobs:
           cache: pip
           cache-dependency-path: hermes_mcp/pyproject.toml
 
-      - name: Set up Gradle
+      - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "8.14.4"
-
-      - name: Generate pinned Gradle Wrapper once
-        if: ${{ hashFiles('gradle/wrapper/gradle-wrapper.jar') == '' }}
-        run: |
-          gradle --no-daemon wrapper \
-            --gradle-version 8.14.4 \
-            --distribution-type bin \
-            --gradle-distribution-sha256-sum f1771298a70f6db5a29daf62378c4e18a17fc33c9ba6b14362e0cdf40610380d
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add gradlew gradlew.bat gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties
-          git commit -m "build: add pinned Gradle wrapper"
-          git push origin HEAD:main
 
       - name: Unit tests
         run: ./gradlew --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
