@@ -135,7 +135,7 @@ class RelayAgentTransport(
 
             pairingCode = null
             if (authenticated) backoffMillis = 1_000L
-            mutableConnectionState.value = ConnectionState.PAIRING
+            mutableConnectionState.value = ConnectionState.RECONNECTING
 
             val jitter = Random.nextLong(0L, min(1_000L, backoffMillis))
             delay(backoffMillis + jitter)
