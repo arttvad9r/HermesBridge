@@ -1,6 +1,8 @@
 package io.github.arttvad9r.hermesbridge
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -15,9 +17,13 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     private val healthRepository: DeviceHealthRepository =
         AndroidDeviceHealthRepository(application)
     private val pairingStore = PairingStore(application)
+    private val treeStore = SafTreeStore(application)
 
     private val _state = MutableStateFlow(
-        BridgeUiState(health = healthRepository.snapshot())
+        BridgeUiState(
+            health = healthRepository.snapshot(),
+            fileAccessConfigured = treeStore.treeUri() != null,
+        )
     )
     val state: StateFlow<BridgeUiState> = _state.asStateFlow()
 
@@ -60,6 +66,53 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshHealth() {
         _state.update { it.copy(health = healthRepository.snapshot()) }
+    }
+
+    fun grantFileTree(uri: Uri) {
+        val readFlag = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        runCatching {
+            app.contentResolver.takePersistableUriPermission(uri, readFlag)
+            val previous = treeStore.treeUri()
+            treeStore.save(uri)
+            if (previous != null && previous != uri) {
+                runCatching {
+                    app.contentResolver.releasePersistableUriPermission(previous, readFlag)
+                }
+            }
+        }.onSuccess {
+            _state.update {
+                it.copy(
+                    fileAccessConfigured = true,
+                    message = null,
+                )
+            }
+        }.onFailure { error ->
+            _state.update {
+                it.copy(
+                    fileAccessConfigured = treeStore.treeUri() != null,
+                    message = error.message ?: "Не удалось сохранить доступ к выбранной папке.",
+                )
+            }
+        }
+    }
+
+    fun revokeFileAccess() {
+        val current = treeStore.treeUri()
+        if (current != null) {
+            runCatching {
+                app.contentResolver.releasePersistableUriPermission(
+                    current,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+        treeStore.clear()
+        _state.update {
+            it.copy(
+                fileAccessConfigured = false,
+                message = null,
+            )
+        }
     }
 
     fun pair() {
