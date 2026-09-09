@@ -44,6 +44,14 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        viewModelScope.launch {
+            BridgeApprovalRuntime.pendingTickets.collectLatest { tickets ->
+                _state.update { it.copy(pendingApprovals = tickets) }
+            }
+        }
+
+        BridgeApprovalRuntime.refresh()
+
         if (pairingStore.deviceId() != null) {
             runCatching { BridgeForegroundService.connect(app) }
                 .onFailure { error ->
@@ -66,6 +74,14 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshHealth() {
         _state.update { it.copy(health = healthRepository.snapshot()) }
+    }
+
+    fun approveAction(approvalId: String) {
+        BridgeApprovalRuntime.approve(approvalId)
+    }
+
+    fun denyAction(approvalId: String) {
+        BridgeApprovalRuntime.deny(approvalId)
     }
 
     fun grantFileTree(uri: Uri) {
