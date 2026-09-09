@@ -9,6 +9,7 @@ import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
 import io.github.arttvad9r.hermesbridge.protocol.DeviceRevokeOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.ErrorPayload
 import io.github.arttvad9r.hermesbridge.protocol.MessageType
+import io.github.arttvad9r.hermesbridge.protocol.PROTOCOL_VERSION
 import io.github.arttvad9r.hermesbridge.protocol.PairOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.PairRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
@@ -20,10 +21,10 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
+import io.ktor.server.application.install
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
-import io.ktor.server.request.header
-import io.ktor.server.request.receiveChannel
+import io.ktor.server.request.receiveStream
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
 import io.ktor.server.response.respondFile
@@ -34,24 +35,34 @@ import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.webSocket
-import io.ktor.utils.io.readAvailable
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
-import java.nio.file.Files
 import java.nio.file.Path
-import java.security.MessageDigest
-import java.security.SecureRandom
-import java.time.Instant
-import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+
+@Serializable
+data class PairingCodeResponse(
+    val code: String,
+    val expiresAtEpochMillis: Long,
+)
+
+@Serializable
+data class RelayCommandRequest(
+    val tool: String,
+    val arguments: JsonObject = JsonObject(emptyMap()),
+)
 
 @Serializable
 data class RelayDeviceResponse(
@@ -61,17 +72,24 @@ data class RelayDeviceResponse(
 )
 
 @Serializable
-data class RelayCommandRequest(
-    val tool: String,
-    val arguments: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()),
+data class RelayRevokeResponse(
+    val deviceId: String,
+    val revoked: Boolean,
 )
 
 private class DeviceSessionHub {
     private val sessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<CommandResultPayload>>()
 
-    fun register(deviceId: String, session: DefaultWebSocketServerSession) {
-        sessions[deviceId] = session
+    suspend fun register(deviceId: String, session: DefaultWebSocketServerSession) {
+        val old = sessions.put(deviceId, session)
+        if (old != null && old !== session) {
+            try {
+                old.close(CloseReason(CloseReason.Codes.NORMAL, "Replaced by a newer session"))
+            } catch (_: Exception) {
+                // The old socket may already be closed. The new authenticated session wins.
+            }
+        }
     }
 
     fun unregister(deviceId: String, session: DefaultWebSocketServerSession) {
@@ -146,7 +164,6 @@ internal fun commandTimeoutMillis(tool: String): Long = when (tool) {
     "apps.install" -> 300_000L
     "files.analyze",
     "battery.usage",
-    "apps.revokePermission",
     -> 60_000L
     else -> 20_000L
 }
@@ -226,9 +243,10 @@ fun Application.relayModule(
                 )
                 return@post
             }
+
             runtime.sessions.revoke(deviceId)
             call.respondText(
-                "{\"revoked\":true}",
+                BridgeProtocol.json.encodeToString(RelayRevokeResponse(deviceId, revoked = true)),
                 ContentType.Application.Json,
                 HttpStatusCode.OK,
             )
@@ -236,49 +254,49 @@ fun Application.relayModule(
 
         post("/api/v1/pairing-codes") {
             if (!call.requireAdmin(adminToken)) return@post
-            val issued = runtime.pairingCodes.issue()
-            call.respondText(
-                BridgeProtocol.json.encodeToString(issued),
-                ContentType.Application.Json,
-                HttpStatusCode.Created,
+            val pairing = runtime.pairingCodes.create()
+            val body = BridgeProtocol.json.encodeToString(
+                PairingCodeResponse(pairing.code, pairing.expiresAtEpochMillis)
             )
+            call.respondText(body, ContentType.Application.Json)
         }
 
         post("/api/v1/apk-artifacts") {
             if (!call.requireAdmin(adminToken)) return@post
-            val declaredLength = call.request.header(HttpHeaders.ContentLength)?.toLongOrNull()
-            if (declaredLength == null || declaredLength !in 1..MAX_APK_ARTIFACT_BYTES) {
+            val fileName = call.request.headers[APK_NAME_HEADER]
+            if (fileName.isNullOrBlank()) {
                 call.respondText(
-                    "{\"error\":\"invalid_apk_size\"}",
-                    ContentType.Application.Json,
-                    HttpStatusCode.BadRequest,
-                )
-                return@post
-            }
-            val fileName = call.request.header(APK_NAME_HEADER)
-            if (fileName == null || !isSafeApkName(fileName)) {
-                call.respondText(
-                    "{\"error\":\"invalid_apk_name\"}",
+                    "{\"error\":\"missing_apk_name\"}",
                     ContentType.Application.Json,
                     HttpStatusCode.BadRequest,
                 )
                 return@post
             }
 
-            val staged = try {
-                runtime.apkArtifacts.stage(
-                    fileName = fileName,
-                    declaredLength = declaredLength,
-                    channel = call.receiveChannel(),
-                )
-            } catch (_: ApkArtifactTooLargeException) {
+            val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            if (declaredLength != null && declaredLength !in 1..ApkArtifactStore.MAX_APK_BYTES) {
                 call.respondText(
                     "{\"error\":\"apk_too_large\"}",
                     ContentType.Application.Json,
                     HttpStatusCode.PayloadTooLarge,
                 )
                 return@post
-            } catch (_: Exception) {
+            }
+
+            val staged = try {
+                call.receiveStream().use { input ->
+                    withContext(Dispatchers.IO) {
+                        runtime.apkArtifacts.stage(fileName, input, declaredLength)
+                    }
+                }
+            } catch (error: ApkArtifactTooLargeException) {
+                call.respondText(
+                    "{\"error\":\"apk_too_large\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.PayloadTooLarge,
+                )
+                return@post
+            } catch (error: InvalidApkArtifactException) {
                 call.respondText(
                     "{\"error\":\"invalid_apk_artifact\"}",
                     ContentType.Application.Json,
@@ -361,62 +379,69 @@ fun Application.relayModule(
 }
 
 private suspend fun ApplicationCall.requireAdmin(adminToken: String): Boolean {
-    val supplied = request.header(HttpHeaders.Authorization)
-        ?.removePrefix("Bearer ")
-        ?.takeIf { it.isNotEmpty() }
-        ?: run {
-            respondText("Unauthorized", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
-            return false
-        }
-    if (!MessageDigest.isEqual(supplied.toByteArray(), adminToken.toByteArray())) {
-        respondText("Unauthorized", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
-        return false
-    }
-    return true
+    val supplied = request.headers[HttpHeaders.Authorization]
+    if (supplied == "Bearer $adminToken") return true
+    respondText("Unauthorized", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
+    return false
 }
 
 private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: RelayRuntime) {
-    var authenticatedDeviceId: String? = null
+    var pendingDevice: DeviceRecord? = null
     var challenge: String? = null
+    var authenticatedDeviceId: String? = null
 
     try {
         for (frame in incoming) {
             if (frame !is Frame.Text) continue
-            val text = frame.readText()
+
             val envelope = try {
-                BridgeProtocol.decode(text)
+                BridgeProtocol.decode(frame.readText())
             } catch (_: Exception) {
-                sendError("invalid_envelope", "Invalid protocol envelope.")
-                continue
+                sendError("invalid_json", "Message is not a valid protocol envelope.")
+                close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Invalid envelope"))
+                return
+            }
+
+            if (envelope.v != PROTOCOL_VERSION) {
+                sendError("unsupported_version", "Unsupported protocol version.")
+                close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Unsupported protocol"))
+                return
             }
 
             when (envelope.type) {
                 MessageType.PAIR_REQUEST -> {
-                    if (authenticatedDeviceId != null) {
-                        sendError("already_authenticated", "Session is already authenticated.")
+                    if (pendingDevice != null || authenticatedDeviceId != null) {
+                        sendError("invalid_state", "Pairing is not valid in the current session state.")
                         continue
                     }
+
                     val payload = try {
                         BridgeProtocol.decodePayload<PairRequestPayload>(envelope)
                     } catch (_: Exception) {
                         sendError("invalid_payload", "Invalid pairing payload.")
                         continue
                     }
-                    val pairingCode = runtime.pairingCodes.consume(payload.code)
-                    if (pairingCode == null) {
-                        sendError("invalid_pairing_code", "Pairing code is invalid or expired.")
+
+                    if (payload.protocolVersion != PROTOCOL_VERSION) {
+                        sendError("unsupported_version", "Unsupported pairing protocol version.")
                         continue
                     }
-                    val device = try {
-                        runtime.devices.register(
-                            publicKey = payload.publicKey,
-                            label = payload.deviceLabel,
-                            appVersion = payload.appVersion,
-                        )
+
+                    val publicKey = try {
+                        AuthCrypto.decodeEcPublicKey(payload.publicKey)
                     } catch (_: Exception) {
-                        sendError("invalid_device", "Device identity could not be registered.")
+                        sendError("invalid_public_key", "Device public key is invalid.")
                         continue
                     }
+
+                    if (!runtime.pairingCodes.consume(payload.code)) {
+                        sendError("invalid_pairing_code", "Pairing code is invalid or expired.")
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Invalid pairing code"))
+                        return
+                    }
+
+                    val device = runtime.devices.register(publicKey, payload.deviceLabel)
+                    pendingDevice = device
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.PAIR_OK,
@@ -424,48 +449,54 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                             payload = BridgeProtocol.payload(PairOkPayload(device.deviceId)),
                         )
                     )
-                    challenge = AuthCrypto.randomChallenge()
+                    val newChallenge = AuthCrypto.newChallenge()
+                    challenge = newChallenge
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.AUTH_CHALLENGE,
                             deviceId = device.deviceId,
-                            payload = BridgeProtocol.payload(AuthChallengePayload(challenge!!)),
+                            payload = BridgeProtocol.payload(AuthChallengePayload(newChallenge)),
                         )
                     )
                 }
 
                 MessageType.SESSION_HELLO -> {
-                    if (authenticatedDeviceId != null) {
-                        sendError("already_authenticated", "Session is already authenticated.")
+                    if (pendingDevice != null || authenticatedDeviceId != null) {
+                        sendError("invalid_state", "Session hello is not valid in the current state.")
                         continue
                     }
+
                     val payload = try {
                         BridgeProtocol.decodePayload<SessionHelloPayload>(envelope)
                     } catch (_: Exception) {
-                        sendError("invalid_payload", "Invalid session hello.")
+                        sendError("invalid_payload", "Invalid session hello payload.")
                         continue
                     }
+
                     val device = runtime.devices.find(payload.deviceId)
                     if (device == null || envelope.deviceId != payload.deviceId) {
-                        sendError("unknown_device", "Device is not paired with this relay.")
-                        continue
+                        sendError("unknown_device", "Device is not registered.")
+                        close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Unknown device"))
+                        return
                     }
-                    challenge = AuthCrypto.randomChallenge()
+
+                    pendingDevice = device
+                    val newChallenge = AuthCrypto.newChallenge()
+                    challenge = newChallenge
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.AUTH_CHALLENGE,
                             deviceId = device.deviceId,
-                            payload = BridgeProtocol.payload(AuthChallengePayload(challenge!!)),
+                            payload = BridgeProtocol.payload(AuthChallengePayload(newChallenge)),
                         )
                     )
                 }
 
                 MessageType.AUTH_RESPONSE -> {
-                    val deviceId = envelope.deviceId
+                    val device = pendingDevice
                     val nonce = challenge
-                    val device = deviceId?.let(runtime.devices::find)
-                    if (deviceId == null || nonce == null || device == null) {
-                        sendError("auth_not_started", "Start pairing or session authentication first.")
+                    if (device == null || nonce == null || authenticatedDeviceId != null) {
+                        sendError("invalid_state", "Authentication challenge is not active.")
                         continue
                     }
 
@@ -480,7 +511,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         envelope.deviceId != device.deviceId ||
                         !AuthCrypto.verify(device, nonce, payload.signature)
                     ) {
-                        sendError("auth_failed", "Device signature verification failed")
+                        sendError("auth_failed", "Device signature verification failed.")
                         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Authentication failed"))
                         return
                     }
