@@ -129,7 +129,7 @@ def _validate_package_name(package_name: str) -> str:
     if not (3 <= len(value) <= MAX_PACKAGE_NAME_LENGTH) or not PACKAGE_NAME_RE.fullmatch(value):
         raise ValueError("package_name is not a valid Android package name.")
     if value == HERMES_BRIDGE_PACKAGE:
-        raise ValueError("Hermes Bridge cannot uninstall itself.")
+        raise ValueError("The Hermes Bridge package is protected from agent package operations.")
     return value
 
 
@@ -195,6 +195,17 @@ def uninstall_app(
             "packageName": package,
             "keepData": keep_data,
         },
+    )
+
+
+@mcp.tool()
+def force_stop_app(device_id: str, package_name: str) -> dict[str, Any]:
+    """Request a privileged force-stop of one Android package. The phone requires explicit local approval."""
+    package = _validate_package_name(package_name)
+    return _device_command(
+        device_id,
+        "apps.forceStop",
+        {"packageName": package},
     )
 
 
