@@ -44,7 +44,9 @@
 - [x] `device_health`.
 - [x] `list_apps`.
 - [x] `list_files` inside the user-granted SAF tree.
-- [ ] Package/install MCP tools only after local approvals exist.
+- [x] Typed `uninstall_app` behind Android-side exact-argument approval.
+- [x] Typed `force_stop_app` behind Android-side exact-argument approval.
+- [ ] Safe APK-transfer/install MCP flow.
 
 ## P0 — tool boundary
 
@@ -52,12 +54,13 @@
 - [x] `device.health`.
 - [x] `apps.list` with launcher-only package visibility; no `QUERY_ALL_PACKAGES`.
 - [x] `files.list` limited to a user-selected SAF directory tree.
+- [x] `apps.uninstall` with strict package validation, self-protection and approval.
+- [x] `apps.forceStop` with strict package validation, self-protection and approval.
 - [x] Structured result/error envelopes.
 - [x] Path-segment validation and bounded file-list size/depth.
 - [ ] Add read-only app details as needed without broad package visibility.
 - [ ] File size analysis/large-file summaries inside the granted tree.
-- [ ] Introduce selected `droid-mcp` modules only where they add value behind the same allowlist.
-- [ ] Idempotency for future mutating tools.
+- [ ] Idempotency where a future mutating operation is safely retryable.
 - [ ] Audit log.
 
 ## P1 — Android setup wizard
@@ -66,30 +69,31 @@
 - [x] File-access step using Storage Access Framework.
 - [x] Persisted read-only SAF grant with explicit revoke/change controls.
 - [x] Reboot recovery state for the base relay connection.
+- [x] Shizuku detection/setup/authorization card and runtime state.
 - [ ] Turn the current cards into a guided first-run setup flow.
 - [ ] Usage Access step.
-- [ ] Shizuku detection/setup/authorization step.
 - [ ] Accessibility setup as an optional separate step.
 - [ ] "Advanced access needs restoration" notification.
 
 ## P1 — privileged actions
 
-- [ ] Add Shizuku dependency/backend.
+- [x] Shizuku API/provider dependency and typed privileged backend.
 - [ ] Install APK.
-- [ ] Uninstall app.
-- [ ] Force-stop app.
+- [x] Uninstall app.
+- [x] Force-stop app.
 - [ ] Selected permission operations.
 - [ ] Selected safe settings operations.
 - [ ] Selected diagnostics (`dumpsys`) wrapped in typed tools.
-- [ ] Never register upstream raw shell.
+- [x] Never register upstream/raw shell in the Hermes tool surface.
 
 ## P1 — approvals
 
-- [ ] Pending approval model.
-- [ ] Local Android approval UI.
+- [x] Pending approval model.
+- [x] Local Android approval UI.
+- [x] Approval expiry.
+- [x] Approval binds to exact canonical normalized arguments.
+- [x] Approved tickets are one-use only.
 - [ ] Hermes/Telegram approval routing.
-- [ ] Approval expiry.
-- [ ] Approval binds to exact normalized arguments.
 - [ ] Per-tool "always allow" only where explicitly safe.
 - [ ] Emergency disconnect/revoke button for the Hermes pairing itself.
 
@@ -108,7 +112,8 @@
 - [ ] Keystore migration/recovery tests.
 - [ ] Process-death/reboot/network-handover tests on device.
 - [ ] SAF permission revocation/provider failure tests on device.
+- [ ] Shizuku reboot/reactivation tests on device.
 - [ ] Battery impact measurements.
-- [ ] R8/release build.
+- [ ] R8/release build and reflection keep-rule verification.
 - [ ] Signed reproducible release process.
 - [ ] Decide project license.
