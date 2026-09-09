@@ -278,6 +278,36 @@ def list_files(
 
 
 @mcp.tool()
+def analyze_files(
+    device_id: str,
+    path_segments: list[str] | None = None,
+) -> dict[str, Any]:
+    """Analyze storage inside a granted SAF directory, returning bounded totals and the largest files without modifying anything."""
+    segments = list(path_segments or [])
+    _validate_path_segments(segments)
+    return _device_command(
+        device_id,
+        "files.analyze",
+        {"pathSegments": segments},
+        timeout=75,
+    )
+
+
+@mcp.tool()
+def delete_path(device_id: str, path_segments: list[str]) -> dict[str, Any]:
+    """Request deletion of one file or directory inside the granted SAF tree. The phone requires explicit local approval."""
+    segments = list(path_segments)
+    _validate_path_segments(segments)
+    if not segments:
+        raise ValueError("path_segments must identify a target below the granted root.")
+    return _device_command(
+        device_id,
+        "files.delete",
+        {"pathSegments": segments},
+    )
+
+
+@mcp.tool()
 def install_apk(
     device_id: str,
     apk_name: str,
