@@ -2,7 +2,6 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -11,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BridgeToolRegistryTest {
-    private val repository = object : DeviceHealthRepository {
+    private val healthRepository = object : DeviceHealthRepository {
         override fun snapshot() = DeviceHealthSnapshot(
             batteryPercent = 73,
             availableMemoryBytes = 10L,
@@ -20,7 +19,21 @@ class BridgeToolRegistryTest {
             totalStorageBytes = 40L,
         )
     }
-    private val registry = BridgeToolRegistry(repository)
+
+    private val appsRepository = object : InstalledAppsRepository {
+        override fun listLaunchableApps() = listOf(
+            InstalledAppSnapshot(
+                packageName = "com.example.app",
+                label = "Example",
+                versionName = "1.2.3",
+                versionCode = 12L,
+                systemApp = false,
+                enabled = true,
+            )
+        )
+    }
+
+    private val registry = BridgeToolRegistry(healthRepository, appsRepository)
 
     @Test
     fun deviceHealthExecutesWithoutApproval() = runBlocking {
@@ -33,6 +46,34 @@ class BridgeToolRegistryTest {
 
         assertTrue(result.ok)
         assertEquals("73", result.result?.get("batteryPercent")?.toString())
+    }
+
+    @Test
+    fun appsListExecutesWithoutApproval() = runBlocking {
+        val result = registry.execute(
+            CommandRequestPayload(
+                tool = BridgeToolRegistry.APPS_LIST,
+                requestId = "request-apps",
+            )
+        )
+
+        assertTrue(result.ok)
+        assertEquals("1", result.result?.get("count")?.toString())
+        assertTrue(result.result?.get("apps")?.toString()?.contains("com.example.app") == true)
+    }
+
+    @Test
+    fun appsListRejectsArguments() = runBlocking {
+        val result = registry.execute(
+            CommandRequestPayload(
+                tool = BridgeToolRegistry.APPS_LIST,
+                requestId = "request-apps-args",
+                arguments = buildJsonObject { put("unexpected", true) },
+            )
+        )
+
+        assertFalse(result.ok)
+        assertEquals("invalid_arguments", result.error?.code)
     }
 
     @Test
