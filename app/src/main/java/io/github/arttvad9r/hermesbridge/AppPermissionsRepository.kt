@@ -41,8 +41,8 @@ class AndroidAppPermissionsRepository(context: Context) : AppPermissionsReposito
             throw AppPermissionsUnavailableException("Android denied access to package permission metadata.", error)
         }
 
-        val requested = packageInfo.requestedPermissions.orEmpty()
-        val flags = packageInfo.requestedPermissionsFlags.orEmpty()
+        val requested = packageInfo.requestedPermissions ?: emptyArray<String>()
+        val flags = packageInfo.requestedPermissionsFlags ?: IntArray(0)
         val permissions = requested
             .asSequence()
             .take(MAX_PERMISSIONS)
@@ -50,19 +50,19 @@ class AndroidAppPermissionsRepository(context: Context) : AppPermissionsReposito
                 val name = permissionName.trim()
                     .takeIf { it.isNotEmpty() && it.length <= MAX_PERMISSION_NAME_LENGTH }
                     ?: return@mapIndexedNotNull null
-                val requestedFlags = flags.getOrElse(index) { 0 }
+                val requestedFlags: Int = if (index < flags.size) flags[index] else 0
                 val permissionInfo = getPermissionInfoOrNull(name)
                 val protection = protectionLabel(permissionInfo)
                 AppPermissionSnapshot(
                     name = name,
-                    granted = requestedFlags and PackageInfo.REQUESTED_PERMISSION_GRANTED != 0,
+                    granted = hasFlag(requestedFlags, PackageInfo.REQUESTED_PERMISSION_GRANTED),
                     protection = protection,
                     dangerous = protection == PROTECTION_DANGEROUS_LABEL,
                     group = permissionInfo?.group?.take(MAX_PERMISSION_GROUP_LENGTH),
                     implicit = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-                        requestedFlags and PackageInfo.REQUESTED_PERMISSION_IMPLICIT != 0,
+                        hasFlag(requestedFlags, PackageInfo.REQUESTED_PERMISSION_IMPLICIT),
                     neverForLocation = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                        requestedFlags and PackageInfo.REQUESTED_PERMISSION_NEVER_FOR_LOCATION != 0,
+                        hasFlag(requestedFlags, PackageInfo.REQUESTED_PERMISSION_NEVER_FOR_LOCATION),
                 )
             }
             .distinctBy { it.name }
@@ -82,40 +82,23 @@ class AndroidAppPermissionsRepository(context: Context) : AppPermissionsReposito
 
     @Suppress("DEPRECATION")
     private fun getPackageInfo(packageName: String): PackageInfo =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.getPackageInfo(
-                packageName,
-                PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong()),
-            )
-        } else {
-            packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
-        }
+        packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
 
     @Suppress("DEPRECATION")
-    private fun getPermissionInfoOrNull(name: String): PermissionInfo? = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.getPermissionInfo(name, PackageManager.PermissionInfoFlags.of(0L))
-        } else {
-            packageManager.getPermissionInfo(name, 0)
-        }
-    }.getOrNull()
+    private fun getPermissionInfoOrNull(name: String): PermissionInfo? =
+        runCatching { packageManager.getPermissionInfo(name, 0) }.getOrNull()
 
     private fun protectionLabel(permissionInfo: PermissionInfo?): String {
         if (permissionInfo == null) return PROTECTION_UNKNOWN_LABEL
-        val base = permissionInfo.protectionLevel and PermissionInfo.PROTECTION_MASK_BASE
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            base == PermissionInfo.PROTECTION_INTERNAL
-        ) {
-            return "internal"
-        }
-        return when (base) {
+        return when (permissionInfo.protectionLevel and PermissionInfo.PROTECTION_MASK_BASE) {
             PermissionInfo.PROTECTION_NORMAL -> "normal"
             PermissionInfo.PROTECTION_DANGEROUS -> PROTECTION_DANGEROUS_LABEL
             PermissionInfo.PROTECTION_SIGNATURE -> "signature"
             else -> "other"
         }
     }
+
+    private fun hasFlag(value: Int, flag: Int): Boolean = value and flag != 0
 
     companion object {
         const val MAX_PERMISSIONS = 300
