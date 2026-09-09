@@ -70,7 +70,31 @@ Creates a short-lived one-time pairing code for the Android app.
 
 ### `device_health(device_id)`
 
-Maps only to Android tool `device.health`. Returns battery percentage plus memory/storage totals.
+Maps only to Android tool `device.health`. Returns current battery percentage plus memory/storage totals.
+
+### `battery_usage(device_id)`
+
+Maps only to Android tool `battery.usage`. It is a read-only diagnostic and accepts no diagnostic or shell arguments.
+
+The Android side runs exactly:
+
+```text
+dumpsys batterystats --charged --checkin
+```
+
+through Shizuku, with bounded output and a bounded execution timeout. Android parses only the supported power-use sections and returns a compact structure rather than the raw checkin dump.
+
+Returned fields include:
+
+- `source = batterystats_charged_checkin`;
+- checkin format version when available;
+- battery capacity and computed/minimum/maximum drained power in mAh when present;
+- bounded system power-use items;
+- bounded top UIDs by estimated mAh, with package-name mappings found in the checkin data.
+
+The data is accumulated **since the last charge** because the fixed command uses `--charged`. It is not an instantaneous wattage/current reading and should not be interpreted as one. Values are Android Batterystats estimates and may differ from OEM battery-settings UI calculations.
+
+The tool does not expose raw `dumpsys`, does not accept an arbitrary package/UID filter, and does not run `batterystats --reset`.
 
 ### `list_apps(device_id)`
 
@@ -87,6 +111,18 @@ Maps only to `files.list`. It works only inside the directory tree explicitly se
 ```
 
 It is not a raw filesystem path. Both MCP and Android reject traversal markers, separators, excessive depth and oversized segments.
+
+### `analyze_files(device_id, path_segments=[])`
+
+Maps only to `files.analyze` and is read-only.
+
+Android recursively analyzes only the granted SAF subtree, with hard limits on traversal. The current bounds are 5,000 scanned entries, depth 32 and 50 largest-file results. The result includes total bytes, file/directory counts and `truncated` so Hermes knows when a result is incomplete.
+
+### `delete_path(device_id, path_segments)`
+
+Maps only to `files.delete`.
+
+The target must be below the SAF root; an empty path cannot delete the granted root itself. Android stats the target before requesting approval. Approval is bound to the normalized path plus the target's current directory flag, MIME type, size and last-modified value. If those values change before the retry, the previous approval does not authorize deletion of the changed target.
 
 ### `install_apk(device_id, apk_name, replace=true)`
 
@@ -131,7 +167,7 @@ It follows the same approval boundary as uninstall. Hermes Bridge also refuses t
 
 ## Approval behavior
 
-Mutating/privileged tools do not execute while the Android approval is pending.
+Read-only tools such as health, Batterystats power-use inspection and SAF analysis execute without approval. Mutating/privileged tools do not execute while the Android approval is pending.
 
 The approval fingerprint includes:
 
@@ -144,6 +180,7 @@ Consequences:
 - approving one package does not authorize another package;
 - approving uninstall does not authorize force-stop;
 - install approval is bound to verified APK content/signing metadata, not an ephemeral download token;
+- file deletion approval is bound to the selected path and the current target metadata;
 - an approved ticket cannot be replayed after one successful consumption;
 - expired approvals require a new user decision.
 
@@ -156,8 +193,10 @@ The MCP adapter intentionally has no equivalent of:
 ```text
 run_command(tool, arguments)
 run_shell(command)
+run_dumpsys(args)
 install_from_url(url)
 install_from_path(path)
+delete_raw_path(path)
 ```
 
 Each public MCP function hardcodes one Android tool name. The Android app applies another independent allowlist and risk policy before execution.
@@ -168,9 +207,9 @@ Keep these properties:
 - relay admin API stays loopback-only;
 - Android transport uses WSS through the public reverse proxy;
 - only the tokenized `/device-artifacts/*` download route is additionally exposed for APK transfer;
-- read-only tools execute without approval;
+- read-only tools execute without approval but remain fixed and bounded;
 - mutating/privileged tools are separate typed functions;
-- no arbitrary shell, intent, content URI, remote URL or raw filesystem path is exposed.
+- no arbitrary shell, dumpsys arguments, intent, content URI, remote URL or raw filesystem path is exposed.
 
 ## Smoke test
 
@@ -181,9 +220,11 @@ After relay and MCP are configured:
 3. If needed, call `create_pairing_code` and enter it in the Android app.
 4. Verify the phone reports connected.
 5. Call `device_health` and `list_apps`.
-6. Select a folder in the Android app and call `list_files`.
-7. Activate/authorize Shizuku in the app.
-8. Test `force_stop_app` or `uninstall_app` on a disposable package: approve the displayed card on the phone and retry the same call.
-9. Put a disposable test APK directly in `HERMES_BRIDGE_APK_DIR`, call `install_apk`, approve the verified package/version shown on the phone, then retry `install_apk` for the same APK.
+6. Select a folder in the Android app; call `list_files`, then `analyze_files`.
+7. Test `delete_path` on a disposable SAF file: approve the exact target shown on the phone and retry the same call.
+8. Activate/authorize Shizuku in the app.
+9. Call `battery_usage`; verify a parsed result or a clear `battery_stats_*` error rather than raw output.
+10. Test `force_stop_app` or `uninstall_app` on a disposable package: approve the displayed card on the phone and retry the same call.
+11. Put a disposable test APK directly in `HERMES_BRIDGE_APK_DIR`, call `install_apk`, approve the verified package/version shown on the phone, then retry `install_apk` for the same APK.
 
-A physical-device end-to-end test is still required before privileged actions should be treated as production-ready.
+A physical-device end-to-end test is still required before Shizuku-backed and mutating actions should be treated as production-ready.
