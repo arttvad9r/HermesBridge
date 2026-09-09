@@ -16,6 +16,8 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     private val app = application
     private val healthRepository: DeviceHealthRepository =
         AndroidDeviceHealthRepository(application)
+    private val appUsageRepository: AppUsageRepository =
+        AndroidAppUsageRepository(application)
     private val pairingStore = PairingStore(application)
     private val treeStore = SafTreeStore(application)
 
@@ -23,6 +25,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
         BridgeUiState(
             health = healthRepository.snapshot(),
             fileAccessConfigured = treeStore.treeUri() != null,
+            usageAccessGranted = appUsageRepository.hasAccess(),
         )
     )
     val state: StateFlow<BridgeUiState> = _state.asStateFlow()
@@ -81,6 +84,10 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshHealth() {
         _state.update { it.copy(health = healthRepository.snapshot()) }
+    }
+
+    fun refreshUsageAccess() {
+        _state.update { it.copy(usageAccessGranted = appUsageRepository.hasAccess()) }
     }
 
     fun approveAction(approvalId: String) {
