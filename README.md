@@ -6,12 +6,12 @@ The intended UX is deliberately simple:
 
 1. Install one APK.
 2. Pair it with Hermes using a one-time code.
-3. Grant only the capabilities you want.
+3. Grant only the capabilities you want through the guided setup.
 4. Close the app and give tasks to Hermes normally.
 
 Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with exact-argument approvals for mutating/privileged actions.
 
-> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, foreground service, Hermes MCP adapter, read-only diagnostics/files, bounded storage analysis, approved SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end testing of privileged and Shizuku-backed diagnostics is still required.
+> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, guided setup, safe re-pair/revocation, Hermes MCP integration, read-only diagnostics/app metadata/files, bounded permission and storage audits, approved SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end validation is still required before treating privileged operations as production-ready.
 
 ## Current capabilities
 
@@ -19,11 +19,16 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - One-time pairing and challenge/response reconnect authentication.
 - Persistent outbound WSS connection from Android to the relay.
 - Foreground service with reboot/package-update recovery.
+- Guided first-run setup instead of exposing all technical settings at once.
+- Confirmed phone-side self-revoke plus localhost admin revoke; clean re-pair without reinstalling the APK.
 - Relay deployment examples for systemd + TLS reverse proxy.
 - Local stdio MCP adapter for Hermes.
 - `device_health` — battery percentage plus memory and storage totals.
-- `battery_usage` — bounded read-only Android Batterystats power-use data since the last charge, parsed locally from a fixed Shizuku command; raw dumpsys is never returned to Hermes.
+- `battery_usage` — bounded read-only Android Batterystats data since the last charge, parsed locally from fixed `dumpsys batterystats -c --charged`; raw dumpsys is never returned to Hermes.
 - `list_apps` — launcher-visible apps without `QUERY_ALL_PACKAGES`.
+- `app_usage` — bounded UsageStats for launcher-visible apps after the user enables Android Usage Access.
+- `app_permissions` — requested/granted permission metadata for one launcher-visible app.
+- `permissions_audit` — bounded launcher-only scan returning permissions that are both granted and classified by Android as `dangerous`, with explicit truncation state.
 - `list_files` — directory browsing only inside a folder explicitly selected through Android Storage Access Framework.
 - `analyze_files` — bounded recursive SAF analysis with total size, counts, truncation status and largest-file summaries.
 - `delete_path` — deletion of one validated SAF file/directory after local approval bound to the target's current metadata; the granted root itself is protected.
@@ -64,7 +69,8 @@ Hermes on VPS
              Android app
                    |
                    +-- Android APIs
-                   +-- PackageManager (limited visibility)
+                   +-- PackageManager (launcher-scoped visibility)
+                   +-- UsageStats (optional special access)
                    +-- Storage Access Framework (user-selected tree)
                    +-- approval policy
                    +-- Shizuku (optional typed privileged/read-only commands)
@@ -96,8 +102,10 @@ The project keeps these non-negotiable rules:
 - no arbitrary arguments for Batterystats diagnostics;
 - no PIN/password capture or unlock automation;
 - no root requirement;
-- default-deny tool registration;
-- read-only tools are narrowly typed and argument-validated;
+- default-deny tool routing/registration;
+- read-only tools are narrowly typed, argument-validated and output-bounded;
+- app metadata/audits stay launcher-scoped and do not request `QUERY_ALL_PACKAGES`;
+- permission audit uses Android's own `dangerous` protection classification rather than an invented risk score;
 - privileged/mutating commands require one-use exact-argument approval;
 - APK install approval is bound to verified content/package/signing metadata rather than transport tokens;
 - SAF deletion approval is bound to the validated target path and current metadata;
@@ -106,7 +114,7 @@ The project keeps these non-negotiable rules:
 - the Hermes-side admin token stays local to the VPS process boundary where possible;
 - SAF file access is limited to a directory explicitly chosen by the user;
 - privileged package operations validate package names and protect Hermes Bridge itself;
-- Shizuku diagnostics return a bounded parsed structure rather than unrestricted command output.
+- Shizuku diagnostics return bounded parsed structures rather than unrestricted command output.
 
 More detail: [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -125,7 +133,7 @@ More detail: [docs/SECURITY.md](docs/SECURITY.md).
 - Shizuku API/provider 13.1.5
 - Python MCP SDK v2 adapter for Hermes
 
-The narrow Shizuku process-execution pattern is adapted from Apache-2.0 `droid-mcp` source pinned in `THIRD_PARTY_NOTICES.md`; no JitPack runtime/build dependency is used. Batterystats parsing is Hermes Bridge code based on Android's documented checkin format.
+The narrow Shizuku process-execution pattern is adapted from Apache-2.0 `droid-mcp` source pinned in `THIRD_PARTY_NOTICES.md`; no JitPack runtime/build dependency is used. Batterystats parsing is Hermes Bridge code based on Android's checkin-format output.
 
 ## Build
 
