@@ -33,7 +33,7 @@ Mitigations:
 - no raw shell;
 - no arbitrary intents/content URIs;
 - command schemas and limits;
-- audit trail.
+- local audit trail.
 
 ### Over-broad Android permission
 
@@ -57,7 +57,8 @@ Mitigations:
 - local approval for high-impact commands;
 - per-device credential revocation;
 - no generic shell endpoint;
-- tool allowlist enforced on device.
+- tool allowlist enforced on device;
+- command outcomes and approval decisions are recorded locally on the phone.
 
 ## Risk classes
 
@@ -112,23 +113,26 @@ Use Android Keystore for private keys. If a bearer/session token is needed, encr
 
 ## Logging
 
-Audit entries should record:
+The implemented Android audit history is deliberately smaller than a diagnostic/debug log. It stores at most the latest 200 entries in app-private storage.
+
+Command entries contain only:
 
 - timestamp;
-- Hermes/device identity;
-- tool;
-- risk class;
-- normalized parameters with sensitive fields redacted;
-- approval decision;
-- result status;
-- duration/error category.
+- a tool name from the fixed audited allowlist, otherwise `unknown_tool`;
+- success/error outcome;
+- a normalized bounded error code, otherwise `other_error`.
 
-Audit logs must not contain file contents, passwords, pairing codes or raw auth tokens.
+Approval entries additionally contain the bounded human-facing summary that was already displayed in the local approval card plus approved/denied outcome.
+
+The audit history intentionally does **not** persist raw command arguments or raw error messages. It therefore does not record APK download tokens, relay/auth credentials, remote URLs, SAF paths supplied as command arguments, file contents, package-install bytes, pairing codes or arbitrary unknown tool strings.
+
+The history screen is an internal non-exported activity and can be cleared locally by the user. The foreground-service notification provides a local shortcut to it when notifications are available.
 
 ## Android component exposure
 
 - activities/services/receivers are `exported=false` unless Android requires otherwise;
 - launcher activity is exported only for launcher intent;
+- the audit-history activity is `exported=false`;
 - no cleartext network traffic;
 - no externally reachable local MCP server in the default product topology;
 - any deep link used for pairing must validate origin and nonce.
