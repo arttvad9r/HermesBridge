@@ -18,17 +18,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 class BridgeForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var commandJob: Job? = null
+    private var shizukuRestorationJob: Job? = null
     private lateinit var transport: RelayAgentTransport
+    private lateinit var advancedAccessStore: AdvancedAccessStore
 
     override fun onCreate() {
         super.onCreate()
         BridgeAuditRuntime.initialize(applicationContext)
+        advancedAccessStore = AdvancedAccessStore(applicationContext)
         createNotificationChannel()
 
         val healthRepository = AndroidDeviceHealthRepository(applicationContext)
@@ -51,6 +55,15 @@ class BridgeForegroundService : Service() {
                 onTransportState(state, null)
             }
         }
+
+        serviceScope.launch {
+            ShizukuRuntime.state.collectLatest { shizuku ->
+                if (shizuku.status == ShizukuAccessStatus.READY) {
+                    advancedAccessStore.markConfigured()
+                    ShizukuRestorationNotifier.cancel(applicationContext)
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -65,6 +78,10 @@ class BridgeForegroundService : Service() {
             }
 
             ACTION_CONNECT -> launchCommand { transport.resume() }
+            ACTION_CONNECT_AFTER_BOOT -> {
+                launchCommand { transport.resume() }
+                scheduleShizukuRestorationCheck()
+            }
             ACTION_REVOKE -> revokePairing()
             ACTION_STOP -> stopBridge()
         }
@@ -73,6 +90,7 @@ class BridgeForegroundService : Service() {
 
     override fun onDestroy() {
         commandJob?.cancel()
+        shizukuRestorationJob?.cancel()
         transport.close()
         serviceScope.cancel()
         BridgeRuntime.update(ConnectionState.DISCONNECTED)
@@ -92,6 +110,18 @@ class BridgeForegroundService : Service() {
                     error.message ?: "Не удалось подключиться к relay.",
                 )
             }
+        }
+    }
+
+    private fun scheduleShizukuRestorationCheck() {
+        shizukuRestorationJob?.cancel()
+        shizukuRestorationJob = serviceScope.launch {
+            delay(SHIZUKU_RESTORE_CHECK_DELAY_MILLIS)
+            ShizukuRuntime.refresh()
+            ShizukuRestorationNotifier.showIfNeeded(
+                applicationContext,
+                ShizukuRuntime.state.value.status,
+            )
         }
     }
 
@@ -196,15 +226,24 @@ class BridgeForegroundService : Service() {
         private const val CHANNEL_ID = "hermes_bridge_connection"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_CONNECT = "io.github.arttvad9r.hermesbridge.CONNECT"
+        private const val ACTION_CONNECT_AFTER_BOOT = "io.github.arttvad9r.hermesbridge.CONNECT_AFTER_BOOT"
         private const val ACTION_PAIR = "io.github.arttvad9r.hermesbridge.PAIR"
         private const val ACTION_REVOKE = "io.github.arttvad9r.hermesbridge.REVOKE_PAIRING"
         private const val ACTION_STOP = "io.github.arttvad9r.hermesbridge.STOP"
         private const val EXTRA_PAIRING_CODE = "pairing_code"
+        private const val SHIZUKU_RESTORE_CHECK_DELAY_MILLIS = 8_000L
 
         fun connect(context: Context) {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, BridgeForegroundService::class.java).setAction(ACTION_CONNECT),
+            )
+        }
+
+        fun connectAfterBoot(context: Context) {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, BridgeForegroundService::class.java).setAction(ACTION_CONNECT_AFTER_BOOT),
             )
         }
 
