@@ -294,6 +294,12 @@ def app_permissions(device_id: str, package_name: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def permissions_audit(device_id: str) -> dict[str, Any]:
+    """Audit launcher-visible apps for Android permissions that are both granted and classified by the platform as dangerous. The result is bounded and read-only."""
+    return _device_command(device_id, "apps.permissionsAudit", timeout=30)
+
+
+@mcp.tool()
 def list_files(
     device_id: str,
     path_segments: list[str] | None = None,
