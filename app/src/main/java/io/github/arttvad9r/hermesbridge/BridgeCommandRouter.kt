@@ -18,10 +18,15 @@ class BridgeCommandRouter(
         appsRepository = appsRepository,
         permissionsRepository = appPermissionsRepository,
     )
+    private val appPermissionsAuditHandler = AppPermissionsAuditToolHandler(
+        appsRepository = appsRepository,
+        permissionsRepository = appPermissionsRepository,
+    )
 
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload =
         when (request.tool) {
             AppPermissionsToolHandler.TOOL_NAME -> appPermissionsHandler.execute(request)
+            AppPermissionsAuditToolHandler.TOOL_NAME -> appPermissionsAuditHandler.execute(request)
             else -> coreRegistry.execute(request)
         }
 }
