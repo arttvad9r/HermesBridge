@@ -76,7 +76,16 @@ object BridgeAuditRuntime {
             if (store != null) return
             val created = AuditLogStore(context)
             store = created
-            mutableEntries.value = created.load()
+            val inMemory = mutableEntries.value
+            mutableEntries.value = if (inMemory.isEmpty()) {
+                created.load()
+            } else {
+                var merged = created.load()
+                inMemory.asReversed().forEach { entry ->
+                    merged = created.append(entry)
+                }
+                merged
+            }
         }
     }
 
@@ -86,23 +95,28 @@ object BridgeAuditRuntime {
                 id = UUID.randomUUID().toString(),
                 timestampEpochMillis = System.currentTimeMillis(),
                 type = AuditEventType.COMMAND,
-                tool = sanitizeAuditText(tool, MAX_TOOL_LENGTH),
+                tool = auditSafeToolName(tool),
                 outcome = if (result.ok) OUTCOME_SUCCESS else OUTCOME_ERROR,
-                errorCode = result.error?.code?.let { sanitizeAuditText(it, MAX_ERROR_CODE_LENGTH) },
+                errorCode = result.error?.code?.let(::auditSafeErrorCode),
             )
         )
     }
 
     fun recordApproval(ticket: ApprovalTicket, outcome: String) {
+        val safeTool = auditSafeToolName(ticket.tool)
         append(
             AuditLogEntry(
                 id = UUID.randomUUID().toString(),
                 timestampEpochMillis = System.currentTimeMillis(),
                 type = AuditEventType.APPROVAL,
-                tool = sanitizeAuditText(ticket.tool, MAX_TOOL_LENGTH),
+                tool = safeTool,
                 outcome = sanitizeAuditText(outcome, MAX_OUTCOME_LENGTH),
-                summary = sanitizeAuditText(ticket.displaySummary, MAX_SUMMARY_LENGTH)
-                    .takeIf(String::isNotEmpty),
+                summary = if (safeTool == UNKNOWN_TOOL) {
+                    null
+                } else {
+                    sanitizeAuditText(ticket.displaySummary, MAX_SUMMARY_LENGTH)
+                        .takeIf(String::isNotEmpty)
+                },
             )
         )
     }
@@ -129,10 +143,16 @@ object BridgeAuditRuntime {
     const val APPROVAL_DENIED = "denied"
     private const val OUTCOME_SUCCESS = "success"
     private const val OUTCOME_ERROR = "error"
-    private const val MAX_TOOL_LENGTH = 96
-    private const val MAX_ERROR_CODE_LENGTH = 96
     private const val MAX_OUTCOME_LENGTH = 32
     private const val MAX_SUMMARY_LENGTH = 180
+}
+
+internal fun auditSafeToolName(tool: String): String =
+    tool.takeIf(AUDITED_TOOL_NAMES::contains) ?: UNKNOWN_TOOL
+
+internal fun auditSafeErrorCode(code: String): String {
+    val normalized = sanitizeAuditText(code, 64)
+    return normalized.takeIf { AUDIT_ERROR_CODE_REGEX.matches(it) } ?: "other_error"
 }
 
 internal fun prependBoundedAuditEntry(
@@ -158,3 +178,21 @@ internal fun sanitizeAuditText(value: String, maxLength: Int): String {
 }
 
 internal const val MAX_AUDIT_ENTRIES = 200
+internal const val UNKNOWN_TOOL = "unknown_tool"
+
+private val AUDIT_ERROR_CODE_REGEX = Regex("^[a-z0-9_]{1,64}$")
+private val AUDITED_TOOL_NAMES = setOf(
+    "device.health",
+    "battery.usage",
+    "apps.list",
+    "apps.usage",
+    "apps.permissions",
+    "apps.permissionsAudit",
+    "apps.revokePermission",
+    "files.list",
+    "files.analyze",
+    "files.delete",
+    "apps.install",
+    "apps.uninstall",
+    "apps.forceStop",
+)
