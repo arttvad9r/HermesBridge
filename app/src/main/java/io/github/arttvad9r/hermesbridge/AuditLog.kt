@@ -175,6 +175,7 @@ internal fun sanitizeAuditText(value: String, maxLength: Int): String {
         .replace(Regex("\\s+"), " ")
         .trim()
         .take(maxLength)
+        .trim()
 }
 
 internal const val MAX_AUDIT_ENTRIES = 200
