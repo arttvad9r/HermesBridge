@@ -58,6 +58,41 @@ class BridgeCommandRouterTest {
     }
 
     @Test
+    fun routesPermissionRevokeToSpecializedHandler() = runBlocking {
+        val permissions = object : AppPermissionsRepository {
+            override fun read(packageName: String) = AppPermissionsSnapshot(
+                packageName = packageName,
+                permissions = listOf(
+                    AppPermissionSnapshot(
+                        name = "android.permission.INTERNET",
+                        granted = true,
+                        protection = "normal",
+                        dangerous = false,
+                        group = null,
+                        implicit = false,
+                        neverForLocation = false,
+                    )
+                ),
+            )
+        }
+        val router = router(permissions)
+
+        val result = router.execute(
+            CommandRequestPayload(
+                tool = AppPermissionRevokeToolHandler.TOOL_NAME,
+                requestId = "router-revoke",
+                arguments = buildJsonObject {
+                    put("packageName", "com.example.visible")
+                    put("permissionName", "android.permission.INTERNET")
+                },
+            )
+        )
+
+        assertFalse(result.ok)
+        assertEquals("permission_not_dangerous", result.error?.code)
+    }
+
+    @Test
     fun unknownToolsStillFailClosedThroughCoreRegistry() = runBlocking {
         val router = router(null)
         val result = router.execute(
