@@ -1,0 +1,1 @@
+"""Hermes Bridge MCP adapter."""
