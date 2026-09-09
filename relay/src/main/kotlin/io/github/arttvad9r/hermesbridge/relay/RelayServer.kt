@@ -128,6 +128,13 @@ private class RelayRuntime(deviceRegistryPath: Path?) {
     val sessions = DeviceSessionHub()
 }
 
+internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = when {
+    result.ok -> HttpStatusCode.OK
+    result.error?.code == "device_offline" -> HttpStatusCode.ServiceUnavailable
+    result.error?.code == "command_timeout" -> HttpStatusCode.GatewayTimeout
+    else -> HttpStatusCode.OK
+}
+
 fun main() {
     val token = System.getenv("HERMES_BRIDGE_ADMIN_TOKEN")
         ?.takeIf { it.length >= 24 }
@@ -218,11 +225,10 @@ fun Application.relayModule(
                     error = ProtocolError("command_timeout", "Device did not return a result in time."),
                 )
             }
-            val status = if (result.ok) HttpStatusCode.OK else HttpStatusCode.ServiceUnavailable
             call.respondText(
                 BridgeProtocol.json.encodeToString(result),
                 ContentType.Application.Json,
-                status,
+                commandHttpStatus(result),
             )
         }
 
