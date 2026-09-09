@@ -105,6 +105,7 @@ class BridgeForegroundService : Service() {
         val text = when (state) {
             ConnectionState.DISCONNECTED -> "Соединение остановлено"
             ConnectionState.PAIRING -> "Подключение к Hermes…"
+            ConnectionState.RECONNECTING -> "Соединение потеряно. Переподключение…"
             ConnectionState.CONNECTED -> "Hermes подключён к телефону"
             ConnectionState.ERROR -> message ?: "Ошибка соединения"
         }
