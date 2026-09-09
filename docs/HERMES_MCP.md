@@ -137,6 +137,28 @@ Maps only to `files.analyze` and is read-only. Android recursively analyzes only
 
 ## Mutating / privileged MCP tools
 
+### `revoke_app_permission(device_id, package_name, permission_name)`
+
+Maps only to Android tool `apps.revokePermission`.
+
+This is deliberately a revoke-only tool. It cannot grant permissions, revoke all permissions, choose an Android user, add `pm` flags or run another package-manager command.
+
+Before approval Android verifies that:
+
+- `package_name` is launcher-visible;
+- the app currently requests `permission_name`;
+- Android classifies that permission with the `dangerous` base protection level;
+- the permission is currently granted;
+- the target is not Hermes Bridge itself.
+
+The Android user ID is derived locally from the bridge process UID; Hermes cannot supply it. Approval is bound to canonical `packageName + permissionName + userId` and is one-use. After approval Hermes retries the same logical call. Shizuku receives only the internally built command:
+
+```text
+pm revoke --user <derived-user-id> <package> <permission>
+```
+
+If the permission is already revoked when the command is retried, the tool returns idempotent success without issuing another privileged command.
+
 ### `delete_path(device_id, path_segments)`
 
 Maps only to `files.delete`. The target must be below the SAF root; the granted root itself cannot be deleted. Approval is bound to normalized path plus current target metadata, so a changed target requires a new approval.
@@ -177,7 +199,7 @@ Approval fingerprints bind:
 tool name + canonical normalized arguments
 ```
 
-Additionally, APK install approval binds verified content/package/signing metadata and SAF deletion binds current target metadata. Approved tickets expire and are one-use only.
+Additionally, APK install approval binds verified content/package/signing metadata, SAF deletion binds current target metadata, and permission revoke binds package + permission + derived Android user. Approved tickets expire and are one-use only.
 
 Current approval is local to the Android app. Telegram/Hermes-side approval routing is planned separately.
 
@@ -192,6 +214,7 @@ run_dumpsys(args)
 install_from_url(url)
 install_from_path(path)
 delete_raw_path(path)
+pm_permission(command, flags)
 ```
 
 Each public MCP function hardcodes one Android tool name. Android applies another typed router/registry and risk policy before execution.
@@ -204,6 +227,7 @@ Keep these properties:
 - only tokenized `/device-artifacts/*` downloads are additionally exposed for APK transfer;
 - read-only tools remain fixed and bounded;
 - package metadata tools remain launcher-scoped;
+- permission changes are revoke-only, exact-target and locally approved;
 - mutating/privileged tools are separate typed functions;
 - no arbitrary shell, dumpsys arguments, intent, content URI, remote URL or raw filesystem path is exposed.
 
@@ -219,7 +243,8 @@ After relay and MCP are configured:
 6. Enable Usage Access and test `app_usage`.
 7. Grant a SAF folder and test `list_files` / `analyze_files`.
 8. Activate/authorize Shizuku and call `battery_usage`.
-9. Test `delete_path`, `force_stop_app` or `uninstall_app` on disposable targets, approving the exact Android card and retrying the same call.
-10. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
+9. On a disposable app with a granted dangerous permission, call `revoke_app_permission`, approve the exact package/permission shown on Android and retry the same call.
+10. Test `delete_path`, `force_stop_app` or `uninstall_app` on disposable targets, approving the exact Android card and retrying the same call.
+11. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
 
 Physical-device end-to-end validation is still required before Shizuku-backed and mutating actions should be treated as production-ready.
