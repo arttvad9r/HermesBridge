@@ -3,6 +3,7 @@ package io.github.arttvad9r.hermesbridge
 import android.content.pm.PackageManager
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.InvocationTargetException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
@@ -171,6 +172,8 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
                     message = timeoutMessage,
                 )
             )
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             FixedCommandAttempt.Failure(
                 PrivilegedOperationResult(
