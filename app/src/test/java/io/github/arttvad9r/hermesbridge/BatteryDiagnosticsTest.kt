@@ -99,9 +99,9 @@ class BatteryDiagnosticsTest {
     }
 
     @Test
-    fun batteryCommandIsFixedReadOnlyChargedCheckin() {
+    fun batteryCommandUsesCurrentCheckinFormatWithoutRealCheckinSideEffects() {
         assertArrayEquals(
-            arrayOf("dumpsys", "batterystats", "--charged", "--checkin"),
+            arrayOf("dumpsys", "batterystats", "-c", "--charged"),
             buildBatteryStatsCommand(),
         )
     }
