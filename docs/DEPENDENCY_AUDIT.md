@@ -38,15 +38,18 @@ Previous baseline: Kotlin 2.1.20.
 
 Finding:
 
-- CVE-2026-53914 covers unsafe deserialization in Kotlin build-cache metadata and was fixed in Kotlin 2.4.20 according to JetBrains' fixed-security-issues record.
+- CVE-2026-53914 affects Kotlin before 2.4.20: code execution was possible through unsafe deserialization in build-cache metadata.
 
-Remediation status:
+Remediation:
 
-- Gradle build cache is explicitly disabled with `org.gradle.caching=false` so the project does not rely on an implicit default while the toolchain upgrade is being qualified.
-- Kotlin 2.4.20 is the target patched baseline. The upgrade must pass the full project CI before this audit treats it as complete.
+- Hermes Bridge uses Kotlin 2.4.20 for the Android, JVM, Compose and serialization plugins.
+- The Android module was migrated from the removed string `kotlinOptions.jvmTarget` DSL to typed `compilerOptions` with JVM target 17.
+- Gradle build cache is explicitly disabled with `org.gradle.caching=false` as additional defense in depth.
+- The Kotlin 2.4.20 migration passed protocol/relay/app unit tests, Hermes MCP tests, Android lint, debug APK build and relay distribution build on Gradle 8.14.4.
 
 References:
 
+- https://nvd.nist.gov/vuln/detail/CVE-2026-53914
 - https://www.jetbrains.com/privacy-security/issues-fixed/
 - https://blog.jetbrains.com/kotlin/2026/09/kotlin-2-4-20-released/
 
