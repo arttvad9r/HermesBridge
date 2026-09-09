@@ -269,6 +269,18 @@ def list_apps(device_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def app_usage(device_id: str, days: int = 30) -> dict[str, Any]:
+    """Read bounded Android UsageStats for launcher-visible apps over 1-365 days. Requires Usage Access granted on the phone."""
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+        raise ValueError("days must be an integer from 1 to 365.")
+    return _device_command(
+        device_id,
+        "apps.usage",
+        {"days": days},
+    )
+
+
+@mcp.tool()
 def list_files(
     device_id: str,
     path_segments: list[str] | None = None,
