@@ -25,9 +25,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -46,35 +50,63 @@ class RelayAgentTransport(
         install(WebSockets)
     }
 
+    private val mutableConnectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
+    override val connectionState: StateFlow<ConnectionState> = mutableConnectionState.asStateFlow()
+
     @Volatile
     private var connectionJob: Job? = null
 
-    override suspend fun pair(code: String): Result<Unit> {
-        if (!relayWsUrl.startsWith("wss://")) {
-            return Result.failure(
-                IllegalStateException("Relay URL must use wss:// in production builds.")
-            )
+    override suspend fun pair(code: String): Result<Unit> = startConnection(code)
+
+    override suspend fun resume(): Result<Unit> {
+        if (pairingStore.deviceId() == null) {
+            return Result.failure(IllegalStateException("Device is not paired yet."))
         }
-        connectionJob?.cancelAndJoin()
-        val ready = CompletableDeferred<Result<Unit>>()
-        connectionJob = scope.launch {
-            connectionLoop(code, ready)
-        }
-        return runCatching {
-            withTimeout(20_000L) { ready.await().getOrThrow() }
-        }
+        return startConnection(null)
     }
 
     override suspend fun disconnect(): Result<Unit> = runCatching {
         connectionJob?.cancelAndJoin()
         connectionJob = null
+        mutableConnectionState.value = ConnectionState.DISCONNECTED
+    }
+
+    fun close() {
+        connectionJob?.cancel()
+        connectionJob = null
+        mutableConnectionState.value = ConnectionState.DISCONNECTED
+        client.close()
+        scope.cancel()
+    }
+
+    private suspend fun startConnection(pairingCode: String?): Result<Unit> {
+        if (!relayWsUrl.startsWith("wss://")) {
+            mutableConnectionState.value = ConnectionState.ERROR
+            return Result.failure(
+                IllegalStateException("Relay URL must use wss:// in production builds.")
+            )
+        }
+
+        connectionJob?.cancelAndJoin()
+        mutableConnectionState.value = ConnectionState.PAIRING
+
+        val ready = CompletableDeferred<Result<Unit>>()
+        connectionJob = scope.launch {
+            connectionLoop(pairingCode, ready)
+        }
+
+        return runCatching {
+            withTimeout(20_000L) { ready.await().getOrThrow() }
+        }.onFailure {
+            mutableConnectionState.value = ConnectionState.ERROR
+        }
     }
 
     private suspend fun connectionLoop(
-        initialPairingCode: String,
+        initialPairingCode: String?,
         ready: CompletableDeferred<Result<Unit>>,
     ) {
-        var pairingCode: String? = initialPairingCode
+        var pairingCode = initialPairingCode
         var backoffMillis = 1_000L
 
         while (currentCoroutineContext().isActive) {
@@ -82,6 +114,7 @@ class RelayAgentTransport(
                 runSession(pairingCode, ready)
             }.getOrElse { error ->
                 if (!ready.isCompleted) {
+                    mutableConnectionState.value = ConnectionState.ERROR
                     ready.complete(Result.failure(error))
                     return
                 }
@@ -89,15 +122,21 @@ class RelayAgentTransport(
             }
 
             if (!ready.isCompleted) {
+                mutableConnectionState.value = ConnectionState.ERROR
                 ready.complete(
                     Result.failure(IllegalStateException("Relay connection closed before authentication."))
                 )
                 return
             }
-            if (pairingStore.deviceId() == null) return
+            if (pairingStore.deviceId() == null) {
+                mutableConnectionState.value = ConnectionState.DISCONNECTED
+                return
+            }
 
             pairingCode = null
             if (authenticated) backoffMillis = 1_000L
+            mutableConnectionState.value = ConnectionState.PAIRING
+
             val jitter = Random.nextLong(0L, min(1_000L, backoffMillis))
             delay(backoffMillis + jitter)
             backoffMillis = min(backoffMillis * 2L, 30_000L)
@@ -164,6 +203,7 @@ class RelayAgentTransport(
 
                     MessageType.AUTH_OK -> {
                         authenticated = true
+                        mutableConnectionState.value = ConnectionState.CONNECTED
                         if (!ready.isCompleted) ready.complete(Result.success(Unit))
                     }
 
