@@ -16,8 +16,11 @@ Local VPS only:
 - `POST /api/v1/pairing-codes`
 - `POST /api/v1/apk-artifacts` — streams an APK into the short-lived relay staging store
 - `POST /api/v1/devices/{deviceId}/commands`
+- `POST /api/v1/devices/{deviceId}/revoke` — emergency/admin revocation of one paired device
 
 Do not publish TCP/8080 directly to the internet. Terminate TLS at Caddy/Nginx and firewall the relay port. In particular, never proxy `/api/v1/*` from the public internet.
+
+The Android app also supports authenticated **self-revocation** over its existing WebSocket session. That protocol message can revoke only the currently authenticated phone and does not require or expose the relay admin token to Android.
 
 ## 1. Install the relay distribution
 
@@ -103,7 +106,7 @@ bridge.example.com {
 
 Caddy handles WebSocket upgrade automatically. Replace `bridge.example.com` with the real DNS name and keep TCP/8080 blocked from the public internet.
 
-`/device-artifacts/*` must be public at the routing layer so the phone can download a staged APK, but each artifact still requires its own high-entropy short-lived bearer token. The admin staging endpoint `/api/v1/apk-artifacts` must remain loopback-only.
+`/device-artifacts/*` must be public at the routing layer so the phone can download a staged APK, but each artifact still requires its own high-entropy short-lived bearer token. The admin staging and revoke endpoints under `/api/v1/*` must remain loopback-only.
 
 The Android build must use:
 
@@ -156,6 +159,16 @@ curl --fail -X POST \
   "http://127.0.0.1:8080/api/v1/devices/$DEVICE_ID/commands"
 ```
 
+Emergency/admin revoke of that pairing:
+
+```bash
+curl --fail -X POST \
+  -H "Authorization: Bearer $HERMES_BRIDGE_ADMIN_TOKEN" \
+  "http://127.0.0.1:8080/api/v1/devices/$DEVICE_ID/revoke"
+```
+
+Revocation deletes the persisted public key and closes an active device socket. A revoked phone can no longer authenticate with the old `deviceId`; it must pair again. Normal users should instead use **Отвязать телефон** in the Android app, which performs self-revocation without the admin token.
+
 The relay also transports the other typed tools, but Hermes should normally reach them through the MCP adapter rather than by hand-crafting relay commands.
 
 ## 6. Hermes MCP adapter
@@ -174,7 +187,7 @@ Because the relay URL is loopback, HTTP is accepted for this internal hop. Non-l
 
 See [HERMES_MCP.md](HERMES_MCP.md) for the current typed tool surface and Hermes registration flow.
 
-## 7. Expected persistence behavior
+## 7. Expected persistence and revocation behavior
 
 After the first successful pairing:
 
@@ -184,24 +197,33 @@ After the first successful pairing:
 4. After a normal reboot, `BOOT_COMPLETED` starts the bridge again for an already paired device.
 5. Restarting the relay does not require pairing again as long as its state directory is preserved.
 6. If the relay loses its device registry and returns `unknown_device`, Android clears the stale local `deviceId` and allows a new pairing instead of reconnecting forever.
+7. Android self-revocation removes the relay-side public key first, waits for an authenticated acknowledgement, then clears its local `deviceId` and stops the foreground connection.
+8. Admin revocation deletes the public key and closes the socket; the phone clears its old `deviceId` when the relay rejects the next reconnect as `unknown_device`.
 
 ## Current tools
 
 Read-only:
 
 - `device.health`
+- `battery.usage` — bounded locally parsed Batterystats diagnostics
 - `apps.list`
-- `files.list` — only after the user grants a SAF directory in the Android app
+- `apps.usage` — requires Android Usage Access
+- `files.list` — only inside the SAF tree selected by the user
+- `files.analyze` — bounded recursive analysis inside that tree
 
-Privileged/mutating, with Android-side approval:
+Mutating/privileged, with Android-side exact-target approval:
 
+- `files.delete`
 - `apps.install` — staged APK, verified by size/SHA-256/package/signing metadata before approval
 - `apps.uninstall`
 - `apps.forceStop`
 
+Device pairing revocation is not an MCP tool. It is controlled by the Android UI or the localhost-only admin endpoint.
+
 ## Current limitations
 
-- Shizuku must be running and Hermes Bridge must be authorized before privileged package actions can execute.
-- Privileged package actions are implemented but still require a physical-device end-to-end validation before they should be treated as production-ready.
+- Shizuku must be running and Hermes Bridge must be authorized before privileged package actions and Shizuku-backed Batterystats diagnostics can execute.
+- Usage Access must be granted manually in Android before `apps.usage` can execute.
+- Privileged actions are implemented but still require physical-device end-to-end validation before they should be treated as production-ready.
 - The admin API is bearer-token authenticated but has no multi-user authorization model; keep it loopback-only.
 - A physical-device end-to-end test over real mobile/Wi-Fi network transitions is still required before treating the bridge as production-ready.
