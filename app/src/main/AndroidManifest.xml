@@ -24,6 +24,10 @@
         android:theme="@style/Theme.HermesBridge"
         android:usesCleartextTraffic="false">
         <activity
+            android:name=".AuditLogActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
