@@ -12,7 +12,11 @@ import kotlinx.coroutines.launch
 class BridgeViewModel(application: Application) : AndroidViewModel(application) {
     private val healthRepository: DeviceHealthRepository =
         AndroidDeviceHealthRepository(application)
-    private val transport: AgentTransport = DisabledAgentTransport()
+    private val transport: AgentTransport = RelayAgentTransport(
+        context = application,
+        relayWsUrl = BuildConfig.RELAY_WS_URL,
+        healthRepository = healthRepository,
+    )
 
     private val _state = MutableStateFlow(
         BridgeUiState(health = healthRepository.snapshot())
@@ -52,6 +56,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
                     _state.update {
                         it.copy(
                             connectionState = ConnectionState.CONNECTED,
+                            pairingCode = "",
                             message = null,
                         )
                     }
