@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import java.io.File
 import java.net.HttpURLConnection
-import java.net.URI
 import java.net.URL
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
@@ -154,24 +153,8 @@ class RelayApkArtifactRepository(
         private val TOKEN_REGEX = Regex("^[A-Za-z0-9_-]{40,128}$")
         private val SHA256_REGEX = Regex("^[0-9a-f]{64}$")
 
-        internal fun artifactBaseUrlFromWebSocket(relayWebSocketUrl: String): String {
-            val uri = URI(relayWebSocketUrl)
-            require(uri.scheme == "wss") { "APK artifacts require a wss:// relay URL." }
-            require(uri.host != null) { "Relay URL must contain a host." }
-            require(uri.userInfo == null && uri.query == null && uri.fragment == null) {
-                "Relay URL must not contain user info, query or fragment data."
-            }
-            require(uri.path == "/ws/device") { "Relay WebSocket path must be /ws/device." }
-            return URI(
-                "https",
-                null,
-                uri.host,
-                uri.port,
-                "/device-artifacts",
-                null,
-                null,
-            ).toString().removeSuffix("/")
-        }
+        internal fun artifactBaseUrlFromWebSocket(relayWebSocketUrl: String): String =
+            parseRelayEndpoint(relayWebSocketUrl).artifactBaseUrl
 
         fun validateDescriptor(descriptor: ApkArtifactDescriptor) {
             require(ARTIFACT_ID_REGEX.matches(descriptor.artifactId)) { "Invalid APK artifact ID." }
