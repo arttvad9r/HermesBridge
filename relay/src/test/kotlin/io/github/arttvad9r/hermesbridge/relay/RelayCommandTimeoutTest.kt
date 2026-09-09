@@ -10,8 +10,9 @@ class RelayCommandTimeoutTest {
     }
 
     @Test
-    fun fileAnalysisGetsBoundedExtendedTimeout() {
+    fun boundedReadAnalysisToolsGetExtendedTimeout() {
         assertEquals(60_000L, commandTimeoutMillis("files.analyze"))
+        assertEquals(60_000L, commandTimeoutMillis("battery.usage"))
     }
 
     @Test
