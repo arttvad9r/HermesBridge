@@ -23,6 +23,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: hermes_mcp/pyproject.toml
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
@@ -30,6 +37,11 @@ jobs:
 
       - name: Unit tests
         run: gradle --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
+
+      - name: Test Hermes MCP adapter
+        run: |
+          python -m pip install ./hermes_mcp
+          python -m unittest discover -s hermes_mcp/tests -v
 
       - name: Lint
         run: gradle --no-daemon :app:lintDebug
