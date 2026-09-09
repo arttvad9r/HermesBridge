@@ -42,7 +42,7 @@ import kotlinx.coroutines.withTimeout
 
 class RelayAgentTransport(
     context: Context,
-    private val relayWsUrl: String,
+    relayWsUrl: String,
     healthRepository: DeviceHealthRepository,
     appsRepository: InstalledAppsRepository = AndroidInstalledAppsRepository(context),
     filesRepository: SafFilesRepository = AndroidSafFilesRepository(context),
@@ -54,6 +54,7 @@ class RelayAgentTransport(
     batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
 ) : AgentTransport {
     private val appContext = context.applicationContext
+    private val relayWsUrl = parseRelayEndpoint(relayWsUrl).webSocketUrl
     private val identity = AndroidKeystoreDeviceIdentity()
     private val pairingStore = PairingStore(appContext)
     private val coreToolRegistry = BridgeToolRegistry(
@@ -149,13 +150,6 @@ class RelayAgentTransport(
     }
 
     private suspend fun startConnection(pairingCode: String?): Result<Unit> {
-        if (!relayWsUrl.startsWith("wss://")) {
-            mutableConnectionState.value = ConnectionState.ERROR
-            return Result.failure(
-                IllegalStateException("Relay URL must use wss:// in production builds.")
-            )
-        }
-
         connectionJob?.cancelAndJoin()
         mutableConnectionState.value = ConnectionState.PAIRING
 
