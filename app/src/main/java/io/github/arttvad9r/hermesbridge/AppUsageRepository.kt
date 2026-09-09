@@ -11,9 +11,16 @@ data class AppUsageSnapshot(
     val totalTimeForegroundMillis: Long,
 )
 
+data class AppUsageWindowSnapshot(
+    val days: Int,
+    val beginEpochMillis: Long,
+    val endEpochMillis: Long,
+    val entries: List<AppUsageSnapshot>,
+)
+
 interface AppUsageRepository {
     fun hasAccess(): Boolean
-    fun query(days: Int): List<AppUsageSnapshot>
+    fun query(days: Int): AppUsageWindowSnapshot
 }
 
 class AndroidAppUsageRepository(context: Context) : AppUsageRepository {
@@ -32,7 +39,7 @@ class AndroidAppUsageRepository(context: Context) : AppUsageRepository {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    override fun query(days: Int): List<AppUsageSnapshot> {
+    override fun query(days: Int): AppUsageWindowSnapshot {
         require(days in MIN_DAYS..MAX_DAYS) { "Usage window must be between $MIN_DAYS and $MAX_DAYS days." }
         if (!hasAccess()) throw UsageAccessNotGrantedException()
 
@@ -41,7 +48,7 @@ class AndroidAppUsageRepository(context: Context) : AppUsageRepository {
         val begin = (end - duration).coerceAtLeast(0L)
         val aggregated = usageStatsManager.queryAndAggregateUsageStats(begin, end)
 
-        return aggregated.values
+        val entries = aggregated.values
             .asSequence()
             .mapNotNull { stats ->
                 val packageName = stats.packageName?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
@@ -58,6 +65,13 @@ class AndroidAppUsageRepository(context: Context) : AppUsageRepository {
             )
             .take(MAX_RESULTS)
             .toList()
+
+        return AppUsageWindowSnapshot(
+            days = days,
+            beginEpochMillis = begin,
+            endEpochMillis = end,
+            entries = entries,
+        )
     }
 
     companion object {
