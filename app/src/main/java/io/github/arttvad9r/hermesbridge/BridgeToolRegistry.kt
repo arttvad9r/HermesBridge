@@ -7,12 +7,15 @@ import io.github.arttvad9r.hermesbridge.security.ApprovalDecision
 import io.github.arttvad9r.hermesbridge.security.BridgeTool
 import io.github.arttvad9r.hermesbridge.security.DefaultToolPolicy
 import io.github.arttvad9r.hermesbridge.security.ToolRisk
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class BridgeToolRegistry(
@@ -20,12 +23,15 @@ class BridgeToolRegistry(
     private val appsRepository: InstalledAppsRepository,
     private val filesRepository: SafFilesRepository,
     private val privilegedAppsBackend: PrivilegedAppsBackend = DisabledPrivilegedAppsBackend,
+    private val apkArtifactRepository: ApkArtifactRepository? = null,
+    private val apkPackageInspector: ApkPackageInspector? = null,
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         return when (request.tool) {
             DEVICE_HEALTH -> executeDeviceHealth(request)
             APPS_LIST -> executeAppsList(request)
             FILES_LIST -> executeFilesList(request)
+            APPS_INSTALL -> executeAppsInstall(request)
             APPS_UNINSTALL -> executeAppsUninstall(request)
             APPS_FORCE_STOP -> executeAppsForceStop(request)
             else -> failure(
@@ -217,6 +223,158 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeAppsInstall(request: CommandRequestPayload): CommandResultPayload {
+        val allowedKeys = setOf(
+            ARTIFACT_ID,
+            DOWNLOAD_TOKEN,
+            FILE_NAME,
+            SIZE_BYTES,
+            SHA256,
+            REPLACE,
+        )
+        if (request.arguments.keys.any { it !in allowedKeys }) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "apps.install accepts only staged APK artifact metadata and optional replace.",
+            )
+        }
+
+        val descriptor = parseApkArtifactDescriptor(request)
+            ?: return failure(
+                request.requestId,
+                "invalid_arguments",
+                "APK artifact metadata is missing or invalid.",
+            )
+        val replace = when (val value = request.arguments[REPLACE]) {
+            null -> true
+            is JsonPrimitive -> value.booleanOrNull
+                ?: return failure(request.requestId, "invalid_arguments", "replace must be a boolean.")
+            else -> return failure(request.requestId, "invalid_arguments", "replace must be a boolean.")
+        }
+
+        try {
+            RelayApkArtifactRepository.validateDescriptor(descriptor)
+        } catch (_: IllegalArgumentException) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "APK artifact metadata failed validation.",
+            )
+        }
+
+        requirePrivilegedBackend(request)?.let { return it }
+        val repository = apkArtifactRepository
+            ?: return failure(
+                request.requestId,
+                "apk_install_unavailable",
+                "APK artifact downloading is not configured.",
+            )
+        val inspector = apkPackageInspector
+            ?: return failure(
+                request.requestId,
+                "apk_install_unavailable",
+                "APK package inspection is not configured.",
+            )
+
+        val artifact = try {
+            repository.download(descriptor)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: ApkArtifactDownloadException) {
+            return failure(
+                request.requestId,
+                "apk_download_failed",
+                error.message ?: "The staged APK could not be downloaded.",
+            )
+        } catch (error: Throwable) {
+            return failure(
+                request.requestId,
+                "apk_download_failed",
+                (error.message ?: "The staged APK could not be downloaded.").take(200),
+            )
+        }
+
+        val metadata = try {
+            inspector.inspect(artifact)
+        } catch (error: ApkInspectionException) {
+            return failure(
+                request.requestId,
+                "invalid_apk",
+                error.message ?: "Android could not inspect the APK.",
+            )
+        } catch (error: Throwable) {
+            return failure(
+                request.requestId,
+                "invalid_apk",
+                (error.message ?: "Android could not inspect the APK.").take(200),
+            )
+        }
+
+        if (!isValidPackageName(metadata.packageName)) {
+            return failure(
+                request.requestId,
+                "invalid_apk",
+                "APK contains an invalid package name.",
+            )
+        }
+        if (metadata.packageName == HERMES_BRIDGE_PACKAGE) {
+            return failure(
+                request.requestId,
+                "protected_package",
+                "Hermes Bridge cannot replace itself through the agent install tool.",
+            )
+        }
+
+        val normalizedArguments = buildJsonObject {
+            put(SHA256, artifact.sha256)
+            put(SIZE_BYTES, artifact.sizeBytes)
+            put(PACKAGE_NAME, metadata.packageName)
+            if (metadata.versionName == null) put(VERSION_NAME, JsonNull)
+            else put(VERSION_NAME, metadata.versionName)
+            put(VERSION_CODE, metadata.versionCode)
+            put(
+                SIGNER_SHA256,
+                buildJsonArray {
+                    metadata.signerSha256.sorted().forEach { add(JsonPrimitive(it)) }
+                },
+            )
+            put(REPLACE, replace)
+        }
+        val versionLabel = metadata.versionName?.takeIf { it.isNotBlank() }
+            ?: metadata.versionCode.toString()
+        requireApproval(
+            request = request,
+            tool = APPS_INSTALL,
+            risk = ToolRisk.MUTATING,
+            normalizedArguments = normalizedArguments,
+            summary = "Установить ${metadata.packageName} $versionLabel из ${artifact.fileName}",
+        )?.let { return it }
+
+        val outcome = privilegedAppsBackend.install(artifact, replace)
+        if (!outcome.ok) {
+            return failure(
+                request.requestId,
+                outcome.code ?: "install_failed",
+                outcome.message ?: "The APK could not be installed.",
+            )
+        }
+
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PACKAGE_NAME, metadata.packageName)
+                if (metadata.versionName == null) put(VERSION_NAME, JsonNull)
+                else put(VERSION_NAME, metadata.versionName)
+                put(VERSION_CODE, metadata.versionCode)
+                put(SHA256, artifact.sha256)
+                put(REPLACE, replace)
+                put("installed", true)
+            },
+        )
+    }
+
     private suspend fun executeAppsUninstall(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys.any { it != PACKAGE_NAME && it != KEEP_DATA }) {
             return failure(
@@ -225,7 +383,7 @@ class BridgeToolRegistry(
                 "apps.uninstall accepts only packageName and optional keepData.",
             )
         }
-        val packageName = parsePackageName(request, APPS_UNINSTALL) ?: return packageNameFailure(request)
+        val packageName = parsePackageName(request) ?: return packageNameFailure(request)
         if (packageName == HERMES_BRIDGE_PACKAGE) {
             return failure(
                 request.requestId,
@@ -284,7 +442,7 @@ class BridgeToolRegistry(
                 "apps.forceStop accepts only packageName.",
             )
         }
-        val packageName = parsePackageName(request, APPS_FORCE_STOP) ?: return packageNameFailure(request)
+        val packageName = parsePackageName(request) ?: return packageNameFailure(request)
         if (packageName == HERMES_BRIDGE_PACKAGE) {
             return failure(
                 request.requestId,
@@ -321,7 +479,24 @@ class BridgeToolRegistry(
         )
     }
 
-    private fun parsePackageName(request: CommandRequestPayload, tool: String): String? {
+    private fun parseApkArtifactDescriptor(request: CommandRequestPayload): ApkArtifactDescriptor? {
+        fun string(name: String): String? {
+            val value = request.arguments[name] as? JsonPrimitive ?: return null
+            return value.takeIf { it.isString }?.content
+        }
+
+        val sizePrimitive = request.arguments[SIZE_BYTES] as? JsonPrimitive ?: return null
+        val size = sizePrimitive.longOrNull ?: return null
+        return ApkArtifactDescriptor(
+            artifactId = string(ARTIFACT_ID) ?: return null,
+            downloadToken = string(DOWNLOAD_TOKEN) ?: return null,
+            fileName = string(FILE_NAME) ?: return null,
+            sizeBytes = size,
+            sha256 = string(SHA256) ?: return null,
+        )
+    }
+
+    private fun parsePackageName(request: CommandRequestPayload): String? {
         val primitive = request.arguments[PACKAGE_NAME] as? JsonPrimitive ?: return null
         if (!primitive.isString) return null
         val packageName = primitive.content.trim()
@@ -347,7 +522,7 @@ class BridgeToolRegistry(
         request: CommandRequestPayload,
         tool: String,
         risk: ToolRisk,
-        normalizedArguments: kotlinx.serialization.json.JsonObject,
+        normalizedArguments: JsonObject,
         summary: String,
     ): CommandResultPayload? {
         if (DefaultToolPolicy.decision(BridgeTool(tool, risk)) != ApprovalDecision.REQUIRE_APPROVAL) {
@@ -389,12 +564,22 @@ class BridgeToolRegistry(
         const val DEVICE_HEALTH = "device.health"
         const val APPS_LIST = "apps.list"
         const val FILES_LIST = "files.list"
+        const val APPS_INSTALL = "apps.install"
         const val APPS_UNINSTALL = "apps.uninstall"
         const val APPS_FORCE_STOP = "apps.forceStop"
 
         private const val PATH_SEGMENTS = "pathSegments"
         private const val PACKAGE_NAME = "packageName"
         private const val KEEP_DATA = "keepData"
+        private const val ARTIFACT_ID = "artifactId"
+        private const val DOWNLOAD_TOKEN = "downloadToken"
+        private const val FILE_NAME = "fileName"
+        private const val SIZE_BYTES = "sizeBytes"
+        private const val SHA256 = "sha256"
+        private const val REPLACE = "replace"
+        private const val VERSION_NAME = "versionName"
+        private const val VERSION_CODE = "versionCode"
+        private const val SIGNER_SHA256 = "signerSha256"
         private const val HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
         private val PACKAGE_NAME_REGEX = Regex(
             "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
