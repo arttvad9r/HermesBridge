@@ -22,10 +22,12 @@ data class BridgeUiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val pairingCode: String = "",
     val health: DeviceHealthSnapshot? = null,
+    val notificationsGranted: Boolean = true,
     val fileAccessConfigured: Boolean = false,
     val usageAccessGranted: Boolean = false,
     val setupCompleted: Boolean = false,
     val pendingApprovals: List<ApprovalTicket> = emptyList(),
     val shizuku: ShizukuAccessState = ShizukuAccessState(),
+    val shizukuWasConfigured: Boolean = false,
     val message: String? = null,
 )
