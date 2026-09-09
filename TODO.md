@@ -42,8 +42,11 @@
 - [x] `list_devices`.
 - [x] `create_pairing_code`.
 - [x] `device_health`.
+- [x] `battery_usage` with bounded parsed Batterystats output and no raw shell arguments.
 - [x] `list_apps`.
 - [x] `list_files` inside the user-granted SAF tree.
+- [x] `analyze_files` with bounded recursive SAF storage analysis.
+- [x] `delete_path` behind Android-side exact-target approval.
 - [x] Typed `install_apk` with dedicated VPS staging directory, relay artifact transfer and Android-side verified-content approval.
 - [x] Typed `uninstall_app` behind Android-side exact-argument approval.
 - [x] Typed `force_stop_app` behind Android-side exact-argument approval.
@@ -52,15 +55,17 @@
 
 - [x] Explicit Hermes Bridge Android tool allowlist.
 - [x] `device.health`.
+- [x] `battery.usage` through fixed `dumpsys batterystats --charged --checkin`, parsed locally and read-only.
 - [x] `apps.list` with launcher-only package visibility; no `QUERY_ALL_PACKAGES`.
 - [x] `files.list` limited to a user-selected SAF directory tree.
+- [x] `files.analyze` with bounded traversal, total size and largest-file summaries inside the granted tree.
+- [x] `files.delete` with root protection and approval bound to target metadata.
 - [x] `apps.install` with staged artifact validation, size/SHA-256 verification, Android package/signing inspection, self-protection and approval.
 - [x] `apps.uninstall` with strict package validation, self-protection and approval.
 - [x] `apps.forceStop` with strict package validation, self-protection and approval.
 - [x] Structured result/error envelopes.
 - [x] Path-segment validation and bounded file-list size/depth.
 - [ ] Add read-only app details as needed without broad package visibility.
-- [ ] File size analysis/large-file summaries inside the granted tree.
 - [ ] Idempotency where a future mutating operation is safely retryable.
 - [ ] Audit log.
 
@@ -84,7 +89,8 @@
 - [x] Force-stop app.
 - [ ] Selected permission operations.
 - [ ] Selected safe settings operations.
-- [ ] Selected diagnostics (`dumpsys`) wrapped in typed tools.
+- [x] First selected diagnostic: bounded read-only Batterystats power-use snapshot.
+- [ ] Additional selected diagnostics (`dumpsys`) wrapped in typed tools as justified.
 - [x] Never register upstream/raw shell in the Hermes tool surface.
 
 ## P1 — approvals
@@ -94,6 +100,7 @@
 - [x] Approval expiry.
 - [x] Approval binds to exact canonical normalized arguments.
 - [x] Install approval binds to verified APK content/package/signing metadata rather than ephemeral transfer tokens.
+- [x] File deletion approval binds to validated path plus current target metadata.
 - [x] Approved tickets are one-use only.
 - [ ] Hermes/Telegram approval routing.
 - [ ] Per-tool "always allow" only where explicitly safe.
@@ -115,7 +122,7 @@
 - [ ] Process-death/reboot/network-handover tests on device.
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Shizuku reboot/reactivation tests on device.
-- [ ] Physical-device install/uninstall/force-stop E2E through the deployed VPS relay.
+- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
 - [ ] Signed reproducible release process.
