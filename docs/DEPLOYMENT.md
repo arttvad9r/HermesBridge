@@ -8,14 +8,16 @@ Public internet:
 
 - `GET /health`
 - `GET /ws/device` (WebSocket upgrade)
+- `GET /device-artifacts/{artifactId}` — short-lived APK download; requires the per-artifact bearer token
 
 Local VPS only:
 
 - `GET /api/v1/devices`
 - `POST /api/v1/pairing-codes`
+- `POST /api/v1/apk-artifacts` — streams an APK into the short-lived relay staging store
 - `POST /api/v1/devices/{deviceId}/commands`
 
-Do not publish TCP/8080 directly to the internet. Terminate TLS at Caddy/Nginx and firewall the relay port.
+Do not publish TCP/8080 directly to the internet. Terminate TLS at Caddy/Nginx and firewall the relay port. In particular, never proxy `/api/v1/*` from the public internet.
 
 ## 1. Install the relay distribution
 
@@ -64,7 +66,7 @@ sudo chown root:hermes-bridge /etc/hermes-bridge/relay.env
 sudo chmod 0640 /etc/hermes-bridge/relay.env
 ```
 
-The persistent device registry is stored under `HERMES_BRIDGE_STATE_DIR`. Backing up this directory preserves the relay-side trusted device public keys.
+The persistent device registry is stored under `HERMES_BRIDGE_STATE_DIR`. Short-lived APK artifacts are staged under `HERMES_BRIDGE_STATE_DIR/apk-artifacts` and are removed when their TTL expires.
 
 ## 3. Install systemd service
 
@@ -87,7 +89,7 @@ Example Caddy configuration:
 
 ```caddyfile
 bridge.example.com {
-    @bridge_public path /health /ws/device
+    @bridge_public path /health /ws/device /device-artifacts/*
 
     handle @bridge_public {
         reverse_proxy 127.0.0.1:8080
@@ -100,6 +102,8 @@ bridge.example.com {
 ```
 
 Caddy handles WebSocket upgrade automatically. Replace `bridge.example.com` with the real DNS name and keep TCP/8080 blocked from the public internet.
+
+`/device-artifacts/*` must be public at the routing layer so the phone can download a staged APK, but each artifact still requires its own high-entropy short-lived bearer token. The admin staging endpoint `/api/v1/apk-artifacts` must remain loopback-only.
 
 The Android build must use:
 
@@ -152,7 +156,7 @@ curl --fail -X POST \
   "http://127.0.0.1:8080/api/v1/devices/$DEVICE_ID/commands"
 ```
 
-The relay also transports `apps.list` and `files.list`, but Hermes should normally reach those through the typed MCP adapter rather than by hand-crafting relay commands.
+The relay also transports the other typed tools, but Hermes should normally reach them through the MCP adapter rather than by hand-crafting relay commands.
 
 ## 6. Hermes MCP adapter
 
@@ -161,7 +165,10 @@ Install `hermes_mcp/` into a dedicated Python environment on the same VPS. Confi
 ```text
 HERMES_BRIDGE_RELAY_URL=http://127.0.0.1:8080
 HERMES_BRIDGE_ADMIN_TOKEN=<same admin token>
+HERMES_BRIDGE_APK_DIR=/opt/HermesBridge/apks
 ```
+
+Create the APK staging directory with permissions appropriate for the account running Hermes/MCP. Only files directly inside this directory can be selected by the `install_apk` MCP tool; arbitrary VPS paths are rejected.
 
 Because the relay URL is loopback, HTTP is accepted for this internal hop. Non-loopback MCP relay URLs must use HTTPS.
 
@@ -178,15 +185,23 @@ After the first successful pairing:
 5. Restarting the relay does not require pairing again as long as its state directory is preserved.
 6. If the relay loses its device registry and returns `unknown_device`, Android clears the stale local `deviceId` and allows a new pairing instead of reconnecting forever.
 
-## Current read-only tools
+## Current tools
+
+Read-only:
 
 - `device.health`
 - `apps.list`
 - `files.list` — only after the user grants a SAF directory in the Android app
 
+Privileged/mutating, with Android-side approval:
+
+- `apps.install` — staged APK, verified by size/SHA-256/package/signing metadata before approval
+- `apps.uninstall`
+- `apps.forceStop`
+
 ## Current limitations
 
-- No Shizuku privileges are enabled yet.
-- No package/file mutation tools are enabled yet.
+- Shizuku must be running and Hermes Bridge must be authorized before privileged package actions can execute.
+- Privileged package actions are implemented but still require a physical-device end-to-end validation before they should be treated as production-ready.
 - The admin API is bearer-token authenticated but has no multi-user authorization model; keep it loopback-only.
 - A physical-device end-to-end test over real mobile/Wi-Fi network transitions is still required before treating the bridge as production-ready.
