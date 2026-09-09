@@ -110,7 +110,8 @@ private fun BridgeScreen(
 
             PairingCard(
                 code = state.pairingCode,
-                enabled = state.connectionState != ConnectionState.PAIRING,
+                enabled = state.connectionState == ConnectionState.DISCONNECTED ||
+                    state.connectionState == ConnectionState.ERROR,
                 message = state.message,
                 onCodeChange = onCodeChange,
                 onPair = onPair,
@@ -133,6 +134,7 @@ private fun StatusCard(connectionState: ConnectionState) {
     val (title, detail) = when (connectionState) {
         ConnectionState.DISCONNECTED -> "Не подключён" to "Введите одноразовый код Hermes."
         ConnectionState.PAIRING -> "Подключение…" to "Проверяем код и сервер."
+        ConnectionState.RECONNECTING -> "Переподключение…" to "Связь с relay потеряна, соединение восстановится автоматически."
         ConnectionState.CONNECTED -> "Hermes подключён" to "Телефон доступен агенту в рамках выданных прав."
         ConnectionState.ERROR -> "Не подключён" to "Соединение не установлено."
     }
