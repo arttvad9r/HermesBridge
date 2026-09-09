@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -108,8 +109,8 @@ class BridgeToolRegistryTest {
                     put(
                         "pathSegments",
                         buildJsonArray {
-                            add("Documents")
-                            add("Notes")
+                            add(JsonPrimitive("Documents"))
+                            add(JsonPrimitive("Notes"))
                         },
                     )
                 },
@@ -131,7 +132,7 @@ class BridgeToolRegistryTest {
                     put(
                         "pathSegments",
                         buildJsonArray {
-                            add("..")
+                            add(JsonPrimitive(".."))
                         },
                     )
                 },
