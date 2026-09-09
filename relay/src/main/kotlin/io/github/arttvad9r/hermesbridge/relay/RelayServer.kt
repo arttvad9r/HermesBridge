@@ -36,6 +36,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
@@ -57,6 +58,13 @@ data class RelayCommandRequest(
     val arguments: JsonObject = JsonObject(emptyMap()),
 )
 
+@Serializable
+data class RelayDeviceResponse(
+    val deviceId: String,
+    val label: String,
+    val connected: Boolean,
+)
+
 private class DeviceSessionHub {
     private val sessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
     private val pending = ConcurrentHashMap<String, CompletableDeferred<CommandResultPayload>>()
@@ -75,6 +83,8 @@ private class DeviceSessionHub {
     fun unregister(deviceId: String, session: DefaultWebSocketServerSession) {
         sessions.remove(deviceId, session)
     }
+
+    fun isConnected(deviceId: String): Boolean = sessions.containsKey(deviceId)
 
     suspend fun sendCommand(
         deviceId: String,
@@ -112,9 +122,9 @@ private class DeviceSessionHub {
     }
 }
 
-private class RelayRuntime {
+private class RelayRuntime(deviceRegistryPath: Path?) {
     val pairingCodes = PairingCodeStore()
-    val devices = DeviceRegistry()
+    val devices = DeviceRegistry(deviceRegistryPath)
     val sessions = DeviceSessionHub()
 }
 
@@ -123,14 +133,22 @@ fun main() {
         ?.takeIf { it.length >= 24 }
         ?: error("HERMES_BRIDGE_ADMIN_TOKEN must be set to a secret with at least 24 characters")
     val port = System.getenv("PORT")?.toIntOrNull() ?: 8080
+    val stateDirectory = Path.of(
+        System.getenv("HERMES_BRIDGE_STATE_DIR")
+            ?.takeIf { it.isNotBlank() }
+            ?: ".hermes-bridge",
+    )
 
     embeddedServer(Netty, port = port, host = "0.0.0.0") {
-        relayModule(token)
+        relayModule(token, stateDirectory.resolve("devices.json"))
     }.start(wait = true)
 }
 
-fun Application.relayModule(adminToken: String) {
-    val runtime = RelayRuntime()
+fun Application.relayModule(
+    adminToken: String,
+    deviceRegistryPath: Path? = null,
+) {
+    val runtime = RelayRuntime(deviceRegistryPath)
 
     install(WebSockets) {
         pingPeriodMillis = 20_000L
@@ -142,6 +160,21 @@ fun Application.relayModule(adminToken: String) {
     routing {
         get("/health") {
             call.respondText("ok", ContentType.Text.Plain)
+        }
+
+        get("/api/v1/devices") {
+            if (!call.requireAdmin(adminToken)) return@get
+            val devices = runtime.devices.list().map { device ->
+                RelayDeviceResponse(
+                    deviceId = device.deviceId,
+                    label = device.label,
+                    connected = runtime.sessions.isConnected(device.deviceId),
+                )
+            }
+            call.respondText(
+                BridgeProtocol.json.encodeToString(devices),
+                ContentType.Application.Json,
+            )
         }
 
         post("/api/v1/pairing-codes") {
