@@ -46,6 +46,8 @@
 - [x] `battery_usage` with bounded parsed Batterystats power use and top partial wakelocks; no raw shell arguments.
 - [x] `list_apps`.
 - [x] `app_usage` with optional 1–365 day window, launcher-only visibility and Android Usage Access gate.
+- [x] `app_permissions` for one launcher-visible package without broad package visibility.
+- [x] `permissions_audit` with bounded launcher-only scan of granted Android-dangerous permissions.
 - [x] `list_files` inside the user-granted SAF tree.
 - [x] `analyze_files` with bounded recursive SAF storage analysis.
 - [x] `delete_path` behind Android-side exact-target approval.
@@ -55,12 +57,15 @@
 
 ## P0 — tool boundary
 
-- [x] Explicit Hermes Bridge Android tool allowlist.
+- [x] Explicit Hermes Bridge Android tool allowlist/router.
 - [x] `device.health`.
 - [x] `battery.usage` through fixed read-only `dumpsys batterystats -c --charged`, parsed locally.
 - [x] Bounded top partial-wakelock diagnostics from the same Batterystats snapshot.
 - [x] `apps.list` with launcher-only package visibility; no `QUERY_ALL_PACKAGES`.
 - [x] `apps.usage` intersects UsageStats with launcher-visible packages so special access does not widen package visibility.
+- [x] `apps.permissions` reads requested/granted metadata only after a launcher-visible package check.
+- [x] `apps.permissionsAudit` scans at most 200 launcher-visible apps and returns only granted Android-`dangerous` permissions with explicit truncation state.
+- [x] Permission-audit output bounded below the relay WebSocket frame limit.
 - [x] `files.list` limited to a user-selected SAF directory tree.
 - [x] `files.analyze` with bounded traversal, total size and largest-file summaries inside the granted tree.
 - [x] `files.delete` with root protection and approval bound to target metadata.
@@ -69,7 +74,7 @@
 - [x] `apps.forceStop` with strict package validation, self-protection and approval.
 - [x] Structured result/error envelopes.
 - [x] Path-segment validation and bounded file-list size/depth.
-- [ ] Add additional read-only app details only where useful and without broad package visibility.
+- [ ] Add further read-only app details only when a concrete user scenario justifies them.
 - [ ] Idempotency where a future mutating operation is safely retryable.
 - [ ] Audit log.
 
@@ -92,7 +97,7 @@
 - [x] Install APK through verified staged bytes streamed to `pm install` stdin.
 - [x] Uninstall app.
 - [x] Force-stop app.
-- [ ] Selected permission operations.
+- [ ] Selected permission grant/revoke operations, only if a safe exact-target policy is defined.
 - [ ] Selected safe settings operations.
 - [x] First selected diagnostic: bounded read-only Batterystats power-use and partial-wakelock snapshot.
 - [ ] Additional selected diagnostics (`dumpsys`) wrapped in typed tools as justified.
@@ -127,8 +132,8 @@
 - [ ] Process-death/reboot/network-handover tests on device.
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Usage Access behavior/revocation tests on physical device.
-- [ ] Shizuku reboot/reactivation tests on device.
-- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage E2E through the deployed VPS relay.
+- [ ] Shizuku reboot/reactivation tests on physical device.
+- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
 - [ ] Signed reproducible release process.
