@@ -20,12 +20,14 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
         AndroidAppUsageRepository(application)
     private val pairingStore = PairingStore(application)
     private val treeStore = SafTreeStore(application)
+    private val setupStore = SetupStore(application)
 
     private val _state = MutableStateFlow(
         BridgeUiState(
             health = healthRepository.snapshot(),
             fileAccessConfigured = treeStore.treeUri() != null,
             usageAccessGranted = appUsageRepository.hasAccess(),
+            setupCompleted = setupStore.isCompleted(),
         )
     )
     val state: StateFlow<BridgeUiState> = _state.asStateFlow()
@@ -175,6 +177,8 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с Hermes.") }
             return
         }
+        setupStore.reset()
+        _state.update { it.copy(setupCompleted = false) }
         runCatching { BridgeForegroundService.revokePairing(app) }
             .onFailure { error ->
                 BridgeRuntime.update(
@@ -182,5 +186,19 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
                     error.message ?: "Не удалось запустить отзыв привязки.",
                 )
             }
+    }
+
+    fun finishSetup() {
+        if (_state.value.connectionState != ConnectionState.CONNECTED) {
+            _state.update { it.copy(message = "Сначала подключите Hermes.") }
+            return
+        }
+        setupStore.markCompleted()
+        _state.update { it.copy(setupCompleted = true, message = null) }
+    }
+
+    fun restartSetup() {
+        setupStore.reset()
+        _state.update { it.copy(setupCompleted = false, message = null) }
     }
 }
