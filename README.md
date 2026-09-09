@@ -18,6 +18,8 @@ Hermes Bridge is **not** intended to expose a general-purpose remote shell. The 
 - P-256 device identity stored in Android Keystore.
 - One-time pairing and challenge/response reconnect authentication.
 - Persistent outbound WSS connection from Android to the relay.
+- Strict canonical relay endpoint validation: `wss://HOST[:PORT]/ws/device`, with no user info, query or fragment; APK artifact HTTPS URLs are derived from the same validated endpoint.
+- Android Network Security Config denies cleartext traffic and trusts system certificate authorities only.
 - Foreground service with reboot/package-update recovery.
 - Android 13+ notification-permission setup is explicit and optional; denying it does not disable the Hermes relay connection.
 - Guided first-run setup instead of exposing all technical settings at once.
@@ -91,6 +93,7 @@ See:
 - [Product specification](docs/PRODUCT_SPEC.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security model](docs/SECURITY.md)
+- [Dependency/security audit](docs/DEPENDENCY_AUDIT.md)
 - [Relay protocol](docs/PROTOCOL.md)
 - [Permissions and setup](docs/PERMISSIONS.md)
 - [Relay deployment](docs/DEPLOYMENT.md)
@@ -120,7 +123,8 @@ The project keeps these non-negotiable rules:
 - SAF deletion approval is bound to the validated target path and current metadata;
 - audit history stores bounded sanitized metadata rather than raw tool arguments or secret-bearing error text;
 - long-term device credentials are stored in Android Keystore;
-- production device transport requires WSS;
+- production device transport requires the canonical WSS relay endpoint;
+- Android cleartext traffic is disabled and the app network security configuration trusts system CAs only;
 - the Hermes-side admin token stays local to the VPS process boundary where possible;
 - SAF file access is limited to a directory explicitly chosen by the user;
 - privileged package operations validate package names and protect Hermes Bridge itself;
@@ -130,15 +134,15 @@ More detail: [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Technology baseline
 
-- Kotlin 2.1.20
+- Kotlin 2.4.20
 - Android Gradle Plugin 8.9.1
-- Gradle 8.12
+- Gradle 8.14.4 via checksum-pinned Gradle Wrapper
 - compile/target SDK 35
 - min SDK 30
 - Jetpack Compose + Material 3
 - Java/Kotlin target 17
-- Ktor WebSockets
-- kotlinx.serialization
+- Ktor WebSockets 3.1.2
+- kotlinx.serialization 1.8.1
 - AndroidX DocumentFile 1.1.0 for SAF tree traversal
 - Shizuku API/provider 13.1.5
 - Python MCP SDK v2 adapter for Hermes
@@ -148,10 +152,10 @@ The narrow Shizuku process-execution pattern is adapted from Apache-2.0 `droid-m
 ## Build
 
 ```bash
-gradle :app:assembleDebug
+./gradlew :app:assembleDebug
 ```
 
-The CI currently installs Gradle 8.12 explicitly because the repository does not yet contain a validated Gradle Wrapper binary.
+The repository contains the standard Gradle Wrapper pinned to Gradle 8.14.4 and the official binary distribution SHA-256. CI validates the wrapper and uses `./gradlew` for all Gradle tasks.
 
 CI runs:
 
@@ -161,6 +165,8 @@ CI runs:
 - debug APK build;
 - relay distribution build;
 - artifact upload.
+
+Weekly Dependabot monitoring covers Gradle/Maven, Python and GitHub Actions dependencies. Updates are reviewed and tested; there is no automatic merge policy.
 
 ## Repository policy
 
