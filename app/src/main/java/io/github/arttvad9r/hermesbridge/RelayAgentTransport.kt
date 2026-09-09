@@ -70,6 +70,7 @@ class RelayAgentTransport(
         coreRegistry = coreToolRegistry,
         appsRepository = appsRepository,
         appPermissionsRepository = appPermissionsRepository,
+        privilegedAppsBackend = privilegedAppsBackend,
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = HttpClient(CIO) {
