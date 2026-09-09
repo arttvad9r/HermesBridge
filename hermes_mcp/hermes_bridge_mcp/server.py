@@ -257,6 +257,12 @@ def device_health(device_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def battery_usage(device_id: str) -> dict[str, Any]:
+    """Read parsed battery power usage since the last charge from Android batterystats. This is read-only and exposes no shell arguments."""
+    return _device_command(device_id, "battery.usage", timeout=75)
+
+
+@mcp.tool()
 def list_apps(device_id: str) -> dict[str, Any]:
     """List launcher-visible apps on one paired Android phone without broad package access."""
     return _device_command(device_id, "apps.list")
