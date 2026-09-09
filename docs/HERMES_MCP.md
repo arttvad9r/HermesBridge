@@ -13,25 +13,15 @@ python -m venv .venv
 pip install .
 ```
 
-This installs:
+This installs `hermes-bridge-mcp`. The adapter requires MCP Python SDK v2 (`mcp>=2,<3`).
 
-```text
-hermes-bridge-mcp
-```
-
-The adapter requires MCP Python SDK v2 (`mcp>=2,<3`).
-
-Create a dedicated APK staging directory:
+Create the APK staging directory used only by `install_apk`:
 
 ```bash
 sudo mkdir -p /opt/HermesBridge/apks
 ```
 
-Give write access only to the account/process that is supposed to place APKs there. The MCP install tool accepts a simple file name from this directory, never an arbitrary VPS path.
-
 ## Required environment
-
-The relay should normally run on the same VPS:
 
 ```text
 HERMES_BRIDGE_RELAY_URL=http://127.0.0.1:8080
@@ -58,7 +48,7 @@ mcp_servers:
 
 Reload MCP servers in Hermes after configuration changes.
 
-## Current MCP tools
+## Read-only MCP tools
 
 ### `list_devices()`
 
@@ -74,31 +64,60 @@ Maps only to Android tool `device.health`. Returns current battery percentage pl
 
 ### `battery_usage(device_id)`
 
-Maps only to Android tool `battery.usage`. It is a read-only diagnostic and accepts no diagnostic or shell arguments.
+Maps only to Android tool `battery.usage`. It accepts no diagnostic or shell arguments.
 
-The Android side runs exactly:
+Android runs exactly:
 
 ```text
-dumpsys batterystats --charged --checkin
+dumpsys batterystats -c --charged
 ```
 
-through Shizuku, with bounded output and a bounded execution timeout. Android parses only the supported power-use sections and returns a compact structure rather than the raw checkin dump.
+through Shizuku. `-c` requests the current statistics in checkin-format output without using the real `--checkin` path. `--charged` scopes the data to since the last charge. Execution time and stdout/stderr sizes are bounded, and Android parses only supported sections rather than returning the raw dump.
 
-Returned fields include:
+Returned data includes, when Android provides it:
 
-- `source = batterystats_charged_checkin`;
-- checkin format version when available;
-- battery capacity and computed/minimum/maximum drained power in mAh when present;
+- checkin format version;
+- battery capacity and estimated drained power in mAh;
 - bounded system power-use items;
-- bounded top UIDs by estimated mAh, with package-name mappings found in the checkin data.
+- bounded top UIDs by estimated mAh;
+- bounded top partial wakelocks and package mappings.
 
-The data is accumulated **since the last charge** because the fixed command uses `--charged`. It is not an instantaneous wattage/current reading and should not be interpreted as one. Values are Android Batterystats estimates and may differ from OEM battery-settings UI calculations.
-
-The tool does not expose raw `dumpsys`, does not accept an arbitrary package/UID filter, and does not run `batterystats --reset`.
+This is accumulated Batterystats data, not instantaneous current/wattage. The tool never runs `--reset` and never accepts arbitrary dumpsys arguments.
 
 ### `list_apps(device_id)`
 
 Maps only to `apps.list`. Returns launcher-visible applications. Hermes Bridge does not request `QUERY_ALL_PACKAGES`.
+
+### `app_usage(device_id, days=30)`
+
+Maps only to `apps.usage`. `days` must be an integer from 1 to 365 and defaults to 30.
+
+The phone must have Android Usage Access enabled for Hermes Bridge. Results are intersected with the same launcher-visible set used by `list_apps`, so Usage Access does not expand the agent's package visibility.
+
+### `app_permissions(device_id, package_name)`
+
+Maps only to `apps.permissions`.
+
+The Android side first verifies that `package_name` is already present in the launcher-visible app set. Only then does it read `PackageInfo` permission metadata. Returned fields include requested permissions, current granted state, Android protection classification, permission group and relevant request flags.
+
+`dangerous=true` means Android itself classifies the permission with the `dangerous` base protection level. Hermes Bridge does not invent a custom risk score or claim that a granted permission is unnecessary.
+
+### `permissions_audit(device_id)`
+
+Maps only to `apps.permissionsAudit` and provides a bounded overview for questions such as "which visible apps currently hold dangerous permissions?".
+
+The audit:
+
+- scans only launcher-visible apps;
+- scans at most 200 apps per call;
+- returns only permissions that are both currently granted and Android-classified as `dangerous`;
+- returns at most 30 app findings and 10 permission records per returned app;
+- reports `scanTruncated` and `resultTruncated` explicitly;
+- never requests `QUERY_ALL_PACKAGES`;
+- does not inspect hidden/system-only packages through another API;
+- does not modify or revoke any permission.
+
+The result also reports visible/scanned/skipped/matched counts and the total number of dangerous granted permissions found within the scanned set.
 
 ### `list_files(device_id, path_segments=[])`
 
@@ -114,75 +133,51 @@ It is not a raw filesystem path. Both MCP and Android reject traversal markers, 
 
 ### `analyze_files(device_id, path_segments=[])`
 
-Maps only to `files.analyze` and is read-only.
+Maps only to `files.analyze` and is read-only. Android recursively analyzes only the granted SAF subtree with hard traversal/output limits and returns `truncated` when incomplete.
 
-Android recursively analyzes only the granted SAF subtree, with hard limits on traversal. The current bounds are 5,000 scanned entries, depth 32 and 50 largest-file results. The result includes total bytes, file/directory counts and `truncated` so Hermes knows when a result is incomplete.
+## Mutating / privileged MCP tools
 
 ### `delete_path(device_id, path_segments)`
 
-Maps only to `files.delete`.
-
-The target must be below the SAF root; an empty path cannot delete the granted root itself. Android stats the target before requesting approval. Approval is bound to the normalized path plus the target's current directory flag, MIME type, size and last-modified value. If those values change before the retry, the previous approval does not authorize deletion of the changed target.
+Maps only to `files.delete`. The target must be below the SAF root; the granted root itself cannot be deleted. Approval is bound to normalized path plus current target metadata, so a changed target requires a new approval.
 
 ### `install_apk(device_id, apk_name, replace=true)`
 
 Maps only to `apps.install` and requires Shizuku plus explicit Android-side approval.
 
-`apk_name` is only a simple `.apk` filename located directly inside `HERMES_BRIDGE_APK_DIR`. The MCP adapter rejects raw paths such as `../app.apk`, `/tmp/app.apk`, nested directories and non-APK names.
+`apk_name` must be a simple `.apk` filename directly inside `HERMES_BRIDGE_APK_DIR`; arbitrary VPS paths and URLs are rejected.
 
-The transfer/install flow is deliberately split into trust boundaries:
+The flow is:
 
-1. MCP streams the selected file over the loopback admin API to the relay staging store.
-2. Relay enforces a 200 MiB maximum, computes SHA-256 while streaming and creates a random short-lived download token.
-3. Android derives the artifact endpoint only from its configured `wss://.../ws/device` relay origin; arbitrary download URLs are not accepted.
-4. Android downloads over HTTPS with redirects disabled.
-5. Android verifies exact size and SHA-256.
-6. Android PackageManager parses the APK and extracts package name, version and signing-certificate hashes.
-7. The phone displays an approval whose fingerprint is bound to verified content metadata: SHA-256, size, package/version, signer hashes and `replace`.
-8. After approval, Hermes retries `install_apk` for the same APK. A new relay artifact ID/token is allowed because those are transport details; changed APK content requires a new approval.
-9. Shizuku receives only the internally constructed command `pm install [-r] -S <verified size> -`; verified APK bytes are streamed through stdin. Hermes never supplies a shell command or device filesystem path.
+1. MCP streams the selected APK over the loopback admin API to relay staging.
+2. Relay enforces the size limit, computes SHA-256 and creates a short-lived random download token.
+3. Android derives the artifact URL only from its configured relay origin and downloads over HTTPS without redirects.
+4. Android verifies exact size and SHA-256, then parses package/version/signing certificates.
+5. Approval is bound to verified content/package/signing metadata plus `replace`.
+6. After approval Hermes retries the same logical install.
+7. Shizuku receives only an internally constructed `pm install [-r] -S <size> -`; verified bytes are streamed on stdin.
 
-Hermes Bridge refuses to replace its own package through this agent tool.
+Hermes Bridge refuses to replace itself through this tool.
 
 ### `uninstall_app(device_id, package_name, keep_data=false)`
 
-Maps only to `apps.uninstall`.
-
-Properties:
-
-- requires Shizuku to be active and authorized;
-- requires explicit Android-side approval;
-- approval is bound to normalized `packageName + keepData`;
-- approval expires and is one-use only;
-- Hermes Bridge cannot uninstall itself;
-- invalid package names are rejected in both MCP and Android layers.
-
-The first call normally returns a structured `approval_required` result. The phone displays the exact requested operation. After the user approves it, Hermes must retry the same normalized call. Changing the package or `keep_data` requires a new approval.
+Maps only to `apps.uninstall`. It requires Shizuku and a one-use Android-side approval bound to normalized `packageName + keepData`. Hermes Bridge cannot uninstall itself.
 
 ### `force_stop_app(device_id, package_name)`
 
-Maps only to `apps.forceStop`.
-
-It follows the same approval boundary as uninstall. Hermes Bridge also refuses to force-stop its own package because doing so would terminate the active device connection.
+Maps only to `apps.forceStop`. It requires Shizuku and exact-argument approval. Hermes Bridge cannot force-stop itself because that would terminate the active bridge process.
 
 ## Approval behavior
 
-Read-only tools such as health, Batterystats power-use inspection and SAF analysis execute without approval. Mutating/privileged tools do not execute while the Android approval is pending.
+Read-only tools execute without approval but remain fixed, validated and bounded. Mutating/privileged tools do not execute while approval is pending.
 
-The approval fingerprint includes:
+Approval fingerprints bind:
 
 ```text
 tool name + canonical normalized arguments
 ```
 
-Consequences:
-
-- approving one package does not authorize another package;
-- approving uninstall does not authorize force-stop;
-- install approval is bound to verified APK content/signing metadata, not an ephemeral download token;
-- file deletion approval is bound to the selected path and the current target metadata;
-- an approved ticket cannot be replayed after one successful consumption;
-- expired approvals require a new user decision.
+Additionally, APK install approval binds verified content/package/signing metadata and SAF deletion binds current target metadata. Approved tickets expire and are one-use only.
 
 Current approval is local to the Android app. Telegram/Hermes-side approval routing is planned separately.
 
@@ -199,15 +194,16 @@ install_from_path(path)
 delete_raw_path(path)
 ```
 
-Each public MCP function hardcodes one Android tool name. The Android app applies another independent allowlist and risk policy before execution.
+Each public MCP function hardcodes one Android tool name. Android applies another typed router/registry and risk policy before execution.
 
 Keep these properties:
 
 - MCP runs locally beside Hermes;
 - relay admin API stays loopback-only;
 - Android transport uses WSS through the public reverse proxy;
-- only the tokenized `/device-artifacts/*` download route is additionally exposed for APK transfer;
-- read-only tools execute without approval but remain fixed and bounded;
+- only tokenized `/device-artifacts/*` downloads are additionally exposed for APK transfer;
+- read-only tools remain fixed and bounded;
+- package metadata tools remain launcher-scoped;
 - mutating/privileged tools are separate typed functions;
 - no arbitrary shell, dumpsys arguments, intent, content URI, remote URL or raw filesystem path is exposed.
 
@@ -215,16 +211,15 @@ Keep these properties:
 
 After relay and MCP are configured:
 
-1. Reload MCP in Hermes.
-2. Call `list_devices`.
-3. If needed, call `create_pairing_code` and enter it in the Android app.
-4. Verify the phone reports connected.
-5. Call `device_health` and `list_apps`.
-6. Select a folder in the Android app; call `list_files`, then `analyze_files`.
-7. Test `delete_path` on a disposable SAF file: approve the exact target shown on the phone and retry the same call.
-8. Activate/authorize Shizuku in the app.
-9. Call `battery_usage`; verify a parsed result or a clear `battery_stats_*` error rather than raw output.
-10. Test `force_stop_app` or `uninstall_app` on a disposable package: approve the displayed card on the phone and retry the same call.
-11. Put a disposable test APK directly in `HERMES_BRIDGE_APK_DIR`, call `install_apk`, approve the verified package/version shown on the phone, then retry `install_apk` for the same APK.
+1. Reload MCP in Hermes and call `list_devices`.
+2. If needed, call `create_pairing_code` and finish pairing in the Android app.
+3. Call `device_health` and `list_apps`.
+4. Call `app_permissions` for one returned package and verify only that app is inspected.
+5. Call `permissions_audit` and check `scanTruncated/resultTruncated` before treating the result as complete.
+6. Enable Usage Access and test `app_usage`.
+7. Grant a SAF folder and test `list_files` / `analyze_files`.
+8. Activate/authorize Shizuku and call `battery_usage`.
+9. Test `delete_path`, `force_stop_app` or `uninstall_app` on disposable targets, approving the exact Android card and retrying the same call.
+10. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
 
-A physical-device end-to-end test is still required before Shizuku-backed and mutating actions should be treated as production-ready.
+Physical-device end-to-end validation is still required before Shizuku-backed and mutating actions should be treated as production-ready.
