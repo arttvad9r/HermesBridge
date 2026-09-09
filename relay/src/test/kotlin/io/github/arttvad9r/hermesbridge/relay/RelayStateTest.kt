@@ -10,6 +10,7 @@ import java.security.Signature
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -57,6 +58,23 @@ class RelayStateTest {
 
         assertEquals("My phone", restored.label)
         assertTrue(keyPair.public.encoded.contentEquals(restored.publicKey.encoded))
+    }
+
+    @Test
+    fun revokedDeviceIsRemovedPersistently() {
+        val directory = Files.createTempDirectory("hermes-bridge-relay-revoke")
+        val store = directory.resolve("devices.json")
+        val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+
+        val registry = DeviceRegistry(store)
+        val registered = registry.register(keyPair.public, "Revoked phone")
+        assertTrue(registry.revoke(registered.deviceId))
+        assertNull(registry.find(registered.deviceId))
+        assertFalse(registry.revoke(registered.deviceId))
+
+        val restoredRegistry = DeviceRegistry(store)
+        assertNull(restoredRegistry.find(registered.deviceId))
+        assertTrue(restoredRegistry.list().isEmpty())
     }
 
     @Test
