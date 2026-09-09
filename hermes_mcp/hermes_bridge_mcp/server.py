@@ -14,6 +14,8 @@ from mcp.server import MCPServer
 DEVICE_ID_RE = re.compile(r"^device_[A-Za-z0-9-]+$")
 DEFAULT_RELAY_URL = "http://127.0.0.1:8080"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+MAX_PATH_DEPTH = 32
+MAX_PATH_SEGMENT_LENGTH = 255
 
 mcp = MCPServer("Hermes Bridge")
 
@@ -89,18 +91,34 @@ def _request_json(
         raise RuntimeError("Relay returned invalid JSON.") from exc
 
 
-def _device_command(device_id: str, tool: str) -> dict[str, Any]:
+def _device_command(
+    device_id: str,
+    tool: str,
+    arguments: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if not DEVICE_ID_RE.fullmatch(device_id):
         raise ValueError("device_id has an invalid format.")
 
     result = _request_json(
         "POST",
         f"/api/v1/devices/{quote(device_id, safe='')}/commands",
-        {"tool": tool, "arguments": {}},
+        {"tool": tool, "arguments": arguments or {}},
     )
     if not isinstance(result, dict):
         raise RuntimeError("Relay returned an invalid command response.")
     return result
+
+
+def _validate_path_segments(path_segments: list[str]) -> None:
+    if len(path_segments) > MAX_PATH_DEPTH:
+        raise ValueError("path_segments exceeds the maximum depth.")
+    for segment in path_segments:
+        if not isinstance(segment, str):
+            raise ValueError("path_segments must contain only strings.")
+        if not segment or len(segment) > MAX_PATH_SEGMENT_LENGTH:
+            raise ValueError("path_segments contains an invalid segment length.")
+        if segment in {".", ".."} or "/" in segment or "\\" in segment or "\x00" in segment:
+            raise ValueError("path_segments contains a forbidden segment.")
 
 
 @mcp.tool()
@@ -131,6 +149,21 @@ def device_health(device_id: str) -> dict[str, Any]:
 def list_apps(device_id: str) -> dict[str, Any]:
     """List launcher-visible apps on one paired Android phone without broad package access."""
     return _device_command(device_id, "apps.list")
+
+
+@mcp.tool()
+def list_files(
+    device_id: str,
+    path_segments: list[str] | None = None,
+) -> dict[str, Any]:
+    """List one directory inside the folder explicitly granted in the Android app."""
+    segments = list(path_segments or [])
+    _validate_path_segments(segments)
+    return _device_command(
+        device_id,
+        "files.list",
+        {"pathSegments": segments},
+    )
 
 
 def main() -> None:
