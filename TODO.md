@@ -76,9 +76,9 @@
 - [x] `apps.forceStop` with strict package validation, self-protection and approval.
 - [x] Structured result/error envelopes.
 - [x] Path-segment validation and bounded file-list size/depth.
+- [x] Local persistent audit log with 200-entry retention, fail-closed tool/error metadata and no raw command arguments or secret-bearing error messages.
 - [ ] Add further read-only app details only when a concrete user scenario justifies them.
 - [ ] Idempotency where a future mutating operation is safely retryable.
-- [ ] Audit log.
 
 ## P1 — Android setup wizard
 
@@ -90,6 +90,7 @@
 - [x] Shizuku detection/setup/authorization card and runtime state.
 - [x] Usage Access status/setup card with manual Android special-access flow.
 - [x] Guided first-run flow: connect Hermes, choose optional capabilities, finish into the normal dashboard.
+- [x] Local "История Hermes" screen reachable from the foreground-service notification.
 - [ ] Accessibility setup as an optional separate step.
 - [ ] "Advanced access needs restoration" notification.
 
@@ -116,6 +117,7 @@
 - [x] File deletion approval binds to validated path plus current target metadata.
 - [x] Permission-revoke approval binds to package + permission + derived Android user ID.
 - [x] Approved tickets are one-use only.
+- [x] Approval/denial decisions recorded in the local bounded audit history.
 - [ ] Hermes/Telegram approval routing.
 - [ ] Per-tool "always allow" only where explicitly safe.
 - [x] Emergency disconnect/revoke button for the Hermes pairing itself.
@@ -137,6 +139,7 @@
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Usage Access behavior/revocation tests on physical device.
 - [ ] Shizuku reboot/reactivation tests on physical device.
+- [ ] Audit-log persistence, clear-history and notification-entry E2E on physical device.
 - [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
