@@ -82,7 +82,7 @@
 - [x] Reboot recovery state for the base relay connection.
 - [x] Shizuku detection/setup/authorization card and runtime state.
 - [x] Usage Access status/setup card with manual Android special-access flow.
-- [ ] Turn the current cards into a guided first-run setup flow.
+- [x] Guided first-run flow: connect Hermes, choose optional capabilities, finish into the normal dashboard.
 - [ ] Accessibility setup as an optional separate step.
 - [ ] "Advanced access needs restoration" notification.
 
