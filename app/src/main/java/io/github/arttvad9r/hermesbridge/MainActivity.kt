@@ -1,7 +1,9 @@
 package io.github.arttvad9r.hermesbridge
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -65,6 +67,12 @@ class MainActivity : ComponentActivity() {
                     onRefreshHealth = vm::refreshHealth,
                     onChooseFileTree = { fileTreeLauncher.launch(null) },
                     onRevokeFileAccess = vm::revokeFileAccess,
+                    onOpenUsageAccessSettings = {
+                        runCatching {
+                            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                        }
+                    },
+                    onRefreshUsageAccess = vm::refreshUsageAccess,
                     onApprove = vm::approveAction,
                     onDeny = vm::denyAction,
                     onRequestShizukuPermission = vm::requestShizukuPermission,
@@ -100,6 +108,8 @@ private fun BridgeScreen(
     onRefreshHealth: () -> Unit,
     onChooseFileTree: () -> Unit,
     onRevokeFileAccess: () -> Unit,
+    onOpenUsageAccessSettings: () -> Unit,
+    onRefreshUsageAccess: () -> Unit,
     onApprove: (String) -> Unit,
     onDeny: (String) -> Unit,
     onRequestShizukuPermission: () -> Unit,
@@ -156,6 +166,12 @@ private fun BridgeScreen(
                 onRevoke = onRevokeFileAccess,
             )
 
+            UsageAccessCard(
+                granted = state.usageAccessGranted,
+                onOpenSettings = onOpenUsageAccessSettings,
+                onRefresh = onRefreshUsageAccess,
+            )
+
             ShizukuCard(
                 state = state.shizuku,
                 onRequestPermission = onRequestShizukuPermission,
@@ -164,6 +180,7 @@ private fun BridgeScreen(
 
             CapabilitiesCard(
                 fileAccessConfigured = state.fileAccessConfigured,
+                usageAccessGranted = state.usageAccessGranted,
                 shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
             )
 
@@ -355,9 +372,9 @@ private fun FileAccessCard(
             )
             Text(
                 if (configured) {
-                    "Hermes может только просматривать содержимое выбранной папки и её подпапок."
+                    "Hermes может просматривать и анализировать выбранную папку. Удаление конкретного файла или папки требует отдельного подтверждения."
                 } else {
-                    "Выберите папку, содержимое которой Hermes сможет просматривать. Остальное хранилище останется недоступно."
+                    "Выберите папку, содержимое которой Hermes сможет просматривать и анализировать. Остальное хранилище останется недоступно."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -374,6 +391,49 @@ private fun FileAccessCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Отключить доступ к файлам")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageAccessCard(
+    granted: Boolean,
+    onOpenSettings: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "Использование приложений",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(onClick = onRefresh) {
+                    Text("Проверить")
+                }
+            }
+            Text(
+                if (granted) "Usage Access выдан." else "Usage Access не выдан.",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                "Нужен только для чтения времени последнего использования и времени на переднем плане у приложений, уже видимых Hermes. Разрешение включается вручную в Android.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!granted) {
+                Button(
+                    onClick = onOpenSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Открыть Usage Access")
                 }
             }
         }
@@ -454,6 +514,7 @@ private fun MetricRow(label: String, value: String) {
 @Composable
 private fun CapabilitiesCard(
     fileAccessConfigured: Boolean,
+    usageAccessGranted: Boolean,
     shizukuReady: Boolean,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -461,7 +522,8 @@ private fun CapabilitiesCard(
             Text("Доступ", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             CapabilityRow("Диагностика устройства", "Доступно")
             CapabilityRow("Список приложений", "Доступно")
-            CapabilityRow("Просмотр файлов", if (fileAccessConfigured) "Доступно" else "Не настроено")
+            CapabilityRow("Статистика использования", if (usageAccessGranted) "Доступно" else "Не настроено")
+            CapabilityRow("Файлы", if (fileAccessConfigured) "Доступно" else "Не настроено")
             CapabilityRow("Подтверждение действий", "Готово")
             CapabilityRow("Расширенный доступ Shizuku", if (shizukuReady) "Готово" else "Не настроено")
             CapabilityRow("Управление интерфейсом", "Опционально")
