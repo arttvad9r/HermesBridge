@@ -15,6 +15,7 @@ from mcp.server import MCPServer
 
 DEVICE_ID_RE = re.compile(r"^device_[A-Za-z0-9-]+$")
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$")
+PERMISSION_NAME_RE = PACKAGE_NAME_RE
 ARTIFACT_ID_RE = re.compile(r"^apk_[0-9a-fA-F-]{36}$")
 ARTIFACT_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -24,6 +25,7 @@ LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 MAX_PATH_DEPTH = 32
 MAX_PATH_SEGMENT_LENGTH = 255
 MAX_PACKAGE_NAME_LENGTH = 255
+MAX_PERMISSION_NAME_LENGTH = 255
 MAX_APK_NAME_LENGTH = 120
 MAX_APK_BYTES = 200 * 1024 * 1024
 HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
@@ -153,6 +155,15 @@ def _validate_package_name(package_name: str, *, protect_bridge: bool = True) ->
         raise ValueError("package_name is not a valid Android package name.")
     if protect_bridge and value == HERMES_BRIDGE_PACKAGE:
         raise ValueError("The Hermes Bridge package is protected from agent package operations.")
+    return value
+
+
+def _validate_permission_name(permission_name: str) -> str:
+    if not isinstance(permission_name, str):
+        raise ValueError("permission_name must be a string.")
+    value = permission_name.strip()
+    if not (3 <= len(value) <= MAX_PERMISSION_NAME_LENGTH) or not PERMISSION_NAME_RE.fullmatch(value):
+        raise ValueError("permission_name is not a valid Android permission name.")
     return value
 
 
@@ -297,6 +308,26 @@ def app_permissions(device_id: str, package_name: str) -> dict[str, Any]:
 def permissions_audit(device_id: str) -> dict[str, Any]:
     """Audit launcher-visible apps for Android permissions that are both granted and classified by the platform as dangerous. The result is bounded and read-only."""
     return _device_command(device_id, "apps.permissionsAudit", timeout=30)
+
+
+@mcp.tool()
+def revoke_app_permission(
+    device_id: str,
+    package_name: str,
+    permission_name: str,
+) -> dict[str, Any]:
+    """Request revocation of one currently granted Android dangerous runtime permission from one launcher-visible app. The phone requires exact local approval."""
+    package = _validate_package_name(package_name)
+    permission = _validate_permission_name(permission_name)
+    return _device_command(
+        device_id,
+        "apps.revokePermission",
+        {
+            "packageName": package,
+            "permissionName": permission,
+        },
+        timeout=75,
+    )
 
 
 @mcp.tool()
