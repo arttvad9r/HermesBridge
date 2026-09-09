@@ -41,6 +41,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.arttvad9r.hermesbridge.security.ApprovalTicket
+import io.github.arttvad9r.hermesbridge.security.ToolRisk
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -63,6 +65,8 @@ class MainActivity : ComponentActivity() {
                     onRefreshHealth = vm::refreshHealth,
                     onChooseFileTree = { fileTreeLauncher.launch(null) },
                     onRevokeFileAccess = vm::revokeFileAccess,
+                    onApprove = vm::approveAction,
+                    onDeny = vm::denyAction,
                 )
             }
         }
@@ -94,6 +98,8 @@ private fun BridgeScreen(
     onRefreshHealth: () -> Unit,
     onChooseFileTree: () -> Unit,
     onRevokeFileAccess: () -> Unit,
+    onApprove: (String) -> Unit,
+    onDeny: (String) -> Unit,
 ) {
     Scaffold { innerPadding ->
         Column(
@@ -117,6 +123,14 @@ private fun BridgeScreen(
             )
 
             StatusCard(state.connectionState)
+
+            state.pendingApprovals.forEach { ticket ->
+                ApprovalCard(
+                    ticket = ticket,
+                    onApprove = { onApprove(ticket.id) },
+                    onDeny = { onDeny(ticket.id) },
+                )
+            }
 
             PairingCard(
                 code = state.pairingCode,
@@ -168,6 +182,66 @@ private fun StatusCard(connectionState: ConnectionState) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun ApprovalCard(
+    ticket: ApprovalTicket,
+    onApprove: () -> Unit,
+    onDeny: () -> Unit,
+) {
+    val riskLabel = when (ticket.risk) {
+        ToolRisk.READ_ONLY -> "Чтение"
+        ToolRisk.MUTATING -> "Изменение данных"
+        ToolRisk.PRIVILEGED -> "Расширенный доступ"
+        ToolRisk.UI_CONTROL -> "Управление интерфейсом"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Требуется подтверждение",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                riskLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                ticket.displaySummary.ifBlank { ticket.tool },
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                "Разрешение одноразовое, действует недолго и подходит только для этого действия с этими параметрами.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TextButton(
+                    onClick = onDeny,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Отклонить")
+                }
+                Button(
+                    onClick = onApprove,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("Разрешить")
+                }
+            }
         }
     }
 }
@@ -312,6 +386,7 @@ private fun CapabilitiesCard(fileAccessConfigured: Boolean) {
             CapabilityRow("Диагностика устройства", "Доступно")
             CapabilityRow("Список приложений", "Доступно")
             CapabilityRow("Просмотр файлов", if (fileAccessConfigured) "Доступно" else "Не настроено")
+            CapabilityRow("Подтверждение действий", "Готово")
             CapabilityRow("Расширенный доступ Shizuku", "Запланировано")
             CapabilityRow("Управление интерфейсом", "Опционально")
         }
