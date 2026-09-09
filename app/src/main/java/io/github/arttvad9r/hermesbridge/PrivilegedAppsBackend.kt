@@ -28,6 +28,16 @@ interface PrivilegedAppsBackend {
     ): PrivilegedOperationResult
 
     suspend fun forceStop(packageName: String): PrivilegedOperationResult
+
+    suspend fun revokePermission(
+        packageName: String,
+        permissionName: String,
+        userId: Int,
+    ): PrivilegedOperationResult = PrivilegedOperationResult(
+        ok = false,
+        code = "permission_revoke_unavailable",
+        message = "Permission revocation is not configured in this backend.",
+    )
 }
 
 data class PrivilegedBackendReadiness(
@@ -189,6 +199,46 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
             }
         }
 
+    override suspend fun revokePermission(
+        packageName: String,
+        permissionName: String,
+        userId: Int,
+    ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
+        readinessFailure()?.let { return@withContext it }
+        invalidPackageFailure(packageName)?.let { return@withContext it }
+        invalidPermissionFailure(permissionName)?.let { return@withContext it }
+        if (userId !in 0..MAX_ANDROID_USER_ID) {
+            return@withContext PrivilegedOperationResult(
+                ok = false,
+                code = "invalid_user_id",
+                message = "Android user ID is outside the supported range.",
+            )
+        }
+
+        when (
+            val attempt = executeAttempt(
+                argv = buildPmRevokePermissionCommand(packageName, permissionName, userId),
+                timeoutCode = "permission_revoke_timeout",
+                timeoutMessage = "Package manager did not finish permission revocation within ${EXEC_TIMEOUT_MILLIS / 1000} seconds.",
+            )
+        ) {
+            is FixedCommandAttempt.Failure -> attempt.result
+            is FixedCommandAttempt.Success -> {
+                val command = attempt.result
+                if (command.exitCode == 0) {
+                    PrivilegedOperationResult(ok = true)
+                } else {
+                    PrivilegedOperationResult(
+                        ok = false,
+                        code = "permission_revoke_failed",
+                        message = command.firstOutputLine()
+                            ?: "Package manager rejected the permission revoke request.",
+                    )
+                }
+            }
+        }
+    }
+
     private fun readinessFailure(): PrivilegedOperationResult? {
         val ready = readiness()
         return if (ready.ready) null else PrivilegedOperationResult(
@@ -199,13 +249,24 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
     }
 
     private fun invalidPackageFailure(packageName: String): PrivilegedOperationResult? =
-        if (PACKAGE_NAME_REGEX.matches(packageName) && packageName.length in 3..255) {
+        if (ANDROID_NAME_REGEX.matches(packageName) && packageName.length in 3..MAX_ANDROID_NAME_LENGTH) {
             null
         } else {
             PrivilegedOperationResult(
                 ok = false,
                 code = "invalid_package_name",
                 message = "The package name is invalid.",
+            )
+        }
+
+    private fun invalidPermissionFailure(permissionName: String): PrivilegedOperationResult? =
+        if (ANDROID_NAME_REGEX.matches(permissionName) && permissionName.length in 3..MAX_ANDROID_NAME_LENGTH) {
+            null
+        } else {
+            PrivilegedOperationResult(
+                ok = false,
+                code = "invalid_permission_name",
+                message = "The permission name is invalid.",
             )
         }
 
@@ -331,9 +392,6 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
     companion object {
         private const val EXEC_TIMEOUT_MILLIS = 30_000L
         private const val INSTALL_TIMEOUT_MILLIS = 180_000L
-        private val PACKAGE_NAME_REGEX = Regex(
-            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
-        )
 
         @Volatile
         private var cachedNewProcessMethod: java.lang.reflect.Method? = null
@@ -362,6 +420,28 @@ internal fun buildPmInstallCommand(sizeBytes: Long, replace: Boolean): Array<Str
     }.toTypedArray()
 }
 
+internal fun buildPmRevokePermissionCommand(
+    packageName: String,
+    permissionName: String,
+    userId: Int,
+): Array<String> {
+    require(packageName.length in 3..MAX_ANDROID_NAME_LENGTH && ANDROID_NAME_REGEX.matches(packageName)) {
+        "Invalid package name."
+    }
+    require(permissionName.length in 3..MAX_ANDROID_NAME_LENGTH && ANDROID_NAME_REGEX.matches(permissionName)) {
+        "Invalid permission name."
+    }
+    require(userId in 0..MAX_ANDROID_USER_ID) { "Invalid Android user ID." }
+    return arrayOf(
+        "pm",
+        "revoke",
+        "--user",
+        userId.toString(),
+        packageName,
+        permissionName,
+    )
+}
+
 object DisabledPrivilegedAppsBackend : PrivilegedAppsBackend {
     override fun readiness() = PrivilegedBackendReadiness(
         ready = false,
@@ -381,9 +461,21 @@ object DisabledPrivilegedAppsBackend : PrivilegedAppsBackend {
 
     override suspend fun forceStop(packageName: String) = unavailable()
 
+    override suspend fun revokePermission(
+        packageName: String,
+        permissionName: String,
+        userId: Int,
+    ) = unavailable()
+
     private fun unavailable() = PrivilegedOperationResult(
         ok = false,
         code = "shizuku_unavailable",
         message = "Privileged app backend is not configured.",
     )
 }
+
+private const val MAX_ANDROID_NAME_LENGTH = 255
+private const val MAX_ANDROID_USER_ID = 99_999
+private val ANDROID_NAME_REGEX = Regex(
+    "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+)
