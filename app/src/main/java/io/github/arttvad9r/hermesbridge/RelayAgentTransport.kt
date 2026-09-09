@@ -50,12 +50,13 @@ class RelayAgentTransport(
     apkArtifactRepository: ApkArtifactRepository = RelayApkArtifactRepository(context, relayWsUrl),
     apkPackageInspector: ApkPackageInspector = AndroidApkPackageInspector(context),
     appUsageRepository: AppUsageRepository = AndroidAppUsageRepository(context),
+    appPermissionsRepository: AppPermissionsRepository = AndroidAppPermissionsRepository(context),
     batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
 ) : AgentTransport {
     private val appContext = context.applicationContext
     private val identity = AndroidKeystoreDeviceIdentity()
     private val pairingStore = PairingStore(appContext)
-    private val toolRegistry = BridgeToolRegistry(
+    private val coreToolRegistry = BridgeToolRegistry(
         healthRepository = healthRepository,
         appsRepository = appsRepository,
         filesRepository = filesRepository,
@@ -64,6 +65,11 @@ class RelayAgentTransport(
         apkPackageInspector = apkPackageInspector,
         batteryDiagnosticsBackend = batteryDiagnosticsBackend,
         appUsageRepository = appUsageRepository,
+    )
+    private val commandRouter = BridgeCommandRouter(
+        coreRegistry = coreToolRegistry,
+        appsRepository = appsRepository,
+        appPermissionsRepository = appPermissionsRepository,
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = HttpClient(CIO) {
@@ -284,7 +290,7 @@ class RelayAgentTransport(
                                 continue
                             }
                             val request = BridgeProtocol.decodePayload<CommandRequestPayload>(envelope)
-                            val result = toolRegistry.execute(request)
+                            val result = commandRouter.execute(request)
                             sendEnvelope(
                                 type = MessageType.COMMAND_RESULT,
                                 deviceId = deviceId,
