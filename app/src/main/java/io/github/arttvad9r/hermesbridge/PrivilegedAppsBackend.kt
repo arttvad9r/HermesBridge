@@ -1,7 +1,16 @@
 package io.github.arttvad9r.hermesbridge
 
-import io.droidmcp.shizuku.ShizukuShellBackend
-import io.droidmcp.shell.UninstallAppTool
+import android.content.pm.PackageManager
+import java.io.ByteArrayOutputStream
+import java.lang.reflect.InvocationTargetException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import rikka.shizuku.Shizuku
 
 interface PrivilegedAppsBackend {
     fun readiness(): PrivilegedBackendReadiness
@@ -24,18 +33,36 @@ data class PrivilegedOperationResult(
     val message: String? = null,
 )
 
+/**
+ * Narrow Shizuku package backend adapted from the Apache-2.0 droid-mcp project,
+ * pinned to upstream commit aeaa5b9e8e96f56ef64a7ca23d0726585f7b1103 (0.10.1 era).
+ *
+ * Only the fixed `pm uninstall [-k] <package>` operation is retained here.
+ * No generic command execution method is exposed through Hermes Bridge.
+ * See THIRD_PARTY_NOTICES.md for attribution.
+ */
 class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
-    private val uninstallTool = UninstallAppTool(ShizukuShellBackend())
-
     override fun readiness(): PrivilegedBackendReadiness {
-        val state = ShizukuRuntime.state.value
-        return if (state.status == ShizukuAccessStatus.READY) {
+        val localState = ShizukuRuntime.state.value
+        if (localState.status != ShizukuAccessStatus.READY) {
+            return PrivilegedBackendReadiness(
+                ready = false,
+                code = "shizuku_unavailable",
+                message = localState.message ?: "Shizuku is not ready for privileged app operations.",
+            )
+        }
+
+        val binderReady = runCatching {
+            Shizuku.pingBinder() &&
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+        return if (binderReady) {
             PrivilegedBackendReadiness(ready = true)
         } else {
             PrivilegedBackendReadiness(
                 ready = false,
                 code = "shizuku_unavailable",
-                message = state.message ?: "Shizuku is not ready for privileged app operations.",
+                message = "Shizuku binder or permission is no longer available.",
             )
         }
     }
@@ -43,35 +70,139 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
     override suspend fun uninstall(
         packageName: String,
         keepData: Boolean,
-    ): PrivilegedOperationResult {
+    ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
         val ready = readiness()
         if (!ready.ready) {
-            return PrivilegedOperationResult(
+            return@withContext PrivilegedOperationResult(
                 ok = false,
                 code = ready.code,
                 message = ready.message,
             )
         }
-
-        val result = uninstallTool.execute(
-            mapOf(
-                "package_name" to packageName,
-                "keep_data" to keepData,
+        if (!PACKAGE_NAME_REGEX.matches(packageName) || packageName.length !in 3..255) {
+            return@withContext PrivilegedOperationResult(
+                ok = false,
+                code = "invalid_package_name",
+                message = "The package name is invalid.",
             )
-        )
-        if (result.isSuccess) {
-            return PrivilegedOperationResult(ok = true)
         }
 
-        val error = result.errorMessage.orEmpty()
-        val separator = error.indexOf(':')
-        val code = if (separator > 0) error.substring(0, separator).trim() else "uninstall_failed"
-        val detail = if (separator > 0) error.substring(separator + 1).trim() else error
-        return PrivilegedOperationResult(
-            ok = false,
-            code = code.ifBlank { "uninstall_failed" },
-            message = detail.ifBlank { "The app could not be uninstalled." },
+        val argv = buildList {
+            add("pm")
+            add("uninstall")
+            if (keepData) add("-k")
+            add(packageName)
+        }.toTypedArray()
+
+        val command = try {
+            executeFixedCommand(argv)
+        } catch (_: TimeoutCancellationException) {
+            return@withContext PrivilegedOperationResult(
+                ok = false,
+                code = "uninstall_timeout",
+                message = "Package manager did not finish within ${EXEC_TIMEOUT_MS / 1000} seconds.",
+            )
+        } catch (error: Throwable) {
+            return@withContext PrivilegedOperationResult(
+                ok = false,
+                code = "shizuku_spawn_failed",
+                message = (error.message ?: error::class.java.simpleName).take(200),
+            )
+        }
+
+        if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
+            PrivilegedOperationResult(ok = true)
+        } else {
+            val detail = sequenceOf(command.stderr, command.stdout)
+                .flatMap { it.lineSequence() }
+                .map(String::trim)
+                .firstOrNull(String::isNotEmpty)
+                ?.take(200)
+                ?: "Package manager rejected the uninstall request."
+            PrivilegedOperationResult(
+                ok = false,
+                code = "uninstall_failed",
+                message = detail,
+            )
+        }
+    }
+
+    private suspend fun executeFixedCommand(argv: Array<String>): FixedCommandResult {
+        if (!Shizuku.pingBinder()) {
+            error("Shizuku binder is not reachable.")
+        }
+        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            error("Shizuku permission is not granted to Hermes Bridge.")
+        }
+
+        val process = spawnViaShizuku(argv)
+        val stdoutBuffer = ByteArrayOutputStream()
+        val stderrBuffer = ByteArrayOutputStream()
+
+        return withTimeout(EXEC_TIMEOUT_MS) {
+            coroutineScope {
+                val stdoutJob = launch(Dispatchers.IO) {
+                    runCatching { process.inputStream.use { it.copyTo(stdoutBuffer) } }
+                }
+                val stderrJob = launch(Dispatchers.IO) {
+                    runCatching { process.errorStream.use { it.copyTo(stderrBuffer) } }
+                }
+                try {
+                    val exitCode = runInterruptible(Dispatchers.IO) { process.waitFor() }
+                    stdoutJob.join()
+                    stderrJob.join()
+                    FixedCommandResult(
+                        exitCode = exitCode,
+                        stdout = stdoutBuffer.toString(Charsets.UTF_8.name()),
+                        stderr = stderrBuffer.toString(Charsets.UTF_8.name()),
+                    )
+                } finally {
+                    runCatching { process.destroy() }
+                }
+            }
+        }
+    }
+
+    private fun spawnViaShizuku(argv: Array<String>): Process {
+        val method = newProcessMethod
+            ?: error("Shizuku.newProcess is unavailable in the linked Shizuku API.")
+        return try {
+            method.invoke(null, argv, null, null) as Process
+        } catch (error: InvocationTargetException) {
+            val cause = error.targetException ?: error
+            throw IllegalStateException(
+                "Shizuku.newProcess failed: ${cause.message ?: cause::class.java.simpleName}",
+                cause,
+            )
+        } catch (error: ReflectiveOperationException) {
+            throw IllegalStateException("Shizuku.newProcess reflection failed: ${error.message}", error)
+        }
+    }
+
+    private data class FixedCommandResult(
+        val exitCode: Int,
+        val stdout: String,
+        val stderr: String,
+    )
+
+    companion object {
+        private const val EXEC_TIMEOUT_MS = 30_000L
+        private val PACKAGE_NAME_REGEX = Regex(
+            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
         )
+
+        @Volatile
+        private var cachedNewProcessMethod: java.lang.reflect.Method? = null
+
+        private val newProcessMethod: java.lang.reflect.Method?
+            get() = cachedNewProcessMethod ?: runCatching {
+                Shizuku::class.java.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java,
+                ).apply { isAccessible = true }
+            }.getOrNull().also { cachedNewProcessMethod = it }
     }
 }
 
