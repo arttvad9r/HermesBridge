@@ -70,7 +70,7 @@ See:
 - [Security model](docs/SECURITY.md)
 - [Relay protocol](docs/PROTOCOL.md)
 - [Permissions and setup](docs/PERMISSIONS.md)
-- [Relay deployment](docs/RELAY_DEPLOYMENT.md)
+- [Relay deployment](docs/DEPLOYMENT.md)
 - [Hermes MCP integration](docs/HERMES_MCP.md)
 - [Implementation roadmap](TODO.md)
 
