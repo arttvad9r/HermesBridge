@@ -11,6 +11,7 @@ Hermes Bridge contains a narrow adaptation of Shizuku process-execution and type
 
 The adapted Hermes Bridge implementation intentionally keeps only fixed typed operations currently required by the product:
 
+- `pm install [-r] -S <verified-size> -`, with verified APK bytes supplied through stdin;
 - `pm uninstall [-k] <package>`;
 - `am force-stop <package>`.
 
