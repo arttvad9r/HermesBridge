@@ -41,11 +41,16 @@ class RelayAgentTransport(
     private val relayWsUrl: String,
     healthRepository: DeviceHealthRepository,
     appsRepository: InstalledAppsRepository = AndroidInstalledAppsRepository(context),
+    filesRepository: SafFilesRepository = AndroidSafFilesRepository(context),
 ) : AgentTransport {
     private val appContext = context.applicationContext
     private val identity = AndroidKeystoreDeviceIdentity()
     private val pairingStore = PairingStore(appContext)
-    private val toolRegistry = BridgeToolRegistry(healthRepository, appsRepository)
+    private val toolRegistry = BridgeToolRegistry(
+        healthRepository = healthRepository,
+        appsRepository = appsRepository,
+        filesRepository = filesRepository,
+    )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = HttpClient(CIO) {
         install(WebSockets)
