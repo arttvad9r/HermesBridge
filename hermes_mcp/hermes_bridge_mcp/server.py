@@ -5,7 +5,7 @@ import os
 import re
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 from mcp.server import MCPServer
@@ -13,16 +13,32 @@ from mcp.server import MCPServer
 
 DEVICE_ID_RE = re.compile(r"^device_[A-Za-z0-9-]+$")
 DEFAULT_RELAY_URL = "http://127.0.0.1:8080"
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 mcp = MCPServer("Hermes Bridge")
 
 
 def _relay_url() -> str:
     value = os.environ.get("HERMES_BRIDGE_RELAY_URL", DEFAULT_RELAY_URL).rstrip("/")
-    if not value.startswith(("http://127.0.0.1", "http://localhost", "https://")):
-        raise RuntimeError(
-            "HERMES_BRIDGE_RELAY_URL must be loopback HTTP or an explicit HTTPS URL."
-        )
+    parsed = urlsplit(value)
+
+    if parsed.username is not None or parsed.password is not None:
+        raise RuntimeError("HERMES_BRIDGE_RELAY_URL must not contain user info.")
+    if parsed.query or parsed.fragment:
+        raise RuntimeError("HERMES_BRIDGE_RELAY_URL must not contain query or fragment data.")
+    if parsed.path not in ("", "/"):
+        raise RuntimeError("HERMES_BRIDGE_RELAY_URL must not contain a path.")
+    if parsed.hostname is None:
+        raise RuntimeError("HERMES_BRIDGE_RELAY_URL has no valid hostname.")
+
+    if parsed.scheme == "http":
+        if parsed.hostname.lower() not in LOOPBACK_HOSTS:
+            raise RuntimeError(
+                "Plain HTTP relay URLs are allowed only for loopback hosts."
+            )
+    elif parsed.scheme != "https":
+        raise RuntimeError("Relay URL must use loopback HTTP or HTTPS.")
+
     return value
 
 
