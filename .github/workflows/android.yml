@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -47,6 +47,11 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon :app:assembleDebug
 
+      - name: Build minified release APK
+        run: |
+          ./gradlew --no-daemon :app:assembleRelease
+          test -s app/build/outputs/mapping/release/mapping.txt
+
       - name: Build relay distribution
         run: ./gradlew --no-daemon :relay:distTar
 
@@ -55,6 +60,12 @@ jobs:
         with:
           name: hermes-bridge-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-bridge-release-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Upload relay distribution
         uses: actions/upload-artifact@v4
