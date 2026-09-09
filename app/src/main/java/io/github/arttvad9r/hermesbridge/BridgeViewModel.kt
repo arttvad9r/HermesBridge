@@ -21,13 +21,16 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     private val pairingStore = PairingStore(application)
     private val treeStore = SafTreeStore(application)
     private val setupStore = SetupStore(application)
+    private val advancedAccessStore = AdvancedAccessStore(application)
 
     private val _state = MutableStateFlow(
         BridgeUiState(
             health = healthRepository.snapshot(),
+            notificationsGranted = BridgeNotificationPermission.isGranted(application),
             fileAccessConfigured = treeStore.treeUri() != null,
             usageAccessGranted = appUsageRepository.hasAccess(),
             setupCompleted = setupStore.isCompleted(),
+            shizukuWasConfigured = advancedAccessStore.wasConfigured(),
         )
     )
     val state: StateFlow<BridgeUiState> = _state.asStateFlow()
@@ -57,7 +60,16 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             ShizukuRuntime.state.collectLatest { shizuku ->
-                _state.update { it.copy(shizuku = shizuku) }
+                if (shizuku.status == ShizukuAccessStatus.READY) {
+                    advancedAccessStore.markConfigured()
+                    ShizukuRestorationNotifier.cancel(app)
+                }
+                _state.update {
+                    it.copy(
+                        shizuku = shizuku,
+                        shizukuWasConfigured = advancedAccessStore.wasConfigured(),
+                    )
+                }
             }
         }
 
@@ -86,6 +98,12 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshHealth() {
         _state.update { it.copy(health = healthRepository.snapshot()) }
+    }
+
+    fun refreshNotificationPermission() {
+        _state.update {
+            it.copy(notificationsGranted = BridgeNotificationPermission.isGranted(app))
+        }
     }
 
     fun refreshUsageAccess() {
