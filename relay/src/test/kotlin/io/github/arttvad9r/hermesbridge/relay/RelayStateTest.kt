@@ -1,6 +1,9 @@
 package io.github.arttvad9r.hermesbridge.relay
 
 import io.github.arttvad9r.hermesbridge.protocol.BridgeProtocol
+import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
+import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
+import io.ktor.http.HttpStatusCode
 import java.nio.file.Files
 import java.security.KeyPairGenerator
 import java.security.Signature
@@ -54,5 +57,39 @@ class RelayStateTest {
 
         assertEquals("My phone", restored.label)
         assertTrue(keyPair.public.encoded.contentEquals(restored.publicKey.encoded))
+    }
+
+    @Test
+    fun commandHttpStatusPreservesDeviceLevelErrors() {
+        val policyDenied = CommandResultPayload(
+            requestId = "request-1",
+            ok = false,
+            error = ProtocolError("policy_denied", "Denied locally."),
+        )
+        val invalidArguments = CommandResultPayload(
+            requestId = "request-2",
+            ok = false,
+            error = ProtocolError("invalid_arguments", "Bad arguments."),
+        )
+
+        assertEquals(HttpStatusCode.OK, commandHttpStatus(policyDenied))
+        assertEquals(HttpStatusCode.OK, commandHttpStatus(invalidArguments))
+    }
+
+    @Test
+    fun commandHttpStatusUsesTransportErrorsForUnavailableDevice() {
+        val offline = CommandResultPayload(
+            requestId = "",
+            ok = false,
+            error = ProtocolError("device_offline", "Offline."),
+        )
+        val timeout = CommandResultPayload(
+            requestId = "",
+            ok = false,
+            error = ProtocolError("command_timeout", "Timeout."),
+        )
+
+        assertEquals(HttpStatusCode.ServiceUnavailable, commandHttpStatus(offline))
+        assertEquals(HttpStatusCode.GatewayTimeout, commandHttpStatus(timeout))
     }
 }
