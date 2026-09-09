@@ -1,5 +1,7 @@
 package io.github.arttvad9r.hermesbridge
 
+import io.github.arttvad9r.hermesbridge.security.ApprovalTicket
+
 enum class ConnectionState {
     DISCONNECTED,
     PAIRING,
@@ -21,5 +23,6 @@ data class BridgeUiState(
     val pairingCode: String = "",
     val health: DeviceHealthSnapshot? = null,
     val fileAccessConfigured: Boolean = false,
+    val pendingApprovals: List<ApprovalTicket> = emptyList(),
     val message: String? = null,
 )
