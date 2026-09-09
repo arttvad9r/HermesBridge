@@ -27,12 +27,18 @@ object BridgeApprovalRuntime {
 
     fun approve(id: String): ApprovalTicket? {
         val result = manager.approve(id)
+        if (result != null) {
+            BridgeAuditRuntime.recordApproval(result, BridgeAuditRuntime.APPROVAL_APPROVED)
+        }
         publish()
         return result
     }
 
     fun deny(id: String): ApprovalTicket? {
         val result = manager.deny(id)
+        if (result != null) {
+            BridgeAuditRuntime.recordApproval(result, BridgeAuditRuntime.APPROVAL_DENIED)
+        }
         publish()
         return result
     }
