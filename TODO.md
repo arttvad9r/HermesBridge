@@ -11,7 +11,7 @@
 - [x] Pairing-code validation.
 - [x] Default-deny risk/approval policy.
 - [x] Unit tests for pairing and approval policy.
-- [ ] Green CI: unit tests + lint + debug APK.
+- [x] Green CI: unit tests + lint + debug APK.
 - [ ] Add and validate the Gradle Wrapper after baseline CI is green.
 - [ ] Add basic app icon/assets without generated artwork.
 - [ ] Upgrade Android toolchain only after baseline CI is green.
