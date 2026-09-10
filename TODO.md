@@ -138,7 +138,7 @@
 
 - [x] Dependency/advisory audit with documented decisions and weekly Dependabot monitoring.
 - [x] Android Network Security Config plus strict canonical WSS relay endpoint/TLS policy tests.
-- [ ] Keystore migration/recovery tests.
+- [x] Keystore migration/recovery tests.
 - [ ] Process-death/reboot/network-handover tests on device.
 - [ ] Physical TLS/WSS certificate and handshake validation through the deployed VPS endpoint.
 - [ ] Notification permission grant/deny/settings behavior on Android 13+ physical device.
