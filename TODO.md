@@ -13,7 +13,7 @@
 - [x] Unit tests for pairing and approval policy.
 - [x] Green CI: unit tests + lint + debug APK.
 - [x] Add and validate a Gradle 8.14.4 Wrapper with pinned distribution SHA-256.
-- [ ] Add basic app icon/assets without generated artwork.
+- [x] Add basic app icon/assets without generated artwork.
 - [x] Apply security-driven Gradle/Kotlin toolchain upgrades only after concrete advisories and full CI validation.
 
 ## P0 — real remote connection
