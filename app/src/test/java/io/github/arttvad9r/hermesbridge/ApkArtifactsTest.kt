@@ -1,6 +1,9 @@
 package io.github.arttvad9r.hermesbridge
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ApkArtifactsTest {
@@ -58,6 +61,20 @@ class ApkArtifactsTest {
                 // expected
             }
         }
+    }
+
+    @Test
+    fun apkDisplayVersionNameUsesSharedAppMetadataBounds() {
+        assertNull(boundedApkDisplayVersionName(null))
+        assertEquals("2.0", boundedApkDisplayVersionName("2.0"))
+
+        val bounded = boundedApkDisplayVersionName(
+            "release\n" + "\u0800".repeat(MAX_REMOTE_APP_VERSION_NAME_CHARS * 2)
+        ) ?: throw AssertionError("Expected bounded version name")
+
+        assertEquals(MAX_REMOTE_APP_VERSION_NAME_CHARS, bounded.length)
+        assertFalse(bounded.any(Char::isISOControl))
+        assertTrue(bounded.startsWith("release "))
     }
 
     private fun validDescriptor() = ApkArtifactDescriptor(
