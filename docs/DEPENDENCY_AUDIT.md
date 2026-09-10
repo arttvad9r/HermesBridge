@@ -93,6 +93,8 @@ Dependabot monitors GitHub Actions versions. Every external `uses:` reference in
 
 `ci/verify-actions-pinned.sh` fails CI if an external workflow action is changed back to a mutable tag/branch reference or if the verifier can no longer find any external action references. Local actions and `docker://` references are excluded from that rule because they do not use a GitHub repository ref.
 
+When an Action pin changes, review must re-resolve the intended upstream release/tag to the immutable commit SHA before accepting the update; a changed hash by itself is not sufficient provenance evidence.
+
 Workflow permissions default to `contents: read`; the temporary write permission used once to generate and commit the standard Gradle Wrapper was removed immediately afterward.
 
 References:
