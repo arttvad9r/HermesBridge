@@ -104,6 +104,7 @@
 - [x] Uninstall app.
 - [x] Force-stop app.
 - [x] Revoke one already-granted Android `dangerous` runtime permission from a launcher-visible app after exact local approval.
+- [ ] Migrate the fixed Shizuku command backend from deprecated reflective `Shizuku.newProcess` to a typed `UserService` before adopting Shizuku API 14; do not add a generic shell surface during migration.
 - [ ] Permission grant operations, only if a separate safe exact-target policy is justified.
 - [ ] Selected safe settings operations.
 - [x] First selected diagnostic: bounded read-only Batterystats power-use and partial-wakelock snapshot.
