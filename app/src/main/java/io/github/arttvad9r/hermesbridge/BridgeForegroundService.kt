@@ -195,6 +195,12 @@ class BridgeForegroundService : Service() {
             Intent(this, AuditLogActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val captureConsentIntent = PendingIntent.getActivity(
+            this,
+            3,
+            Intent(this, UiCaptureConsentActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
@@ -205,6 +211,7 @@ class BridgeForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .addAction(0, "История", historyIntent)
+            .addAction(0, "Захват экрана", captureConsentIntent)
             .addAction(0, "Остановить", stopIntent)
             .build()
     }

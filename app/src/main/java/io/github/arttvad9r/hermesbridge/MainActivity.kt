@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
             HermesBridgeTheme {
                 val vm: BridgeViewModel = viewModel()
                 val state by vm.state.collectAsState()
+                val uiCaptureSession by UiCaptureSessionRuntime.state.collectAsState()
                 val fileTreeLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocumentTree(),
                     onResult = { uri -> uri?.let(vm::grantFileTree) },
@@ -71,6 +72,7 @@ class MainActivity : ComponentActivity() {
 
                 BridgeScreen(
                     state = state,
+                    uiCaptureSession = uiCaptureSession,
                     onCodeChange = vm::updatePairingCode,
                     onPair = vm::pair,
                     onRevokePairing = vm::revokePairing,
@@ -107,6 +109,12 @@ class MainActivity : ComponentActivity() {
                     onOpenShizuku = {
                         ShizukuRestorationNotifier.shizukuLaunchIntent(this)?.let { startActivity(it) }
                     },
+                    onStartUiCapture = {
+                        startActivity(Intent(this, UiCaptureConsentActivity::class.java))
+                    },
+                    onStopUiCapture = {
+                        stopService(Intent(this, UiCaptureForegroundService::class.java))
+                    },
                 )
             }
         }
@@ -133,6 +141,7 @@ private fun HermesBridgeTheme(content: @Composable () -> Unit) {
 @Composable
 private fun BridgeScreen(
     state: BridgeUiState,
+    uiCaptureSession: UiCaptureSessionState,
     onCodeChange: (String) -> Unit,
     onPair: () -> Unit,
     onRevokePairing: () -> Unit,
@@ -150,6 +159,8 @@ private fun BridgeScreen(
     onRequestShizukuPermission: () -> Unit,
     onRefreshShizuku: () -> Unit,
     onOpenShizuku: () -> Unit,
+    onStartUiCapture: () -> Unit,
+    onStopUiCapture: () -> Unit,
 ) {
     var showRevokePairingDialog by remember { mutableStateOf(false) }
 
@@ -306,6 +317,12 @@ private fun BridgeScreen(
                     onRequestPermission = onRequestShizukuPermission,
                     onRefresh = onRefreshShizuku,
                     onOpenShizuku = onOpenShizuku,
+                )
+
+                UiCaptureCard(
+                    state = uiCaptureSession,
+                    onStart = onStartUiCapture,
+                    onStop = onStopUiCapture,
                 )
 
                 CapabilitiesCard(
@@ -769,6 +786,62 @@ private fun ShizukuCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Открыть Shizuku")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UiCaptureCard(
+    state: UiCaptureSessionState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val status = when (state.status) {
+        UiCaptureSessionStatus.STOPPED -> "Не активен"
+        UiCaptureSessionStatus.REQUESTING_CONSENT -> "Ожидается подтверждение Android"
+        UiCaptureSessionStatus.STARTING -> "Запускается"
+        UiCaptureSessionStatus.ACTIVE -> "Активен"
+        UiCaptureSessionStatus.DENIED -> "Разрешение не выдано"
+        UiCaptureSessionStatus.ERROR -> "Ошибка запуска"
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Захват экрана",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(status, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(
+                if (state.status == UiCaptureSessionStatus.ACTIVE) {
+                    "Сессия действует не более пяти минут и может быть остановлена здесь в любой момент. Hermes пока не получает изображение."
+                } else {
+                    "Каждая новая сессия требует системного подтверждения Android. Hermes пока не получает изображение: передача скриншотов ещё не включена."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when {
+                canRequestUiCaptureConsent(state.status) -> {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Начать захват")
+                    }
+                }
+
+                state.status == UiCaptureSessionStatus.STARTING ||
+                    state.status == UiCaptureSessionStatus.ACTIVE -> {
+                    Button(
+                        onClick = onStop,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Остановить захват")
+                    }
                 }
             }
         }
