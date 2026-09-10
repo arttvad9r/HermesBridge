@@ -120,6 +120,30 @@ class BridgeCommandRouterTest {
         assertEquals("invalid_request_id", result.error?.code)
     }
 
+    @Test
+    fun localRepositoryExceptionTextDoesNotCrossRouterBoundary() = runBlocking {
+        val marker = "SECRET_MARKER:/data/user/0/io.github.arttvad9r.hermesbridge/private"
+        val permissions = object : AppPermissionsRepository {
+            override fun read(packageName: String): AppPermissionsSnapshot {
+                throw IllegalStateException(marker)
+            }
+        }
+        val router = router(permissions)
+
+        val result = router.execute(
+            CommandRequestPayload(
+                tool = AppPermissionsToolHandler.TOOL_NAME,
+                requestId = "router-redaction",
+                arguments = buildJsonObject { put("packageName", "com.example.visible") },
+            )
+        )
+
+        assertFalse(result.ok)
+        assertEquals("app_permissions_failed", result.error?.code)
+        assertEquals("Android could not read app permission metadata.", result.error?.message)
+        assertFalse(result.error?.message.orEmpty().contains(marker))
+    }
+
     private fun router(permissions: AppPermissionsRepository?) = BridgeCommandRouter(
         coreRegistry = BridgeToolRegistry(
             healthRepository = healthRepository,
