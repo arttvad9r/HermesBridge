@@ -106,6 +106,20 @@ class BridgeCommandRouterTest {
         assertEquals("unknown_tool", result.error?.code)
     }
 
+    @Test
+    fun invalidRequestIdFailsClosedThroughReplayGuard() = runBlocking {
+        val router = router(null)
+        val result = router.execute(
+            CommandRequestPayload(
+                tool = BridgeToolRegistry.DEVICE_HEALTH,
+                requestId = "invalid request id",
+            )
+        )
+
+        assertFalse(result.ok)
+        assertEquals("invalid_request_id", result.error?.code)
+    }
+
     private fun router(permissions: AppPermissionsRepository?) = BridgeCommandRouter(
         coreRegistry = BridgeToolRegistry(
             healthRepository = healthRepository,

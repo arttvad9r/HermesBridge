@@ -15,6 +15,7 @@ class BridgeCommandRouter(
     appPermissionsRepository: AppPermissionsRepository?,
     privilegedAppsBackend: PrivilegedAppsBackend = DisabledPrivilegedAppsBackend,
 ) {
+    private val replayGuard = CommandReplayGuard()
     private val appPermissionsHandler = AppPermissionsToolHandler(
         appsRepository = appsRepository,
         permissionsRepository = appPermissionsRepository,
@@ -30,13 +31,17 @@ class BridgeCommandRouter(
     )
 
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
-        val result = when (request.tool) {
-            AppPermissionsToolHandler.TOOL_NAME -> appPermissionsHandler.execute(request)
-            AppPermissionsAuditToolHandler.TOOL_NAME -> appPermissionsAuditHandler.execute(request)
-            AppPermissionRevokeToolHandler.TOOL_NAME -> appPermissionRevokeHandler.execute(request)
-            else -> coreRegistry.execute(request)
+        val outcome = replayGuard.execute(request) {
+            when (request.tool) {
+                AppPermissionsToolHandler.TOOL_NAME -> appPermissionsHandler.execute(request)
+                AppPermissionsAuditToolHandler.TOOL_NAME -> appPermissionsAuditHandler.execute(request)
+                AppPermissionRevokeToolHandler.TOOL_NAME -> appPermissionRevokeHandler.execute(request)
+                else -> coreRegistry.execute(request)
+            }
         }
-        BridgeAuditRuntime.recordCommand(request.tool, result)
-        return result
+        if (outcome.shouldAudit) {
+            BridgeAuditRuntime.recordCommand(request.tool, outcome.result)
+        }
+        return outcome.result
     }
 }
