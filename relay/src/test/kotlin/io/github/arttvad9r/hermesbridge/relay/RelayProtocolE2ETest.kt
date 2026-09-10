@@ -9,6 +9,7 @@ import io.github.arttvad9r.hermesbridge.protocol.MessageType
 import io.github.arttvad9r.hermesbridge.protocol.PairOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.PairRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.WireEnvelope
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.contentType
@@ -20,7 +21,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
-import io.ktor.websocket.DefaultClientWebSocketSession
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
@@ -31,6 +31,7 @@ import java.util.Base64
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
