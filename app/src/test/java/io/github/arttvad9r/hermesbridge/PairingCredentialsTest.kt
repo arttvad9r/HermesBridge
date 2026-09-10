@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,13 +32,14 @@ class PairingCredentialsTest {
     }
 
     @Test
-    fun `missing identity clears stale pairing and requires re-pair`() {
+    fun `missing identity clears stale pairing and requires repair`() {
         val store = FakePairingStore("device_123")
         val identity = FakeIdentity(hasKey = false)
 
         val result = PairingCredentialManager(store, identity).validateResume()
+        val error = result.exceptionOrNull() as DeviceIdentityUnavailableException
 
-        assertTrue(result.exceptionOrNull() is DeviceIdentityUnavailableException)
+        assertEquals(DeviceIdentityFailureMode.REPAIR_REQUIRED, error.mode)
         assertEquals(null, store.deviceId())
         assertTrue(store.cleared)
         assertFalse(identity.resetCalled)
@@ -46,25 +48,41 @@ class PairingCredentialsTest {
     @Test
     fun `temporary keystore check failure preserves pairing`() {
         val store = FakePairingStore("device_123")
+        val failure = IllegalStateException("keystore busy")
         val identity = FakeIdentity(
             hasKey = true,
-            hasKeyFailure = IllegalStateException("keystore busy"),
+            hasKeyFailure = failure,
         )
 
         val result = PairingCredentialManager(store, identity).validateResume()
+        val error = result.exceptionOrNull() as DeviceIdentityUnavailableException
 
-        assertTrue(result.exceptionOrNull() is DeviceIdentityUnavailableException)
+        assertEquals(DeviceIdentityFailureMode.TRANSIENT, error.mode)
+        assertSame(failure, error.cause)
         assertEquals("device_123", store.deviceId())
         assertFalse(store.cleared)
         assertFalse(identity.resetCalled)
     }
 
     @Test
-    fun `signing identity failure clears pairing and rotates identity for explicit re-pair`() {
+    fun `repair clears pairing and rotates identity`() {
         val store = FakePairingStore("device_123")
         val identity = FakeIdentity(hasKey = true)
 
-        val result = PairingCredentialManager(store, identity).invalidateAfterSigningFailure()
+        val result = PairingCredentialManager(store, identity).invalidateForRepair()
+
+        assertTrue(result.isSuccess)
+        assertEquals(null, store.deviceId())
+        assertTrue(store.cleared)
+        assertTrue(identity.resetCalled)
+    }
+
+    @Test
+    fun `repair rotates identity even before a device id exists`() {
+        val store = FakePairingStore(null)
+        val identity = FakeIdentity(hasKey = true)
+
+        val result = PairingCredentialManager(store, identity).invalidateForRepair()
 
         assertTrue(result.isSuccess)
         assertEquals(null, store.deviceId())
@@ -80,7 +98,7 @@ class PairingCredentialsTest {
             resetFailure = IllegalStateException("delete failed"),
         )
 
-        val result = PairingCredentialManager(store, identity).invalidateAfterSigningFailure()
+        val result = PairingCredentialManager(store, identity).invalidateForRepair()
 
         assertTrue(result.isFailure)
         assertEquals(null, store.deviceId())
