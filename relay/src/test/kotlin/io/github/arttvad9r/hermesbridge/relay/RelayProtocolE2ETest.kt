@@ -151,8 +151,8 @@ class RelayProtocolE2ETest {
                 val result = BridgeProtocol.json.decodeFromString<CommandResultPayload>(
                     response.bodyAsText()
                 )
-                assertEquals(request.requestId, result.requestId)
                 assertTrue(result.ok)
+                assertEquals(request.requestId, result.requestId)
                 assertEquals(deviceResult, result.result)
             }
         }
@@ -163,11 +163,12 @@ class RelayProtocolE2ETest {
     }
 
     private suspend fun DefaultClientWebSocketSession.receiveEnvelope(): WireEnvelope {
-        val frame = incoming.receive() as Frame.Text
+        val frame = incoming.receive()
+        require(frame is Frame.Text) { "Expected a text protocol frame." }
         return BridgeProtocol.decode(frame.readText())
     }
 
     private companion object {
-        const val ADMIN_TOKEN = "relay-e2e-admin-token"
+        const val ADMIN_TOKEN = "test-admin-token-at-least-24-chars"
     }
 }
