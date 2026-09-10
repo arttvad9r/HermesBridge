@@ -7,6 +7,14 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    groups:
+      ktor:
+        applies-to: "version-updates"
+        patterns:
+          - "io.ktor:*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "pip"
     directory: "/hermes_mcp"
