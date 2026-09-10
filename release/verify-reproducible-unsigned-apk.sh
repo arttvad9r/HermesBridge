@@ -24,33 +24,32 @@ fi
 
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT
+apk="app/build/outputs/apk/release/app-release-unsigned.apk"
 
 build_unsigned() {
   ./gradlew --no-daemon :app:clean :app:assembleRelease
-  local apk="app/build/outputs/apk/release/app-release-unsigned.apk"
   if [[ ! -s "$apk" ]]; then
     echo "Expected unsigned release APK was not produced: $apk" >&2
     exit 1
   fi
-  printf '%s\n' "$apk"
 }
 
-first_apk=$(build_unsigned)
-cp "$first_apk" "$tmp_dir/app-release-first-unsigned.apk"
-second_apk=$(build_unsigned)
+build_unsigned
+cp "$apk" "$tmp_dir/app-release-first-unsigned.apk"
+build_unsigned
 
-if ! cmp -s "$tmp_dir/app-release-first-unsigned.apk" "$second_apk"; then
+if ! cmp -s "$tmp_dir/app-release-first-unsigned.apk" "$apk"; then
   echo "Unsigned release APK is not byte-for-byte reproducible with the current source and toolchain." >&2
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$tmp_dir/app-release-first-unsigned.apk" "$second_apk" >&2
+    sha256sum "$tmp_dir/app-release-first-unsigned.apk" "$apk" >&2
   fi
   exit 1
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$second_apk" | tee "$second_apk.sha256"
+  sha256sum "$apk" | tee "$apk.sha256"
 elif command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 "$second_apk" | tee "$second_apk.sha256"
+  shasum -a 256 "$apk" | tee "$apk.sha256"
 else
   echo "Neither sha256sum nor shasum is available." >&2
   exit 2
