@@ -19,6 +19,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.view.WindowInsets
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -28,8 +29,9 @@ import androidx.core.content.ContextCompat
  * Owns one short-lived, explicitly consented MediaProjection at a time.
  *
  * Each consent is used for exactly one non-secure VirtualDisplay. Hermes Bridge acquires one
- * bounded RGBA frame, immediately erases its process-local byte copy, releases all capture
- * resources, and stops the session. No pixels are persisted or exposed to relay/MCP state.
+ * bounded RGBA frame, redacts locally derived system-bar/cutout edges, immediately erases its
+ * process-local byte copy, releases all capture resources, and stops the session. No pixels are
+ * persisted or exposed to relay/MCP state.
  */
 class UiCaptureForegroundService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -37,6 +39,7 @@ class UiCaptureForegroundService : Service() {
     private var projectionCallback: MediaProjection.Callback? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private var captureEdgeInsets: UiCaptureEdgeInsets? = null
     private var sessionDeadline: UiCaptureSessionDeadline? = null
     private var frameHandled = false
     private var tearingDown = false
@@ -128,13 +131,42 @@ class UiCaptureForegroundService : Service() {
         projectionCallback = callback
         resolvedProjection.registerCallback(callback, mainHandler)
 
-        val dimensions = try {
-            val bounds = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
-            boundedUiCaptureDimensions(bounds.width(), bounds.height())
+        val metrics = try {
+            getSystemService(WindowManager::class.java).maximumWindowMetrics
         } catch (error: Throwable) {
             failSession("Could not determine safe screen-capture dimensions.")
             return
         }
+        val sourceWidth = metrics.bounds.width()
+        val sourceHeight = metrics.bounds.height()
+        val dimensions = try {
+            boundedUiCaptureDimensions(sourceWidth, sourceHeight)
+        } catch (error: Throwable) {
+            failSession("Could not determine safe screen-capture dimensions.")
+            return
+        }
+        val redactionInsets = try {
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
+            )
+            scaledUiCaptureEdgeInsets(
+                sourceWidth = sourceWidth,
+                sourceHeight = sourceHeight,
+                targetWidth = dimensions.width,
+                targetHeight = dimensions.height,
+                sourceInsets = UiCaptureEdgeInsets(
+                    left = insets.left,
+                    top = insets.top,
+                    right = insets.right,
+                    bottom = insets.bottom,
+                ),
+            )
+        } catch (error: Throwable) {
+            failSession("Could not determine safe screen-capture redaction bounds.")
+            return
+        }
+        captureEdgeInsets = redactionInsets
+
         val densityDpi = resources.configuration.densityDpi
         if (densityDpi <= 0) {
             failSession("Android returned an invalid screen density for capture.")
@@ -220,11 +252,24 @@ class UiCaptureForegroundService : Service() {
         }
 
         runCatching { image.close() }
-        val capturedWidth = frame.width
-        val capturedHeight = frame.height
+        val redactionResult = runCatching {
+            val insets = checkNotNull(captureEdgeInsets) {
+                "Capture redaction bounds were not initialized."
+            }
+            redactUiCaptureFrameEdgesInPlace(frame, insets)
+            frame.width to frame.height
+        }
         frame.erase()
-        finishSession(
-            "Captured one local ${capturedWidth}x${capturedHeight} frame and erased its pixel copy."
+
+        redactionResult.fold(
+            onSuccess = { (capturedWidth, capturedHeight) ->
+                finishSession(
+                    "Captured one locally redacted ${capturedWidth}x${capturedHeight} frame and erased its pixel copy."
+                )
+            },
+            onFailure = {
+                failSession("Could not apply the local screen-capture redaction policy.")
+            },
         )
     }
 
@@ -243,6 +288,7 @@ class UiCaptureForegroundService : Service() {
 
     private fun stopWithoutSession(message: String) {
         UiCaptureSessionRuntime.error(message)
+        captureEdgeInsets = null
         sessionDeadline = null
         mainHandler.removeCallbacks(expiryRunnable)
         mainHandler.removeCallbacks(frameTimeoutRunnable)
@@ -254,6 +300,7 @@ class UiCaptureForegroundService : Service() {
         if (tearingDown) return
         tearingDown = true
         try {
+            captureEdgeInsets = null
             sessionDeadline = null
             mainHandler.removeCallbacks(expiryRunnable)
             mainHandler.removeCallbacks(frameTimeoutRunnable)
@@ -310,7 +357,7 @@ class UiCaptureForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
             .setContentTitle("Hermes Bridge · захват экрана")
-            .setContentText("Захватывается один локальный кадр. Он не сохраняется и не передаётся Hermes.")
+            .setContentText("Захватывается один локальный кадр. Системные края скрываются; кадр не сохраняется и не передаётся Hermes.")
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
