@@ -95,7 +95,15 @@ Rules:
 - tool must exist in the local allowlist;
 - arguments must pass a strict schema;
 - local policy decides allow / approval / deny;
-- a duplicate `requestId` must not repeat a completed destructive action.
+- Android accepts request IDs of 1–128 characters matching the bounded protocol identifier alphabet;
+- while a request ID remains in the Android replay table, it is bound to `SHA-256(tool + canonical arguments)`; the same ID with another payload fails closed with `request_id_conflict`;
+- concurrent exact duplicates of one request ID share the same in-flight execution rather than executing the tool twice;
+- for the current non-idempotent tools (`files.delete`, install, uninstall, force-stop and permission revoke), a terminal result is retained in the bounded replay table and returned to exact duplicates without running the operation again;
+- `approval_required` is deliberately non-terminal so Hermes can retry the exact same request after the local ticket is approved;
+- read-only duplicate requests may be evaluated again because repeating those observations does not mutate device state;
+- the replay table is in-memory and bounded to 200 request IDs; it is an in-process duplicate-execution guard, not a claim of durable exactly-once delivery.
+
+All current mutating/privileged tools still require an exact, one-use Android approval before their actual mutation. Therefore process death cannot silently turn a replayed destructive request into a second mutation: after approval state is lost, a retry must obtain a new local approval. The previous operation's outcome can nevertheless be unknown after a crash, so Hermes must not automatically approve/retry such a request merely because the transport reconnected.
 
 ## Approval notifications
 
@@ -128,7 +136,7 @@ When the device pairing identity is revoked, missing or invalidated for repair, 
 - exponential reconnect backoff with jitter;
 - connection resumes after Wi-Fi/mobile handover;
 - only bounded in-memory queues before durable queue design is reviewed;
-- destructive commands use idempotency keys where safe;
+- bounded request-ID replay protection prevents duplicate in-process execution of current destructive tools without pretending to provide durable exactly-once semantics;
 - results include structured error codes, not only strings;
 - approval notifications are best-effort convenience data: losing one never changes or weakens the local approval ticket.
 
