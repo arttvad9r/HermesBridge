@@ -29,9 +29,9 @@ import androidx.core.content.ContextCompat
  * Owns one short-lived, explicitly consented MediaProjection at a time.
  *
  * Each consent is used for exactly one non-secure VirtualDisplay. Hermes Bridge acquires one
- * bounded RGBA frame, redacts locally derived system-bar/cutout edges, immediately erases its
- * process-local byte copy, releases all capture resources, and stops the session. No pixels are
- * persisted or exposed to relay/MCP state.
+ * bounded RGBA frame, redacts locally derived system-bar/cutout/visible-IME edges using a fresh
+ * WindowInsets snapshot, immediately erases its process-local byte copy, releases all capture
+ * resources, and stops the session. No pixels are persisted or exposed to relay/MCP state.
  */
 class UiCaptureForegroundService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -39,7 +39,8 @@ class UiCaptureForegroundService : Service() {
     private var projectionCallback: MediaProjection.Callback? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
-    private var captureEdgeInsets: UiCaptureEdgeInsets? = null
+    private var captureSourceWidth: Int? = null
+    private var captureSourceHeight: Int? = null
     private var sessionDeadline: UiCaptureSessionDeadline? = null
     private var frameHandled = false
     private var tearingDown = false
@@ -145,27 +146,8 @@ class UiCaptureForegroundService : Service() {
             failSession("Could not determine safe screen-capture dimensions.")
             return
         }
-        val redactionInsets = try {
-            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
-                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
-            )
-            scaledUiCaptureEdgeInsets(
-                sourceWidth = sourceWidth,
-                sourceHeight = sourceHeight,
-                targetWidth = dimensions.width,
-                targetHeight = dimensions.height,
-                sourceInsets = UiCaptureEdgeInsets(
-                    left = insets.left,
-                    top = insets.top,
-                    right = insets.right,
-                    bottom = insets.bottom,
-                ),
-            )
-        } catch (error: Throwable) {
-            failSession("Could not determine safe screen-capture redaction bounds.")
-            return
-        }
-        captureEdgeInsets = redactionInsets
+        captureSourceWidth = sourceWidth
+        captureSourceHeight = sourceHeight
 
         val densityDpi = resources.configuration.densityDpi
         if (densityDpi <= 0) {
@@ -253,9 +235,39 @@ class UiCaptureForegroundService : Service() {
 
         runCatching { image.close() }
         val redactionResult = runCatching {
-            val insets = checkNotNull(captureEdgeInsets) {
-                "Capture redaction bounds were not initialized."
+            val expectedSourceWidth = checkNotNull(captureSourceWidth) {
+                "Capture source width was not initialized."
             }
+            val expectedSourceHeight = checkNotNull(captureSourceHeight) {
+                "Capture source height was not initialized."
+            }
+            val currentMetrics = getSystemService(WindowManager::class.java).maximumWindowMetrics
+            val systemInsets = currentMetrics.windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
+            )
+            // IME height is dynamic. Read the visibility-sensitive value only now, after the frame
+            // arrived, so a keyboard that appeared after capture setup is not masked from stale data.
+            val imeInsets = currentMetrics.windowInsets.getInsets(WindowInsets.Type.ime())
+            val insets = currentUiCaptureRedactionInsets(
+                expectedSourceWidth = expectedSourceWidth,
+                expectedSourceHeight = expectedSourceHeight,
+                currentSourceWidth = currentMetrics.bounds.width(),
+                currentSourceHeight = currentMetrics.bounds.height(),
+                targetWidth = frame.width,
+                targetHeight = frame.height,
+                systemInsets = UiCaptureEdgeInsets(
+                    left = systemInsets.left,
+                    top = systemInsets.top,
+                    right = systemInsets.right,
+                    bottom = systemInsets.bottom,
+                ),
+                visibleImeInsets = UiCaptureEdgeInsets(
+                    left = imeInsets.left,
+                    top = imeInsets.top,
+                    right = imeInsets.right,
+                    bottom = imeInsets.bottom,
+                ),
+            )
             redactUiCaptureFrameEdgesInPlace(frame, insets)
             frame.width to frame.height
         }
@@ -288,7 +300,8 @@ class UiCaptureForegroundService : Service() {
 
     private fun stopWithoutSession(message: String) {
         UiCaptureSessionRuntime.error(message)
-        captureEdgeInsets = null
+        captureSourceWidth = null
+        captureSourceHeight = null
         sessionDeadline = null
         mainHandler.removeCallbacks(expiryRunnable)
         mainHandler.removeCallbacks(frameTimeoutRunnable)
@@ -300,7 +313,8 @@ class UiCaptureForegroundService : Service() {
         if (tearingDown) return
         tearingDown = true
         try {
-            captureEdgeInsets = null
+            captureSourceWidth = null
+            captureSourceHeight = null
             sessionDeadline = null
             mainHandler.removeCallbacks(expiryRunnable)
             mainHandler.removeCallbacks(frameTimeoutRunnable)
@@ -357,7 +371,7 @@ class UiCaptureForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
             .setContentTitle("Hermes Bridge · захват экрана")
-            .setContentText("Захватывается один локальный кадр. Системные края скрываются; кадр не сохраняется и не передаётся Hermes.")
+            .setContentText("Захватывается один локальный кадр. Системные края и видимая клавиатура скрываются; кадр не сохраняется и не передаётся Hermes.")
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
