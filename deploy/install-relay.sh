@@ -46,7 +46,7 @@ if [[ ! -f "$service_source" ]]; then
     exit 1
 fi
 
-for command in tar systemctl useradd install mktemp; do
+for command in tar systemctl groupadd useradd install mktemp grep od tr cp mv rm chmod chown; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "error: required command is missing: $command" >&2
         exit 1
@@ -80,15 +80,19 @@ cleanup() {
 trap cleanup EXIT
 
 tar -xf "$archive" -C "$tmp_dir" --no-same-owner --no-same-permissions
-if [[ ! -f "$tmp_dir/relay/bin/relay" ]]; then
-    echo "error: extracted relay launcher is missing" >&2
+if [[ ! -f "$tmp_dir/relay/bin/relay" || -L "$tmp_dir/relay/bin/relay" ]]; then
+    echo "error: extracted relay launcher is missing or is not a regular file" >&2
     exit 1
 fi
 chmod 0755 "$tmp_dir/relay/bin/relay"
 
+# `useradd` defaults differ across distributions. Create the service group
+# explicitly, then bind the system account to that exact group.
+groupadd --system --force "$SERVICE_GROUP"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
     useradd \
         --system \
+        --gid "$SERVICE_GROUP" \
         --home-dir "$STATE_DIR" \
         --shell /usr/sbin/nologin \
         "$SERVICE_USER"
@@ -116,12 +120,9 @@ HERMES_BRIDGE_ADMIN_TOKEN=$admin_token
 HERMES_BRIDGE_STATE_DIR=$STATE_DIR
 PORT=$DEFAULT_PORT
 EOF
-    chown root:"$SERVICE_GROUP" "$env_file"
-    chmod 0640 "$env_file"
-else
-    chown root:"$SERVICE_GROUP" "$env_file"
-    chmod 0640 "$env_file"
 fi
+chown root:"$SERVICE_GROUP" "$env_file"
+chmod 0640 "$env_file"
 
 new_dir="$INSTALL_ROOT/relay.new"
 old_dir="$INSTALL_ROOT/relay.previous"
@@ -135,20 +136,27 @@ if [[ -d "$INSTALL_ROOT/relay" ]]; then
 fi
 mv -- "$new_dir" "$INSTALL_ROOT/relay"
 
-systemctl daemon-reload
-if ! systemctl enable --now "$SERVICE_NAME"; then
-    echo "error: systemd could not start the new relay; attempting rollback" >&2
+rollback_binary() {
     rm -rf -- "$INSTALL_ROOT/relay"
     if [[ -d "$old_dir" ]]; then
         mv -- "$old_dir" "$INSTALL_ROOT/relay"
-        systemctl daemon-reload
+        systemctl daemon-reload || true
         systemctl restart "$SERVICE_NAME" || true
     fi
+}
+
+systemctl daemon-reload
+if ! systemctl enable "$SERVICE_NAME"; then
+    echo "error: systemd could not enable $SERVICE_NAME; attempting rollback" >&2
+    rollback_binary
     exit 1
 fi
 
-if ! systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo "error: $SERVICE_NAME is not active after installation" >&2
+# `enable --now` does not restart an already-running unit after an upgrade.
+# Always restart explicitly so the new distribution is actually executing.
+if ! systemctl restart "$SERVICE_NAME" || ! systemctl is-active --quiet "$SERVICE_NAME"; then
+    echo "error: new relay did not become active; attempting rollback" >&2
+    rollback_binary
     exit 1
 fi
 
