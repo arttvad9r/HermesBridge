@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -33,10 +33,12 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Validate deployment scripts
+      - name: Validate deployment and release scripts
         run: |
           bash -n deploy/install-relay.sh
           bash deploy/install-relay.sh --help >/dev/null
+          bash -n release/build-signed-apk.sh
+          bash -n release/verify-reproducible-signed-apk.sh
 
       - name: Unit tests
         run: ./gradlew --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
@@ -52,10 +54,40 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon :app:assembleDebug
 
-      - name: Build minified release APK
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-bridge-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify reproducible signed release path
         run: |
-          ./gradlew --no-daemon :app:assembleRelease
+          test_keystore="$RUNNER_TEMP/hermes-bridge-ci-release.jks"
+          keytool -genkeypair -noprompt \
+            -keystore "$test_keystore" \
+            -storepass ci-test-only \
+            -keypass ci-test-only \
+            -alias ci-release \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Hermes Bridge CI,O=Hermes Bridge,C=US"
+          apksigner_path=$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)
+          test -x "$apksigner_path"
+          export HERMES_BRIDGE_APKSIGNER="$apksigner_path"
+          export HERMES_BRIDGE_SIGNING_STORE_FILE="$test_keystore"
+          export HERMES_BRIDGE_SIGNING_STORE_PASSWORD=ci-test-only
+          export HERMES_BRIDGE_SIGNING_KEY_ALIAS=ci-release
+          export HERMES_BRIDGE_SIGNING_KEY_PASSWORD=ci-test-only
+          release/verify-reproducible-signed-apk.sh
+
+      - name: Build minified unsigned release APK
+        run: |
+          ./gradlew --no-daemon :app:clean :app:assembleRelease
           test -s app/build/outputs/mapping/release/mapping.txt
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk \
+            > app/build/outputs/apk/release/app-release-unsigned.apk.sha256
 
       - name: Build relay distribution
         run: |
@@ -64,17 +96,13 @@ jobs:
           test -n "$relay_tar"
           tar -tf "$relay_tar" | grep -qx 'relay/bin/relay'
 
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: hermes-bridge-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: hermes-bridge-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          path: |
+            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk.sha256
 
       - name: Upload relay distribution
         uses: actions/upload-artifact@v4

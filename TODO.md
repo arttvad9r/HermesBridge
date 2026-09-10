@@ -149,5 +149,5 @@
 - [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
 - [ ] R8/release build and reflection keep-rule verification.
-- [ ] Signed reproducible release process.
+- [x] Signed reproducible release process with external signing secrets and CI signing/reproducibility verification.
 - [ ] Decide project license.
