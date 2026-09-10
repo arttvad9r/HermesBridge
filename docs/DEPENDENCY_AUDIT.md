@@ -32,26 +32,34 @@ References:
 - https://github.com/gradle/gradle/security/advisories/GHSA-mqwm-5m85-gmcv
 - https://docs.gradle.org/8.14.4/release-notes.html
 
-### Kotlin Gradle Plugin
+### Kotlin Gradle Plugin and R8
 
 Previous baseline: Kotlin 2.1.20.
 
-Finding:
+Findings:
 
 - CVE-2026-53914 affects Kotlin before 2.4.20: code execution was possible through unsafe deserialization in build-cache metadata.
+- After the Kotlin 2.4.20 security update, minified Android builds emitted `R8: An error occurred when parsing kotlin metadata`, showing that the R8 bundled with the existing AGP toolchain did not fully understand the new Kotlin metadata.
+- Android's current Kotlin compatibility table requires R8 9.1.29 for Kotlin 2.4 class files and documents overriding AGP's bundled R8 when a newer compiler is required.
+- The R8 project documents `https://storage.googleapis.com/r8-releases/raw` as its Maven repository for stable/dev prebuilts. R8 9.1.29 is resolved only from that buildscript-scoped repository; normal application dependencies remain restricted to Google Maven and Maven Central.
 
 Remediation:
 
 - Hermes Bridge uses Kotlin 2.4.20 for the Android, JVM, Compose and serialization plugins.
 - The Android module was migrated from the removed string `kotlinOptions.jvmTarget` DSL to typed `compilerOptions` with JVM target 17.
 - Gradle build cache is explicitly disabled with `org.gradle.caching=false` as additional defense in depth.
-- The Kotlin 2.4.20 migration passed protocol/relay/app unit tests, Hermes MCP tests, Android lint, debug APK build and relay distribution build on Gradle 8.14.4.
+- `settings.gradle.kts` pins `com.android.tools:r8:9.1.29` on the Android build classpath instead of accepting an older bundled R8 for minification.
+- The additional R8 repository is scoped to `pluginManagement.buildscript.repositories` and content-filtered to `com.android.tools:r8`; it cannot resolve application/runtime dependencies through `dependencyResolutionManagement`.
+- CI captures the reproducible unsigned minified release log and fails if the Kotlin-metadata parsing warning returns.
+- The Kotlin/R8 combination must pass protocol/relay/app unit tests, Hermes MCP tests, Android lint, debug APK, signed release verification, reproducible unsigned minified release APK and relay distribution builds before adoption.
 
 References:
 
 - https://nvd.nist.gov/vuln/detail/CVE-2026-53914
 - https://www.jetbrains.com/privacy-security/issues-fixed/
 - https://blog.jetbrains.com/kotlin/2026/09/kotlin-2-4-20-released/
+- https://developer.android.com/build/kotlin-support
+- https://r8.googlesource.com/r8/
 
 ## Runtime and application dependencies
 
