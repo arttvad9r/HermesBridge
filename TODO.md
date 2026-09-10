@@ -122,7 +122,7 @@
 - [x] Permission-revoke approval binds to package + permission + derived Android user ID.
 - [x] Approved tickets are one-use only.
 - [x] Approval/denial decisions recorded in the local bounded audit history.
-- [ ] Hermes/Telegram approval routing.
+- [x] Hermes/Telegram approval routing.
 - [ ] Per-tool "always allow" only where explicitly safe.
 - [x] Emergency disconnect/revoke button for the Hermes pairing itself.
 
