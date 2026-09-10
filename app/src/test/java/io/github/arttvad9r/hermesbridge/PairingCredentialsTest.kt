@@ -40,6 +40,7 @@ class PairingCredentialsTest {
         val error = result.exceptionOrNull() as DeviceIdentityUnavailableException
 
         assertEquals(DeviceIdentityFailureMode.REPAIR_REQUIRED, error.mode)
+        assertTrue(requiresDeviceIdentityRepair(error))
         assertEquals(null, store.deviceId())
         assertTrue(store.cleared)
         assertFalse(identity.resetCalled)
@@ -58,10 +59,16 @@ class PairingCredentialsTest {
         val error = result.exceptionOrNull() as DeviceIdentityUnavailableException
 
         assertEquals(DeviceIdentityFailureMode.TRANSIENT, error.mode)
+        assertFalse(requiresDeviceIdentityRepair(error))
         assertSame(failure, error.cause)
         assertEquals("device_123", store.deviceId())
         assertFalse(store.cleared)
         assertFalse(identity.resetCalled)
+    }
+
+    @Test
+    fun `generic failures never trigger identity repair`() {
+        assertFalse(requiresDeviceIdentityRepair(IllegalStateException("network failed")))
     }
 
     @Test
