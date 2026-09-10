@@ -16,6 +16,7 @@ class BridgeCommandRouter(
     privilegedAppsBackend: PrivilegedAppsBackend = DisabledPrivilegedAppsBackend,
 ) {
     private val replayGuard = CommandReplayGuard()
+    private val appsListHandler = AppsListToolHandler(appsRepository)
     private val appPermissionsHandler = AppPermissionsToolHandler(
         appsRepository = appsRepository,
         permissionsRepository = appPermissionsRepository,
@@ -34,6 +35,7 @@ class BridgeCommandRouter(
         val outcome = replayGuard.execute(request) {
             remoteSafeCommandResult(
                 when (request.tool) {
+                    AppsListToolHandler.TOOL_NAME -> appsListHandler.execute(request)
                     AppPermissionsToolHandler.TOOL_NAME -> appPermissionsHandler.execute(request)
                     AppPermissionsAuditToolHandler.TOOL_NAME -> appPermissionsAuditHandler.execute(request)
                     AppPermissionRevokeToolHandler.TOOL_NAME -> appPermissionRevokeHandler.execute(request)
