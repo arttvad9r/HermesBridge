@@ -79,7 +79,25 @@ The Maven API/provider artifact version is intentionally treated separately from
 
 No actionable advisory requiring a library-version change was identified in this review. Future Shizuku changes require re-checking permission semantics and the typed privileged boundary before upgrading.
 
-### kotlinx.coroutines / kotlinx.serialization / AndroidX
+### kotlinx.serialization 1.11.0
+
+`kotlinx.serialization` 1.11.0 adds an explicit production privacy control for JSON decoding exceptions. While the API is experimental, `exceptionsWithDebugInfo` is still `true` by default in this release; with debug info enabled, exception messages may include the raw input or an excerpt of it.
+
+This matters for Hermes Bridge because `BridgeProtocol` decodes relay-supplied JSON and transport failures can propagate a `Throwable.message` to the Android UI/foreground notification. Protocol payloads can contain command arguments and other data that should not be repeated in error surfaces.
+
+Remediation:
+
+- the protocol runtime uses `kotlinx-serialization-json:1.11.0`;
+- `BridgeProtocol` explicitly sets `exceptionsWithDebugInfo = false`;
+- a regression test decodes malformed JSON containing a unique private marker and asserts that the resulting serialization error does not contain the marker;
+- protocol decoding remains strict (`ignoreUnknownKeys = false`); the privacy setting changes diagnostics only, not accepted wire data.
+
+References:
+
+- https://github.com/Kotlin/kotlinx.serialization/releases/tag/v1.11.0
+- https://kotlinlang.org/api/kotlinx.serialization/kotlinx-serialization-json/kotlinx.serialization.json/-json-decoding-exception/
+
+### kotlinx.coroutines / AndroidX
 
 No actionable security advisory requiring an immediate version change was identified in this review for the versions currently used by Hermes Bridge. They remain under Dependabot monitoring. A newer version alone is not sufficient reason for a broad coordinated upgrade.
 

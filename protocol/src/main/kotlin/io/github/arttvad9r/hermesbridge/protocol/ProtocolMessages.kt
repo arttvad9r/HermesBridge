@@ -3,6 +3,7 @@ package io.github.arttvad9r.hermesbridge.protocol
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -95,10 +96,12 @@ data class ErrorPayload(
 )
 
 object BridgeProtocol {
+    @OptIn(ExperimentalSerializationApi::class)
     val json = Json {
         ignoreUnknownKeys = false
         explicitNulls = false
         encodeDefaults = true
+        exceptionsWithDebugInfo = false
     }
 
     fun envelope(
