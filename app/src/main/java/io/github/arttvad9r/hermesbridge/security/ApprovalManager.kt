@@ -65,7 +65,7 @@ class ApprovalManager(
             tool = tool,
             risk = risk,
             argumentsFingerprint = fingerprint,
-            displaySummary = displaySummary.trim().take(MAX_SUMMARY_LENGTH),
+            displaySummary = sanitizeDisplaySummary(displaySummary),
             createdAtEpochMillis = now,
             expiresAtEpochMillis = now + ttlMillis,
             status = ApprovalStatus.PENDING,
@@ -147,6 +147,24 @@ class ApprovalManager(
             } ?: tickets.entries.firstOrNull()
             if (removable == null) return
             tickets.remove(removable.key)
+        }
+    }
+
+    private fun sanitizeDisplaySummary(value: String): String = value
+        .asSequence()
+        .map { character -> if (isUnsafeDisplayCharacter(character)) ' ' else character }
+        .joinToString(separator = "")
+        .trim()
+        .take(MAX_SUMMARY_LENGTH)
+
+    private fun isUnsafeDisplayCharacter(character: Char): Boolean {
+        if (character.isISOControl()) return true
+        return when (Character.getType(character)) {
+            Character.FORMAT.toInt(),
+            Character.LINE_SEPARATOR.toInt(),
+            Character.PARAGRAPH_SEPARATOR.toInt(),
+            -> true
+            else -> false
         }
     }
 
