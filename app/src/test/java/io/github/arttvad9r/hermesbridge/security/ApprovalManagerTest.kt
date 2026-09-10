@@ -6,6 +6,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -126,6 +127,30 @@ class ApprovalManagerTest {
 
         assertEquals(ApprovalStatus.EXPIRED, manager.find(ticket.id)?.status)
         assertNull(manager.consumeApproved("apps.uninstall", arguments))
+    }
+
+    @Test
+    fun approvalDisplaySummaryNormalizesControlsAndKeepsFingerprintExact() {
+        val exactName = "line\nname\u202E\u2028.txt"
+        val manager = ApprovalManager(ttlMillis = 60_000L)
+        val arguments = buildJsonObject {
+            put("pathSegments", buildJsonArray { add(JsonPrimitive(exactName)) })
+        }
+        val expectedFingerprint = ApprovalFingerprint.forRequest("files.delete", arguments)
+
+        val ticket = manager.request(
+            tool = "files.delete",
+            risk = ToolRisk.MUTATING,
+            arguments = arguments,
+            displaySummary = "  Удалить Documents/$exactName\t" + "x".repeat(300),
+        )
+
+        assertEquals(expectedFingerprint, ticket.argumentsFingerprint)
+        assertEquals(ApprovalManager.MAX_SUMMARY_LENGTH, ticket.displaySummary.length)
+        assertFalse(ticket.displaySummary.any(Char::isISOControl))
+        assertFalse(ticket.displaySummary.contains('\u202E'))
+        assertFalse(ticket.displaySummary.contains('\u2028'))
+        assertTrue(ticket.displaySummary.startsWith("Удалить Documents/line name  .txt x"))
     }
 
     @Test(expected = IllegalArgumentException::class)
