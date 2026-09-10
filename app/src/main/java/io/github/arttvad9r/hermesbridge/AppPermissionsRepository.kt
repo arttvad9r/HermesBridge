@@ -90,7 +90,7 @@ class AndroidAppPermissionsRepository(context: Context) : AppPermissionsReposito
 
     private fun protectionLabel(permissionInfo: PermissionInfo?): String {
         if (permissionInfo == null) return PROTECTION_UNKNOWN_LABEL
-        return when (permissionInfo.protectionLevel and PermissionInfo.PROTECTION_MASK_BASE) {
+        return when (permissionInfo.protection) {
             PermissionInfo.PROTECTION_NORMAL -> "normal"
             PermissionInfo.PROTECTION_DANGEROUS -> PROTECTION_DANGEROUS_LABEL
             PermissionInfo.PROTECTION_SIGNATURE -> "signature"
