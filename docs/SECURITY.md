@@ -94,6 +94,20 @@ These must not be exposed to Hermes in V1:
 
 If an upstream dependency exposes one of these, Hermes Bridge must omit it from registration rather than relying on prompting instructions.
 
+## Screen-capture boundary
+
+MediaProjection is an explicit local capability, not an implicit extension of the relay connection. The current pixel path is intentionally narrower than a screenshot tool:
+
+- each Android consent grant is used for at most one `MediaProjection.createVirtualDisplay()` call;
+- the virtual display is non-secure, so Android continues to blank `FLAG_SECURE` / protected window content instead of Hermes Bridge attempting to capture it;
+- the capture surface is aspect-ratio preserving and bounded to at most 1,600 pixels on either axis and 1,500,000 total pixels;
+- the process-local copied RGBA frame is therefore bounded to 6,000,000 bytes;
+- exactly one frame is acquired, its copied byte array is overwritten immediately, and the `Image`, `ImageReader`, `VirtualDisplay`, and `MediaProjection` resources are then released;
+- no screenshot pixels enter `UiCaptureSessionRuntime`, app-private files, logs, audit history, Android intents, protocol models, relay state, MCP results, or Telegram notifications;
+- there is no remote screenshot/capture command and the relay cannot start MediaProjection consent.
+
+Any future screenshot retention, redaction, serialization, transport, remote trigger, or repeated-frame processing is a separate privacy/security boundary and must be reviewed explicitly rather than inheriting permission from this local one-frame primitive.
+
 ## Pairing
 
 Pairing code properties:
