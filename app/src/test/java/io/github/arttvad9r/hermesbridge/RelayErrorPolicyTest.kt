@@ -7,17 +7,43 @@ import org.junit.Test
 
 class RelayErrorPolicyTest {
     @Test
-    fun knownRelayCodeUsesStableLocalTextAndIgnoresRemoteMessage() {
+    fun everyKnownRelayCodeIgnoresRemoteMessage() {
         val remoteMarker = "REMOTE_SECRET_MARKER_7fb274"
+        val knownCodes = listOf(
+            "unknown_device",
+            "invalid_pairing_code",
+            "auth_failed",
+            "unsupported_version",
+            "not_authenticated",
+            "invalid_json",
+            "invalid_payload",
+            "invalid_public_key",
+            "invalid_state",
+            "unexpected_message",
+        )
+
+        knownCodes.forEach { code ->
+            val display = relayErrorDisplayMessage(
+                ErrorPayload(
+                    code = code,
+                    message = "Injected notification text: $remoteMarker",
+                )
+            )
+            assertFalse("Remote message leaked for code=$code", display.contains(remoteMarker))
+            assertFalse("Remote prefix leaked for code=$code", display.contains("Injected notification text"))
+        }
+    }
+
+    @Test
+    fun knownRelayCodeUsesStableLocalText() {
         val display = relayErrorDisplayMessage(
             ErrorPayload(
                 code = "invalid_state",
-                message = remoteMarker,
+                message = "ignored",
             )
         )
 
         assertEquals("Relay rejected the request in the current session state.", display)
-        assertFalse(display.contains(remoteMarker))
     }
 
     @Test
