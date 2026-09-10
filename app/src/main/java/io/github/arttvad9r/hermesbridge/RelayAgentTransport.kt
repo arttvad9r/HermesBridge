@@ -338,15 +338,15 @@ class RelayAgentTransport(
 
                         MessageType.ERROR -> {
                             val payload = BridgeProtocol.decodePayload<ErrorPayload>(envelope)
+                            val displayMessage = relayErrorDisplayMessage(payload)
                             revokeAck?.takeIf { !it.isCompleted }?.complete(
-                                Result.failure(IllegalStateException("${payload.code}: ${payload.message}"))
+                                Result.failure(IllegalStateException(displayMessage))
                             )
                             if (payload.code == "unknown_device") {
                                 pairingStore.clear()
                                 mutableConnectionState.value = ConnectionState.ERROR
-                                error("Relay no longer recognizes this device. Pair it again.")
                             }
-                            error("${payload.code}: ${payload.message}")
+                            error(displayMessage)
                         }
                     }
                 }

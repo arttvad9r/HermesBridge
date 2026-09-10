@@ -60,6 +60,7 @@ Mitigations:
 - per-device credential revocation;
 - no generic shell endpoint;
 - tool allowlist enforced on device;
+- relay-supplied error messages are treated as untrusted; Android surfaces only fixed local text selected from an allowlisted protocol error code;
 - command outcomes and approval decisions are recorded locally on the phone.
 
 ## Risk classes
