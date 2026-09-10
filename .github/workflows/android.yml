@@ -40,6 +40,21 @@ jobs:
           bash -n release/build-signed-apk.sh
           bash -n release/verify-reproducible-signed-apk.sh
 
+      - name: Reject partial release signing configuration
+        run: |
+          log="$RUNNER_TEMP/partial-release-signing.log"
+          if HERMES_BRIDGE_SIGNING_STORE_FILE="$RUNNER_TEMP/incomplete.jks" \
+            ./gradlew --no-daemon :app:tasks >"$log" 2>&1; then
+            cat "$log"
+            echo "Gradle accepted a partial release-signing configuration." >&2
+            exit 1
+          fi
+          grep -Fq "Release signing is partially configured" "$log" || {
+            cat "$log"
+            echo "Gradle failed for an unexpected reason while testing partial signing configuration." >&2
+            exit 1
+          }
+
       - name: Unit tests
         run: ./gradlew --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
 
