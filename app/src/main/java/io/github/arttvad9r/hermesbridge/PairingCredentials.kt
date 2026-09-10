@@ -34,7 +34,7 @@ class PairingCredentialManager(
         return Result.success(Unit)
     }
 
-    fun invalidateAfterSigningFailure(): Result<Unit> {
+    fun invalidateForRepair(): Result<Unit> {
         pairingStore.clear()
         return runCatching { identity.reset() }
     }
