@@ -64,16 +64,38 @@ jobs:
           python -m unittest discover -s hermes_mcp/tests -v
 
       - name: Lint
-        run: ./gradlew --no-daemon :app:lintDebug
+        run: ./gradlew --no-daemon :app:lintDebug :e2e-fixture:lintDebug
 
-      - name: Build debug APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+      - name: Build debug APKs
+        run: ./gradlew --no-daemon :app:assembleDebug :e2e-fixture:assembleDebug
+
+      - name: Verify physical E2E fixture APK policy
+        run: |
+          apk=e2e-fixture/build/outputs/apk/debug/e2e-fixture-debug.apk
+          test -s "$apk"
+
+          apkanalyzer_bin="$(command -v apkanalyzer || true)"
+          if [ -z "$apkanalyzer_bin" ]; then
+            apkanalyzer_bin="$(find "${ANDROID_HOME:?}/cmdline-tools" -type f -name apkanalyzer -perm -u+x -print -quit)"
+          fi
+          test -x "$apkanalyzer_bin"
+
+          test "$("$apkanalyzer_bin" manifest application-id "$apk")" = \
+            "io.github.arttvad9r.hermesbridge.fixture"
+          permissions="$("$apkanalyzer_bin" manifest permissions "$apk")"
+          test "$permissions" = "android.permission.CAMERA"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
           name: hermes-bridge-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload physical E2E fixture APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: hermes-bridge-e2e-fixture
+          path: e2e-fixture/build/outputs/apk/debug/e2e-fixture-debug.apk
 
       - name: Verify signed release path
         run: |

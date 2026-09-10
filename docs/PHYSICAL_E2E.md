@@ -6,7 +6,8 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
 
 ## Test rules
 
-- Use a disposable/test APK for install/uninstall/force-stop checks. Do not use a banking, authenticator, launcher, messaging or other important app.
+- Prefer the repository-owned disposable `e2e-fixture` APK for install/uninstall/force-stop/revoke checks. Build/use instructions and its deliberately narrow permission surface are documented in `E2E_FIXTURE.md`.
+- Do not use a banking, authenticator, launcher, messaging or other important app as a mutation target.
 - Use a disposable folder for SAF deletion checks.
 - Do not expose relay port `8080` publicly; Hermes/admin traffic stays loopback-only.
 - Do not disable the Android-side approval policy for the test.
@@ -86,7 +87,7 @@ Verify that:
 
 ## 5. Approval and mutation checks
 
-Prepare a disposable test directory and a harmless test APK/package.
+Build/install the repository-owned `e2e-fixture` and prepare a disposable test directory. The fixture package is `io.github.arttvad9r.hermesbridge.fixture`; for permission revoke tests, grant `android.permission.CAMERA` from the fixture UI first. The fixture never opens the camera.
 
 For each mutating tool, verify this exact sequence:
 
@@ -100,10 +101,10 @@ For each mutating tool, verify this exact sequence:
 Exercise:
 
 - `delete_path` on a disposable file;
-- `force_stop_app` on the test package;
-- `revoke_app_permission` on a safe runtime permission granted to the test package;
-- `uninstall_app` on the test package;
-- `install_apk` from the dedicated VPS APK staging directory.
+- `force_stop_app` on `io.github.arttvad9r.hermesbridge.fixture`;
+- `revoke_app_permission` for `android.permission.CAMERA` on the fixture package;
+- `uninstall_app` on the fixture package;
+- `install_apk` using the fixture APK from the dedicated VPS APK staging directory.
 
 Do not use Hermes Bridge's own package as the target; self-protection should reject those attempts before mutation.
 
