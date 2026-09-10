@@ -207,11 +207,19 @@ class AndroidApkPackageInspector(
 
         return ApkPackageMetadata(
             packageName = packageInfo.packageName,
-            versionName = packageInfo.versionName,
+            versionName = boundedApkDisplayVersionName(packageInfo.versionName),
             versionCode = packageInfo.longVersionCode,
             signerSha256 = signers,
         )
     }
+}
+
+/**
+ * APK versionName is display metadata. The verified APK SHA-256 remains the exact approval identity,
+ * while the human-readable version is normalized to the same remote bound used by app listings.
+ */
+internal fun boundedApkDisplayVersionName(value: String?): String? = value?.let {
+    boundedRemoteText(it, MAX_REMOTE_APP_VERSION_NAME_CHARS)
 }
 
 private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
