@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 hermes-bridge-mcp = "hermes_bridge_mcp.server:main"
+hermes-bridge-telegram-approvals = "hermes_bridge_mcp.telegram_approvals:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hermes_bridge_mcp"]
