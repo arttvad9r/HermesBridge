@@ -24,6 +24,36 @@ class ProtocolMessagesTest {
     }
 
     @Test
+    fun approvalRequestRoundTripPreservesOnlyTargetFreeMetadata() {
+        val source = BridgeProtocol.envelope(
+            type = MessageType.APPROVAL_REQUEST,
+            deviceId = "device_123",
+            payload = BridgeProtocol.payload(
+                ApprovalRequestPayload(
+                    approvalId = "approval_123",
+                    tool = "apps.forceStop",
+                    risk = "PRIVILEGED",
+                    expiresInMillis = 120_000L,
+                )
+            ),
+        )
+
+        val decoded = BridgeProtocol.decode(BridgeProtocol.encode(source))
+        val payload = BridgeProtocol.decodePayload<ApprovalRequestPayload>(decoded)
+
+        assertEquals(MessageType.APPROVAL_REQUEST, decoded.type)
+        assertEquals("device_123", decoded.deviceId)
+        assertEquals("approval_123", payload.approvalId)
+        assertEquals("apps.forceStop", payload.tool)
+        assertEquals("PRIVILEGED", payload.risk)
+        assertEquals(120_000L, payload.expiresInMillis)
+        assertEquals(
+            setOf("approvalId", "tool", "risk", "expiresInMillis"),
+            decoded.payload.keys,
+        )
+    }
+
+    @Test
     fun decodingErrorsDoNotExposeRawInput() {
         val secretMarker = "HERMES_PRIVATE_INPUT_MARKER"
         val malformed = """{"v":"$secretMarker","id":"id","type":"error","timestamp":"2026-01-01T00:00:00Z"}"""

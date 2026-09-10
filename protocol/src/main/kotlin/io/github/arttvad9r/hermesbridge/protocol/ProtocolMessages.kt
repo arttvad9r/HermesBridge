@@ -26,6 +26,7 @@ object MessageType {
     const val HEARTBEAT_PONG = "heartbeat.pong"
     const val COMMAND_REQUEST = "command.request"
     const val COMMAND_RESULT = "command.result"
+    const val APPROVAL_REQUEST = "approval.request"
     const val DEVICE_REVOKE_REQUEST = "device.revoke.request"
     const val DEVICE_REVOKE_OK = "device.revoke.ok"
     const val ERROR = "error"
@@ -73,6 +74,14 @@ data class CommandRequestPayload(
     val tool: String,
     val requestId: String,
     val arguments: JsonObject = JsonObject(emptyMap()),
+)
+
+@Serializable
+data class ApprovalRequestPayload(
+    val approvalId: String,
+    val tool: String,
+    val risk: String,
+    val expiresInMillis: Long,
 )
 
 @Serializable

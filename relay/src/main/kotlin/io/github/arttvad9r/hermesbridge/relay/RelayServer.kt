@@ -1,5 +1,6 @@
 package io.github.arttvad9r.hermesbridge.relay
 
+import io.github.arttvad9r.hermesbridge.protocol.ApprovalRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.AuthChallengePayload
 import io.github.arttvad9r.hermesbridge.protocol.AuthOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.AuthResponsePayload
@@ -151,6 +152,7 @@ private class RelayRuntime(
     val devices = DeviceRegistry(deviceRegistryPath)
     val sessions = DeviceSessionHub()
     val apkArtifacts = ApkArtifactStore(artifactDirectory)
+    val approvals = ApprovalNotificationStore()
 }
 
 internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = when {
@@ -222,6 +224,33 @@ fun Application.relayModule(
             )
         }
 
+        get("/api/v1/devices/{deviceId}/approvals") {
+            if (!call.requireAdmin(adminToken)) return@get
+            val deviceId = call.parameters["deviceId"]
+            if (deviceId == null || !DEVICE_ID_REGEX.matches(deviceId)) {
+                call.respondText(
+                    "{\"error\":\"invalid_device_id\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.BadRequest,
+                )
+                return@get
+            }
+            if (runtime.devices.find(deviceId) == null) {
+                call.respondText(
+                    "{\"error\":\"device_not_found\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.NotFound,
+                )
+                return@get
+            }
+
+            call.respondText(
+                BridgeProtocol.json.encodeToString(runtime.approvals.list(deviceId)),
+                ContentType.Application.Json,
+                HttpStatusCode.OK,
+            )
+        }
+
         post("/api/v1/devices/{deviceId}/revoke") {
             if (!call.requireAdmin(adminToken)) return@post
             val deviceId = call.parameters["deviceId"]
@@ -244,6 +273,7 @@ fun Application.relayModule(
                 return@post
             }
 
+            runtime.approvals.clearDevice(deviceId)
             runtime.sessions.revoke(deviceId)
             call.respondText(
                 BridgeProtocol.json.encodeToString(RelayRevokeResponse(deviceId, revoked = true)),
@@ -528,6 +558,24 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                     )
                 }
 
+                MessageType.APPROVAL_REQUEST -> {
+                    val deviceId = authenticatedDeviceId
+                    if (deviceId == null || envelope.deviceId != deviceId) {
+                        sendError("not_authenticated", "Authenticate before sending approval notifications.")
+                        continue
+                    }
+
+                    val payload = try {
+                        BridgeProtocol.decodePayload<ApprovalRequestPayload>(envelope)
+                    } catch (_: Exception) {
+                        sendError("invalid_payload", "Invalid approval notification payload.")
+                        continue
+                    }
+                    if (runtime.approvals.record(deviceId, payload) == null) {
+                        sendError("invalid_payload", "Invalid approval notification payload.")
+                    }
+                }
+
                 MessageType.DEVICE_REVOKE_REQUEST -> {
                     val deviceId = authenticatedDeviceId
                     if (
@@ -545,6 +593,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         return
                     }
 
+                    runtime.approvals.clearDevice(deviceId)
                     runtime.sessions.unregister(deviceId, this)
                     authenticatedDeviceId = null
                     sendEnvelope(

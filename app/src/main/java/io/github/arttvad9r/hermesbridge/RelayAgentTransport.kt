@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge
 
 import android.content.Context
 import android.os.Build
+import io.github.arttvad9r.hermesbridge.protocol.ApprovalRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.AuthChallengePayload
 import io.github.arttvad9r.hermesbridge.protocol.AuthResponsePayload
 import io.github.arttvad9r.hermesbridge.protocol.BridgeProtocol
@@ -12,6 +13,7 @@ import io.github.arttvad9r.hermesbridge.protocol.MessageType
 import io.github.arttvad9r.hermesbridge.protocol.PairOkPayload
 import io.github.arttvad9r.hermesbridge.protocol.PairRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.SessionHelloPayload
+import io.github.arttvad9r.hermesbridge.security.ApprovalManager
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
@@ -99,6 +101,9 @@ class RelayAgentTransport(
     override suspend fun resume(): Result<Unit> {
         val validation = pairingCredentials.validateResume()
         if (validation.isFailure) {
+            if (pairingStore.deviceId() == null) {
+                BridgeApprovalRuntime.clear()
+            }
             mutableConnectionState.value = ConnectionState.ERROR
             return validation
         }
@@ -112,7 +117,10 @@ class RelayAgentTransport(
     }
 
     suspend fun revokePairing(): Result<Unit> {
-        val deviceId = pairingStore.deviceId() ?: return Result.success(Unit)
+        val deviceId = pairingStore.deviceId() ?: run {
+            BridgeApprovalRuntime.clear()
+            return Result.success(Unit)
+        }
         if (mutableConnectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(
                 IllegalStateException("Connect to Hermes before revoking this device pairing.")
@@ -187,6 +195,7 @@ class RelayAgentTransport(
                     error.mode == DeviceIdentityFailureMode.REPAIR_REQUIRED
                 ) {
                     val resetFailure = pairingCredentials.invalidateForRepair().exceptionOrNull()
+                    BridgeApprovalRuntime.clear()
                     val terminalError = if (resetFailure == null) {
                         error
                     } else {
@@ -201,6 +210,7 @@ class RelayAgentTransport(
                     return
                 }
                 if (pairingStore.deviceId() == null) {
+                    BridgeApprovalRuntime.clear()
                     mutableConnectionState.value = ConnectionState.ERROR
                     if (!ready.isCompleted) {
                         ready.complete(Result.failure(error))
@@ -223,6 +233,7 @@ class RelayAgentTransport(
                 return
             }
             if (pairingStore.deviceId() == null) {
+                BridgeApprovalRuntime.clear()
                 mutableConnectionState.value = ConnectionState.DISCONNECTED
                 return
             }
@@ -310,6 +321,7 @@ class RelayAgentTransport(
                             }
                             val request = BridgeProtocol.decodePayload<CommandRequestPayload>(envelope)
                             val result = commandRouter.execute(request)
+                            sendPendingApprovalNotifications(deviceId)
                             sendEnvelope(
                                 type = MessageType.COMMAND_RESULT,
                                 deviceId = deviceId,
@@ -325,6 +337,7 @@ class RelayAgentTransport(
                                 error("Relay returned inconsistent device revoke acknowledgement.")
                             }
                             pairingStore.clear()
+                            BridgeApprovalRuntime.clear()
                             mutableConnectionState.value = ConnectionState.DISCONNECTED
                             revokeAck?.complete(Result.success(Unit))
                             close(CloseReason(CloseReason.Codes.NORMAL, "Pairing revoked"))
@@ -346,6 +359,7 @@ class RelayAgentTransport(
                             )
                             if (payload.code == "unknown_device") {
                                 pairingStore.clear()
+                                BridgeApprovalRuntime.clear()
                                 mutableConnectionState.value = ConnectionState.ERROR
                             }
                             error(displayMessage)
@@ -361,6 +375,25 @@ class RelayAgentTransport(
         }
 
         return authenticated
+    }
+
+    private suspend fun DefaultClientWebSocketSession.sendPendingApprovalNotifications(deviceId: String) {
+        while (true) {
+            val notification = BridgeApprovalRuntime.takeRemoteNotification() ?: return
+            val remainingMillis = notification.expiresAtEpochMillis - System.currentTimeMillis()
+            if (remainingMillis <= 0L) continue
+            val payload = ApprovalRequestPayload(
+                approvalId = notification.id,
+                tool = notification.tool,
+                risk = notification.risk.name,
+                expiresInMillis = remainingMillis.coerceAtMost(ApprovalManager.MAX_TTL_MILLIS),
+            )
+            sendEnvelope(
+                type = MessageType.APPROVAL_REQUEST,
+                deviceId = deviceId,
+                payload = BridgeProtocol.payload(payload),
+            )
+        }
     }
 
     private suspend fun DefaultClientWebSocketSession.sendEnvelope(

@@ -61,7 +61,13 @@ Mitigations:
 - no generic shell endpoint;
 - tool allowlist enforced on device;
 - relay-supplied error messages are treated as untrusted; Android surfaces only fixed local text selected from an allowlisted protocol error code;
+- remote approval notifications are informational only: the relay admin token, Hermes process and Telegram/VPS callbacks cannot approve, deny or consume an Android ticket;
+- approval notifications contain only device/approval IDs, an exact allowlisted tool/risk pair and a short relative TTL; target package names, permission names, SAF paths, APK filenames, raw arguments and the local approval-card summary remain on-device;
+- unknown approval tools or mismatched risk classifications are never queued for the remote notification path;
+- losing pairing identity clears pending local approvals and unsent notification records before a future re-pair;
 - command outcomes and approval decisions are recorded locally on the phone.
+
+A future fully remote approval mechanism must remain independently verifiable when the VPS is hostile. In particular, a signing credential stored or processed on the same VPS is not an independent approval factor. Any such design must bind the user's decision to the Android-created ticket/fingerprint and be verified on-device.
 
 ## Risk classes
 
