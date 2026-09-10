@@ -130,7 +130,7 @@
 
 - [x] Backend/release-channel ADR: the standard build does not use `AccessibilityService` for autonomous Hermes UI control.
 - [ ] Prototype narrow typed Android/Shizuku UI actions without a generic shell surface.
-- [ ] User-consented MediaProjection screen-capture strategy with one explicit short-lived capture session at a time.
+- [x] User-consented MediaProjection screen-capture strategy with one explicit short-lived capture session at a time.
 - [ ] Tap/swipe/input typed actions.
 - [ ] Short-lived UI-control sessions with visible local state and explicit revocation.
 - [ ] Sensitive-field/screenshot redaction where feasible; never bypass secure windows.
