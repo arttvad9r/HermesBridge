@@ -8,3 +8,10 @@ captures/
 .externalNativeBuild/
 .cxx/
 **/build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.jks
+*.keystore
+*.p12
+*.pfx

@@ -4,6 +4,21 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val releaseSigningVariableNames = listOf(
+    "HERMES_BRIDGE_SIGNING_STORE_FILE",
+    "HERMES_BRIDGE_SIGNING_STORE_PASSWORD",
+    "HERMES_BRIDGE_SIGNING_KEY_ALIAS",
+    "HERMES_BRIDGE_SIGNING_KEY_PASSWORD",
+)
+val releaseSigningValues = releaseSigningVariableNames.associateWith { name ->
+    System.getenv(name)?.takeIf { it.isNotBlank() }
+}
+val configuredReleaseSigningValues = releaseSigningValues.values.count { it != null }
+check(configuredReleaseSigningValues == 0 || configuredReleaseSigningValues == releaseSigningVariableNames.size) {
+    "Release signing is partially configured. Set all of: ${releaseSigningVariableNames.joinToString()}"
+}
+val releaseSigningEnabled = configuredReleaseSigningValues == releaseSigningVariableNames.size
+
 android {
     namespace = "io.github.arttvad9r.hermesbridge"
     compileSdk = 35
@@ -22,10 +37,24 @@ android {
         buildConfigField("String", "RELAY_WS_URL", "\"$relayWsUrl\"")
     }
 
+    signingConfigs {
+        if (releaseSigningEnabled) {
+            create("release") {
+                storeFile = file(checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_STORE_FILE"]))
+                storePassword = checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_STORE_PASSWORD"])
+                keyAlias = checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_KEY_ALIAS"])
+                keyPassword = checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_KEY_PASSWORD"])
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (releaseSigningEnabled) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
