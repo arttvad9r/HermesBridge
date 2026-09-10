@@ -8,14 +8,18 @@ import org.junit.Test
 
 class UiCaptureSessionRuntimeTest {
     @Test
-    fun activeSessionHasBoundedFiveMinuteDeadline() {
+    fun activeSessionHasBoundedFiveMinuteMonotonicDeadline() {
         UiCaptureSessionRuntime.stopped()
-        UiCaptureSessionRuntime.active(nowEpochMillis = 1_000L)
+        val deadline = newUiCaptureSessionDeadline(nowElapsedRealtimeMillis = 1_000L)
+        UiCaptureSessionRuntime.active(deadline)
 
         val state = UiCaptureSessionRuntime.state.value
         assertEquals(UiCaptureSessionStatus.ACTIVE, state.status)
-        assertEquals(1_000L, state.startedAtEpochMillis)
-        assertEquals(1_000L + UI_CAPTURE_SESSION_MAX_DURATION_MILLIS, state.expiresAtEpochMillis)
+        assertEquals(1_000L, state.startedAtElapsedRealtimeMillis)
+        assertEquals(
+            1_000L + UI_CAPTURE_SESSION_MAX_DURATION_MILLIS,
+            state.expiresAtElapsedRealtimeMillis,
+        )
     }
 
     @Test
@@ -24,8 +28,8 @@ class UiCaptureSessionRuntimeTest {
         val state = UiCaptureSessionRuntime.state.value
 
         assertEquals(UiCaptureSessionStatus.REQUESTING_CONSENT, state.status)
-        assertNull(state.startedAtEpochMillis)
-        assertNull(state.expiresAtEpochMillis)
+        assertNull(state.startedAtElapsedRealtimeMillis)
+        assertNull(state.expiresAtElapsedRealtimeMillis)
     }
 
     @Test
@@ -52,11 +56,35 @@ class UiCaptureSessionRuntimeTest {
     fun customDurationCannotExceedSessionMaximum() {
         assertTrue(
             runCatching {
-                UiCaptureSessionRuntime.active(
-                    nowEpochMillis = 0L,
+                newUiCaptureSessionDeadline(
+                    nowElapsedRealtimeMillis = 0L,
                     durationMillis = UI_CAPTURE_SESSION_MAX_DURATION_MILLIS + 1,
                 )
             }.isFailure
         )
+    }
+
+    @Test
+    fun deadlineRejectsOverflowAndWatchdogUsesShortMonotonicChecks() {
+        assertTrue(
+            runCatching {
+                newUiCaptureSessionDeadline(
+                    nowElapsedRealtimeMillis = Long.MAX_VALUE,
+                    durationMillis = 1L,
+                )
+            }.isFailure
+        )
+
+        val deadline = newUiCaptureSessionDeadline(
+            nowElapsedRealtimeMillis = 10_000L,
+            durationMillis = 2_500L,
+        )
+        assertEquals(
+            UI_CAPTURE_SESSION_WATCHDOG_INTERVAL_MILLIS,
+            uiCaptureSessionWatchdogDelayMillis(deadline, 10_000L),
+        )
+        assertEquals(500L, uiCaptureSessionWatchdogDelayMillis(deadline, 12_000L))
+        assertNull(uiCaptureSessionWatchdogDelayMillis(deadline, 12_500L))
+        assertNull(uiCaptureSessionWatchdogDelayMillis(deadline, -1L))
     }
 }
