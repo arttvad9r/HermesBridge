@@ -5,7 +5,6 @@ import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
 import io.github.arttvad9r.hermesbridge.protocol.MessageType
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -72,35 +71,20 @@ class RemoteCommandResultBudgetTest {
     }
 
     @Test
-    fun commandRouterAppliesBudgetToSpecializedHandlerResult() = runBlocking {
-        val packageName = "com.example.large"
-        val appsRepository = object : InstalledAppsRepository {
-            override fun listLaunchableApps() = listOf(
-                InstalledAppSnapshot(
-                    packageName = packageName,
-                    label = "Large",
-                    versionName = "1",
-                    versionCode = 1L,
-                    systemApp = false,
-                    enabled = true,
-                )
+    fun commandRouterAppliesBudgetToCoreRegistryResult() = runBlocking {
+        val oversizedEntries = (0 until 1_000).map { index ->
+            val name = "entry-${index.toString().padStart(4, '0')}-" + "x".repeat(220)
+            SafFileEntrySnapshot(
+                name = name,
+                pathSegments = listOf("large", name),
+                directory = false,
+                mimeType = "application/octet-stream",
+                sizeBytes = Long.MAX_VALUE,
+                lastModifiedEpochMillis = Long.MAX_VALUE,
             )
         }
-        val permissionsRepository = object : AppPermissionsRepository {
-            override fun read(packageName: String) = AppPermissionsSnapshot(
-                packageName = packageName,
-                permissions = (0 until 1_000).map { index ->
-                    AppPermissionSnapshot(
-                        name = "com.example.permission.$index." + "x".repeat(220),
-                        granted = true,
-                        protection = "dangerous",
-                        dangerous = true,
-                        group = "group." + "\u0800".repeat(220),
-                        implicit = false,
-                        neverForLocation = false,
-                    )
-                },
-            )
+        val appsRepository = object : InstalledAppsRepository {
+            override fun listLaunchableApps() = emptyList<InstalledAppSnapshot>()
         }
         val router = BridgeCommandRouter(
             coreRegistry = BridgeToolRegistry(
@@ -112,21 +96,19 @@ class RemoteCommandResultBudgetTest {
                     override fun list(pathSegments: List<String>) = SafDirectorySnapshot(
                         rootName = "Shared",
                         pathSegments = pathSegments,
-                        entries = emptyList(),
+                        entries = oversizedEntries,
                     )
                 },
             ),
             appsRepository = appsRepository,
-            appPermissionsRepository = permissionsRepository,
+            appPermissionsRepository = null,
         )
 
         val result = router.execute(
             CommandRequestPayload(
-                tool = AppPermissionsToolHandler.TOOL_NAME,
+                tool = BridgeToolRegistry.FILES_LIST,
                 requestId = "router-result-budget",
-                arguments = buildJsonObject {
-                    put("packageName", JsonPrimitive(packageName))
-                },
+                arguments = buildJsonObject {},
             )
         )
 

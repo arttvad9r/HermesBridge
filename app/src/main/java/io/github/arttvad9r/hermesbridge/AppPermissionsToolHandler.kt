@@ -13,6 +13,37 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+internal data class RemotePermissionsProjection(
+    val permissions: List<AppPermissionSnapshot>,
+    val totalPermissionCount: Int,
+    val truncated: Boolean,
+)
+
+internal fun projectPermissionsForRemoteResult(
+    permissions: List<AppPermissionSnapshot>,
+): RemotePermissionsProjection {
+    val projected = permissions.asSequence()
+        .filter { permission -> isValidAndroidQualifiedName(permission.name) }
+        .take(MAX_REMOTE_PERMISSION_ENTRIES)
+        .map { permission ->
+            permission.copy(
+                protection = boundedRemoteText(
+                    permission.protection,
+                    MAX_REMOTE_PERMISSION_PROTECTION_CHARS,
+                ),
+                group = permission.group?.let {
+                    boundedRemoteText(it, MAX_REMOTE_PERMISSION_GROUP_CHARS)
+                },
+            )
+        }
+        .toList()
+    return RemotePermissionsProjection(
+        permissions = projected,
+        totalPermissionCount = permissions.size,
+        truncated = projected.size < permissions.size,
+    )
+}
+
 class AppPermissionsToolHandler(
     private val appsRepository: InstalledAppsRepository,
     private val permissionsRepository: AppPermissionsRepository?,
@@ -32,7 +63,7 @@ class AppPermissionsToolHandler(
             ?.takeIf { it.isString }
             ?.content
             ?.trim()
-            ?.takeIf(::isValidPackageName)
+            ?.takeIf(::isValidAndroidQualifiedName)
             ?: return invalidArguments(request.requestId)
 
         val visibleApp = appsRepository.listLaunchableApps()
@@ -76,26 +107,32 @@ class AppPermissionsToolHandler(
         val dangerousCount = snapshot.permissions.count { it.dangerous }
         val dangerousGrantedCount = snapshot.permissions.count { it.dangerous && it.granted }
         val grantedCount = snapshot.permissions.count { it.granted }
+        val projection = projectPermissionsForRemoteResult(snapshot.permissions)
 
         return CommandResultPayload(
             requestId = request.requestId,
             ok = true,
             result = buildJsonObject {
                 put("packageName", packageName)
-                put("label", visibleApp.label)
+                put("label", boundedRemoteText(visibleApp.label, MAX_REMOTE_APP_LABEL_CHARS))
                 if (visibleApp.versionName == null) put("versionName", JsonNull)
-                else put("versionName", visibleApp.versionName)
+                else put(
+                    "versionName",
+                    boundedRemoteText(visibleApp.versionName, MAX_REMOTE_APP_VERSION_NAME_CHARS),
+                )
                 put("versionCode", visibleApp.versionCode)
                 put("systemApp", visibleApp.systemApp)
                 put("enabled", visibleApp.enabled)
-                put("permissionCount", snapshot.permissions.size)
+                put("permissionCount", projection.totalPermissionCount)
+                put("returnedPermissionCount", projection.permissions.size)
+                put("permissionsTruncated", projection.truncated)
                 put("grantedCount", grantedCount)
                 put("dangerousCount", dangerousCount)
                 put("dangerousGrantedCount", dangerousGrantedCount)
                 put(
                     "permissions",
                     buildJsonArray {
-                        snapshot.permissions.forEach { permission ->
+                        projection.permissions.forEach { permission ->
                             add(
                                 buildJsonObject {
                                     put("name", permission.name)
@@ -121,9 +158,6 @@ class AppPermissionsToolHandler(
         "apps.permissions requires exactly one valid packageName.",
     )
 
-    private fun isValidPackageName(value: String): Boolean =
-        value.length in 3..255 && PACKAGE_NAME_REGEX.matches(value)
-
     private fun failure(requestId: String, code: String, message: String) =
         CommandResultPayload(
             requestId = requestId,
@@ -134,8 +168,17 @@ class AppPermissionsToolHandler(
     companion object {
         const val TOOL_NAME = "apps.permissions"
         private const val PACKAGE_NAME = "packageName"
-        private val PACKAGE_NAME_REGEX = Regex(
-            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
-        )
     }
 }
+
+internal const val MAX_ANDROID_QUALIFIED_NAME_CHARS = 255
+internal const val MAX_REMOTE_PERMISSION_ENTRIES = 96
+internal const val MAX_REMOTE_PERMISSION_GROUP_CHARS = 120
+internal const val MAX_REMOTE_PERMISSION_PROTECTION_CHARS = 32
+
+private val ANDROID_QUALIFIED_NAME_REGEX = Regex(
+    "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+)
+
+internal fun isValidAndroidQualifiedName(value: String): Boolean =
+    value.length in 3..MAX_ANDROID_QUALIFIED_NAME_CHARS && ANDROID_QUALIFIED_NAME_REGEX.matches(value)

@@ -25,11 +25,11 @@ class AppPermissionRevokeToolHandler(
         }
         val packageName = stringArgument(request, PACKAGE_NAME)
             ?.trim()
-            ?.takeIf(::isValidAndroidName)
+            ?.takeIf(::isValidAndroidQualifiedName)
             ?: return invalidArguments(request.requestId)
         val permissionName = stringArgument(request, PERMISSION_NAME)
             ?.trim()
-            ?.takeIf(::isValidAndroidName)
+            ?.takeIf(::isValidAndroidQualifiedName)
             ?: return invalidArguments(request.requestId)
 
         if (packageName == HERMES_BRIDGE_PACKAGE) {
@@ -190,9 +190,6 @@ class AppPermissionRevokeToolHandler(
         return primitive.takeIf { it.isString }?.content
     }
 
-    private fun isValidAndroidName(value: String): Boolean =
-        value.length in 3..MAX_ANDROID_NAME_LENGTH && ANDROID_NAME_REGEX.matches(value)
-
     private fun invalidArguments(requestId: String) = failure(
         requestId,
         "invalid_arguments",
@@ -212,11 +209,7 @@ class AppPermissionRevokeToolHandler(
         private const val PERMISSION_NAME = "permissionName"
         private const val USER_ID = "userId"
         private const val HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
-        private const val MAX_ANDROID_NAME_LENGTH = 255
         private const val MAX_ANDROID_USER_ID = 99_999
-        private val ANDROID_NAME_REGEX = Regex(
-            "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
-        )
     }
 }
 
