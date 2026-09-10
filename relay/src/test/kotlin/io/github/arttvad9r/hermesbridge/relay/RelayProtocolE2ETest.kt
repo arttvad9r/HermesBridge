@@ -12,7 +12,6 @@ import io.github.arttvad9r.hermesbridge.protocol.WireEnvelope
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
-import io.ktor.client.request.contentType
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -20,6 +19,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -151,8 +151,8 @@ class RelayProtocolE2ETest {
                 val result = BridgeProtocol.json.decodeFromString<CommandResultPayload>(
                     response.bodyAsText()
                 )
-                assertTrue(result.ok)
                 assertEquals(request.requestId, result.requestId)
+                assertTrue(result.ok)
                 assertEquals(deviceResult, result.result)
             }
         }
@@ -163,12 +163,11 @@ class RelayProtocolE2ETest {
     }
 
     private suspend fun DefaultClientWebSocketSession.receiveEnvelope(): WireEnvelope {
-        val frame = incoming.receive()
-        require(frame is Frame.Text) { "Expected a text protocol frame." }
+        val frame = incoming.receive() as Frame.Text
         return BridgeProtocol.decode(frame.readText())
     }
 
     private companion object {
-        const val ADMIN_TOKEN = "test-admin-token-at-least-24-chars"
+        const val ADMIN_TOKEN = "relay-e2e-admin-token"
     }
 }
