@@ -27,7 +27,7 @@
 | - device registry         |
 | - pairing                 |
 | - command routing         |
-| - approval routing        |
+| - approval notifications  |
 +------------+--------------+
              ^
              | outbound authenticated TLS/WebSocket
@@ -47,8 +47,8 @@
        v                             v
 Android APIs / droid-mcp       Optional backends
                                - Usage Access
-                               - Accessibility
                                - Shizuku
+                               - policy-gated UI-control session
 ```
 
 ## Android layers
@@ -101,6 +101,14 @@ Shizuku is the initial non-root privileged backend.
 
 Hermes Bridge must prefer dedicated operations such as `force_stop_app` or `install_apk` over a generic shell command. Generic shell execution is not exposed to Hermes.
 
+### UI-control boundary
+
+The standard Hermes Bridge build does not use `AccessibilityService` as an autonomous AI-control backend. See [ADR 0003](decisions/0003-ui-control-policy.md).
+
+Future UI-control work must prefer typed Android APIs and narrow typed Shizuku operations. If screen pixels are required, capture is an explicit short-lived MediaProjection session with fresh system consent for each new session and the required foreground-service lifecycle. Capture is never restored from boot and secure/unavailable content is not bypassed.
+
+UI-control authority is separate from base relay connectivity and ordinary Shizuku setup. Typed tap/swipe/input operations, if implemented, require an explicit local UI-control session/approval and remain bounded and auditable.
+
 ### Transport
 
 V1 transport is a persistent outbound connection from Android to a relay near Hermes.
@@ -133,13 +141,14 @@ This avoids forking/reimplementing its Android tool internals while keeping our 
 
 ## Current implementation
 
-The bootstrap app currently includes:
+The current app includes:
 
-- Compose status UI;
-- real local battery/memory/storage snapshot using Android APIs;
-- pairing-code domain validation;
-- a fail-closed transport stub;
-- initial tool-risk and approval policy;
-- unit tests for pairing/policy.
+- Compose pairing/setup/dashboard and local approval/history UI;
+- an authenticated outbound relay connection with challenge/response device identity, reconnect and revocation flows;
+- a narrow local Hermes MCP adapter and Android-side typed tool router;
+- standard Android health/app/file adapters plus opt-in SAF and Usage Access capabilities;
+- Shizuku-backed typed privileged operations with no agent-facing raw shell;
+- exact local approval for mutating/privileged operations and a bounded local audit history;
+- CI gates for tests, lint, debug/release artifacts, signing-path verification and reproducible unsigned release builds.
 
-The transport stub intentionally refuses pairing until the relay protocol is implemented; the UI must not present a false connected state.
+Physical-device network, permission and privileged-operation validation remains a separate release gate. UI automation is not implemented and must follow ADR 0003 rather than adding an Accessibility placeholder.

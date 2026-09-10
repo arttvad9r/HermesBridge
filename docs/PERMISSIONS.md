@@ -138,17 +138,17 @@ On Android 13+:
 
 The restoration notification contains no pairing code, auth token, raw tool argument, file content or other secret-bearing data.
 
-## UI control: Accessibility
+## Future UI-control session
 
-Accessibility is a separate optional capability and is not currently implemented.
+UI control is not currently implemented and the standard build does not declare an autonomous `AccessibilityService` for Hermes. See [ADR 0003](decisions/0003-ui-control-policy.md).
 
-The user must explicitly enable the service in Android settings. Hermes Bridge must not attempt to disguise or silently enable it.
+Future UI-control must remain a separate opt-in capability rather than inheriting authority from the base relay or ordinary Shizuku setup. Typed Android/Shizuku operations are preferred for actions. If screen pixels are needed, the user must explicitly start a short-lived MediaProjection session and accept the system capture prompt for each new capture session. The projection runs only with the required `mediaProjection` foreground-service type and is never silently restored after reboot.
 
-UI control should be used only when a typed Android operation does not exist or when the user explicitly wants interaction with an app UI.
+A future setup card must appear only after a concrete compliant UI-control implementation exists. Hermes Bridge must not add a placeholder Accessibility permission/service merely to satisfy the wizard roadmap.
 
 ## Capability matrix
 
-| Capability | Base | Notifications | SAF folder | Usage Access | Shizuku | Accessibility |
+| Capability | Base | Notifications | SAF folder | Usage Access | Shizuku | Future UI-control session |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Bridge connection | ✓ | | | | | |
 | Battery/memory/storage totals | ✓ | | | | | |
@@ -162,7 +162,7 @@ UI control should be used only when a typed Android operation does not exist or 
 | Privileged install/uninstall | | | | | ✓ | |
 | Force-stop | | | | | ✓ | |
 | Approved dangerous-permission revoke | | | | | ✓ | |
-| Tap/swipe/input | | | | | | ✓ |
+| Screen capture / tap / swipe / input | | | | | | future |
 
 ## Physical validation still required
 
