@@ -14,12 +14,9 @@ import kotlinx.serialization.encodeToString
  * for the surrounding WireEnvelope fields.
  */
 internal fun enforceRemoteCommandResultBudget(result: CommandResultPayload): CommandResultPayload {
-    val payloadBytes = BridgeProtocol.json
-        .encodeToString(result)
-        .toByteArray(Charsets.UTF_8)
-        .size
-        .toLong()
-    if (payloadBytes <= MAX_REMOTE_COMMAND_RESULT_PAYLOAD_BYTES) return result
+    if (remoteCommandResultPayloadBytes(result) <= MAX_REMOTE_COMMAND_RESULT_PAYLOAD_BYTES) {
+        return result
+    }
 
     return CommandResultPayload(
         requestId = result.requestId,
@@ -30,6 +27,13 @@ internal fun enforceRemoteCommandResultBudget(result: CommandResultPayload): Com
         ),
     )
 }
+
+internal fun remoteCommandResultPayloadBytes(result: CommandResultPayload): Long =
+    BridgeProtocol.json
+        .encodeToString(result)
+        .toByteArray(Charsets.UTF_8)
+        .size
+        .toLong()
 
 internal const val REMOTE_COMMAND_RESULT_ENVELOPE_MARGIN_BYTES = 32L * 1024L
 internal const val MAX_REMOTE_COMMAND_RESULT_PAYLOAD_BYTES =

@@ -72,12 +72,11 @@ class RemoteCommandResultBudgetTest {
 
     @Test
     fun commandRouterAppliesBudgetToCoreRegistryResult() = runBlocking {
-        val oversizedEntries = (0 until 1_000).map { index ->
-            val name = "entry-${index.toString().padStart(4, '0')}-" + "x".repeat(220)
-            SafFileEntrySnapshot(
+        val oversizedFiles = (0 until 1_000).map { index ->
+            val name = "file-${index.toString().padStart(4, '0')}-" + "x".repeat(220)
+            SafLargeFileSnapshot(
                 name = name,
                 pathSegments = listOf("large", name),
-                directory = false,
                 mimeType = "application/octet-stream",
                 sizeBytes = Long.MAX_VALUE,
                 lastModifiedEpochMillis = Long.MAX_VALUE,
@@ -96,7 +95,18 @@ class RemoteCommandResultBudgetTest {
                     override fun list(pathSegments: List<String>) = SafDirectorySnapshot(
                         rootName = "Shared",
                         pathSegments = pathSegments,
-                        entries = oversizedEntries,
+                        entries = emptyList(),
+                    )
+
+                    override fun analyze(pathSegments: List<String>) = SafAnalysisSnapshot(
+                        rootName = "Shared",
+                        pathSegments = pathSegments,
+                        scannedEntries = oversizedFiles.size,
+                        fileCount = oversizedFiles.size,
+                        directoryCount = 0,
+                        totalBytes = Long.MAX_VALUE,
+                        truncated = false,
+                        largestFiles = oversizedFiles,
                     )
                 },
             ),
@@ -106,7 +116,7 @@ class RemoteCommandResultBudgetTest {
 
         val result = router.execute(
             CommandRequestPayload(
-                tool = BridgeToolRegistry.FILES_LIST,
+                tool = BridgeToolRegistry.FILES_ANALYZE,
                 requestId = "router-result-budget",
                 arguments = buildJsonObject {},
             )
