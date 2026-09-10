@@ -1,5 +1,9 @@
 package io.github.arttvad9r.hermesbridge
 
+internal fun requiresDeviceIdentityRepair(error: Throwable): Boolean =
+    error is DeviceIdentityUnavailableException &&
+        error.mode == DeviceIdentityFailureMode.REPAIR_REQUIRED
+
 class PairingCredentialManager(
     private val pairingStore: PairingRecordStore,
     private val identity: DeviceIdentity,
