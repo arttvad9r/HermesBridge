@@ -97,7 +97,14 @@ jobs:
           release/build-signed-apk.sh
 
       - name: Verify reproducible unsigned release APK
-        run: release/verify-reproducible-unsigned-apk.sh
+        run: |
+          set -o pipefail
+          release_log="$RUNNER_TEMP/reproducible-release-build.log"
+          release/verify-reproducible-unsigned-apk.sh 2>&1 | tee "$release_log"
+          if grep -Fq "R8: An error occurred when parsing kotlin metadata" "$release_log"; then
+            echo "R8 is not compatible with the project's Kotlin metadata." >&2
+            exit 1
+          fi
 
       - name: Build relay distribution
         run: |
