@@ -68,17 +68,18 @@ class AppUsageToolHandler(
         }
 
         val observedByPackage = window.entries.associateBy { it.packageName }
-        val launcherApps = appsRepository.listLaunchableApps()
-        val resultApps = launcherApps
+        val sortedApps = appsRepository.listLaunchableApps()
             .map { app -> app to observedByPackage[app.packageName] }
             .sortedWith(
-                compareBy<Pair<InstalledAppSnapshot, AppUsageSnapshot?>> {
+                compareByDescending<Pair<InstalledAppSnapshot, AppUsageSnapshot?>> {
                     it.second?.lastTimeUsedEpochMillis ?: Long.MIN_VALUE
                 }
-                    .thenBy { it.second?.totalTimeForegroundMillis ?: 0L }
+                    .thenByDescending { it.second?.totalTimeForegroundMillis ?: 0L }
                     .thenBy { it.first.label.lowercase() }
                     .thenBy { it.first.packageName },
             )
+        val projection = projectAppsForRemoteResult(sortedApps.map { it.first })
+        val resultApps = projection.apps.map { app -> app to observedByPackage[app.packageName] }
 
         return CommandResultPayload(
             requestId = request.requestId,
@@ -88,6 +89,8 @@ class AppUsageToolHandler(
                 put("beginEpochMillis", window.beginEpochMillis)
                 put("endEpochMillis", window.endEpochMillis)
                 put("count", resultApps.size)
+                put("totalVisibleCount", projection.totalVisibleCount)
+                put("truncated", projection.truncated)
                 put(
                     "apps",
                     buildJsonArray {

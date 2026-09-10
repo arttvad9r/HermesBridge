@@ -102,13 +102,13 @@ This is accumulated Batterystats data, not instantaneous current/wattage. The to
 
 ### `list_apps(device_id)`
 
-Maps only to `apps.list`. Returns launcher-visible applications. Hermes Bridge does not request `QUERY_ALL_PACKAGES`.
+Maps only to `apps.list`. Android keeps its larger launcher-visible set locally for package/policy checks, but the remote result returns at most 128 apps so a control-channel result stays below the WebSocket frame ceiling. `count` is the number actually returned, `totalVisibleCount` is the locally observed launcher-visible count before remote projection, and `truncated=true` means the result must not be treated as a complete list. Labels and version names are also length-bounded and control characters are normalized. Hermes Bridge does not request `QUERY_ALL_PACKAGES`.
 
 ### `app_usage(device_id, days=30)`
 
 Maps only to `apps.usage`. `days` must be an integer from 1 to 365 and defaults to 30.
 
-The phone must have Android Usage Access enabled for Hermes Bridge. Results are intersected with the same launcher-visible set used by `list_apps`, so Usage Access does not expand the agent's package visibility.
+The phone must have Android Usage Access enabled for Hermes Bridge. Results are intersected with the same launcher-visible set used by `list_apps`, so Usage Access does not expand the agent's package visibility. The remote projection uses the same 128-app/text bounds and `count`/`totalVisibleCount`/`truncated` contract. When truncation is necessary, the most recently used apps are retained first.
 
 ### `app_permissions(device_id, package_name)`
 
@@ -259,10 +259,10 @@ After relay and MCP are configured:
 
 1. Reload MCP in Hermes and call `list_devices`.
 2. If needed, call `create_pairing_code` and finish pairing in the Android app.
-3. Call `device_health` and `list_apps`.
+3. Call `device_health` and `list_apps`; if `truncated=true`, treat the returned list as a bounded projection rather than the full launcher-visible set.
 4. Call `app_permissions` for one returned package and verify only that app is inspected.
 5. Call `permissions_audit` and check `scanTruncated/resultTruncated` before treating the result as complete.
-6. Enable Usage Access and test `app_usage`.
+6. Enable Usage Access and test `app_usage`; check `truncated` before treating its app list as complete.
 7. Grant a SAF folder and test `list_files` / `analyze_files`.
 8. Activate/authorize Shizuku and call `battery_usage`.
 9. Trigger one mutating command and verify `pending_approvals` exposes only target-free notification metadata while the Android card shows the exact target locally.

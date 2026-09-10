@@ -10,6 +10,8 @@ The relay does not initiate a network connection to the phone. This allows the p
 
 Both Android and the relay enforce a 256 KiB WebSocket frame limit. Oversized application data must use a dedicated bounded transfer mechanism rather than increasing the control-channel frame size.
 
+List-like Android results are bounded independently of that transport ceiling. `apps.list` and `apps.usage` return at most 128 app entries per command result, bound remote label/version strings, and expose `count`, `totalVisibleCount` and `truncated` so Hermes can distinguish a complete result from a bounded projection. The larger launcher-visible repository remains available locally for package-visibility policy checks; remote truncation must not widen or redefine that security boundary.
+
 ## Envelope
 
 Every application message uses a versioned envelope:
@@ -138,6 +140,7 @@ When the device pairing identity is revoked, missing or invalidated for repair, 
 - only bounded in-memory queues before durable queue design is reviewed;
 - bounded request-ID replay protection prevents duplicate in-process execution of current destructive tools without pretending to provide durable exactly-once semantics;
 - results include structured error codes, not only strings;
+- list-like app results include explicit completeness metadata instead of silently exceeding the WebSocket frame budget;
 - approval notifications are best-effort convenience data: losing one never changes or weakens the local approval ticket.
 
 ## Not in V1
