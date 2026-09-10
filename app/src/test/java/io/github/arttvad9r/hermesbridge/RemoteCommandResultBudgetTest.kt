@@ -71,7 +71,7 @@ class RemoteCommandResultBudgetTest {
     }
 
     @Test
-    fun commandRouterAppliesBudgetToCoreRegistryResult() = runBlocking {
+    fun commandRouterAppliesBudgetToMalformedCoreRegistryResult() = runBlocking {
         val oversizedFiles = (0 until 1_000).map { index ->
             val name = "file-${index.toString().padStart(4, '0')}-" + "x".repeat(220)
             SafLargeFileSnapshot(
@@ -100,7 +100,7 @@ class RemoteCommandResultBudgetTest {
 
                     override fun analyze(pathSegments: List<String>) = SafAnalysisSnapshot(
                         rootName = "Shared",
-                        pathSegments = pathSegments,
+                        pathSegments = listOf(".."),
                         scannedEntries = oversizedFiles.size,
                         fileCount = oversizedFiles.size,
                         directoryCount = 0,

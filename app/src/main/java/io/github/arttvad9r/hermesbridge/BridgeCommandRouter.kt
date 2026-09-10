@@ -40,10 +40,10 @@ class BridgeCommandRouter(
                 AppPermissionRevokeToolHandler.TOOL_NAME -> appPermissionRevokeHandler.execute(request)
                 else -> coreRegistry.execute(request)
             }
-            val projectedResult = if (request.tool == BridgeToolRegistry.FILES_LIST) {
-                projectFilesListForRemoteResult(routedResult)
-            } else {
-                routedResult
+            val projectedResult = when (request.tool) {
+                BridgeToolRegistry.FILES_LIST -> projectFilesListForRemoteResult(routedResult)
+                BridgeToolRegistry.FILES_ANALYZE -> projectFilesAnalyzeForRemoteResult(routedResult)
+                else -> routedResult
             }
             enforceRemoteCommandResultBudget(remoteSafeCommandResult(projectedResult))
         }

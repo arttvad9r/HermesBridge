@@ -5,25 +5,26 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /**
- * Keeps files.list useful when exact SAF identities would otherwise make the remote result exceed
- * the shared command-result budget. Identity fields are never rewritten: invalid/inconsistent
- * identities are dropped, display-only text is bounded, and the largest prefix that fits the real
- * kotlinx.serialization payload encoding is kept.
+ * Keeps files.analyze useful when exact recursive SAF identities would otherwise make the remote
+ * result exceed the shared command-result budget. The locally computed aggregate counters remain
+ * intact; only the bounded largest-files detail list is projected for the remote control channel.
  */
-internal fun projectFilesListForRemoteResult(
+internal fun projectFilesAnalyzeForRemoteResult(
     result: CommandResultPayload,
 ): CommandResultPayload {
     if (!result.ok) return result
     val source = result.result ?: return result
-    val sourceEntries = source["entries"] as? JsonArray ?: return result
-    val parentPath = remotePathSegments(source["pathSegments"]) ?: return result
-    if (runCatching { AndroidSafFilesRepository.validatePathSegments(parentPath) }.isFailure) {
+    val sourceFiles = source["largestFiles"] as? JsonArray ?: return result
+    val rootPath = remotePathSegments(source["pathSegments"]) ?: return result
+    if (runCatching { AndroidSafFilesRepository.validatePathSegments(rootPath) }.isFailure) {
         return result
     }
-    val remoteEntries = sourceEntries.mapNotNull { entry ->
-        boundRemoteFileEntry(entry, parentPath)
+    val scanTruncated = (source["truncated"] as? JsonPrimitive)?.booleanOrNull ?: return result
+    val remoteFiles = sourceFiles.mapNotNull { file ->
+        boundRemoteAnalyzedFile(file, rootPath)
     }
 
     fun candidate(returnedCount: Int): CommandResultPayload {
@@ -34,15 +35,18 @@ internal fun projectFilesListForRemoteResult(
                 boundedRemoteText(rootName.content, MAX_REMOTE_FILE_ROOT_NAME_CHARS)
             )
         }
-        projected["count"] = JsonPrimitive(returnedCount)
-        projected["totalListedCount"] = JsonPrimitive(sourceEntries.size)
-        projected["truncated"] = JsonPrimitive(returnedCount < sourceEntries.size)
-        projected["entries"] = JsonArray(remoteEntries.take(returnedCount))
+        val resultTruncated = returnedCount < sourceFiles.size
+        projected["scanTruncated"] = JsonPrimitive(scanTruncated)
+        projected["resultTruncated"] = JsonPrimitive(resultTruncated)
+        projected["truncated"] = JsonPrimitive(scanTruncated || resultTruncated)
+        projected["totalLargestFileCount"] = JsonPrimitive(sourceFiles.size)
+        projected["returnedLargestFileCount"] = JsonPrimitive(returnedCount)
+        projected["largestFiles"] = JsonArray(remoteFiles.take(returnedCount))
         return result.copy(result = JsonObject(projected))
     }
 
     var low = 0
-    var high = remoteEntries.size
+    var high = remoteFiles.size
     while (low < high) {
         val middle = (low + high + 1) / 2
         if (remoteCommandResultPayloadBytes(candidate(middle)) <= MAX_REMOTE_COMMAND_RESULT_PAYLOAD_BYTES) {
@@ -54,17 +58,19 @@ internal fun projectFilesListForRemoteResult(
     return candidate(low)
 }
 
-private fun boundRemoteFileEntry(
-    entry: JsonElement,
-    parentPath: List<String>,
+private fun boundRemoteAnalyzedFile(
+    file: JsonElement,
+    rootPath: List<String>,
 ): JsonElement? {
-    val source = entry as? JsonObject ?: return null
+    val source = file as? JsonObject ?: return null
     val name = (source["name"] as? JsonPrimitive)
         ?.takeIf { it.isString }
         ?.content
         ?: return null
     val pathSegments = remotePathSegments(source["pathSegments"]) ?: return null
-    if (pathSegments != parentPath + name) return null
+    if (pathSegments.size <= rootPath.size) return null
+    if (pathSegments.take(rootPath.size) != rootPath) return null
+    if (pathSegments.last() != name) return null
     if (runCatching { AndroidSafFilesRepository.validatePathSegments(pathSegments) }.isFailure) {
         return null
     }
@@ -77,15 +83,3 @@ private fun boundRemoteFileEntry(
     )
     return JsonObject(projected)
 }
-
-internal fun remotePathSegments(value: JsonElement?): List<String>? {
-    val array = value as? JsonArray ?: return null
-    return array.map { element ->
-        val primitive = element as? JsonPrimitive ?: return null
-        if (!primitive.isString) return null
-        primitive.content
-    }
-}
-
-internal const val MAX_REMOTE_FILE_ROOT_NAME_CHARS = 120
-internal const val MAX_REMOTE_FILE_MIME_TYPE_CHARS = 120
