@@ -15,8 +15,8 @@ internal enum class UiCaptureSessionStatus {
 
 internal data class UiCaptureSessionState(
     val status: UiCaptureSessionStatus = UiCaptureSessionStatus.STOPPED,
-    val startedAtEpochMillis: Long? = null,
-    val expiresAtEpochMillis: Long? = null,
+    val startedAtElapsedRealtimeMillis: Long? = null,
+    val expiresAtElapsedRealtimeMillis: Long? = null,
     val message: String? = null,
 )
 
@@ -51,15 +51,11 @@ internal object UiCaptureSessionRuntime {
         )
     }
 
-    fun active(nowEpochMillis: Long, durationMillis: Long = UI_CAPTURE_SESSION_MAX_DURATION_MILLIS) {
-        require(nowEpochMillis >= 0L) { "Invalid capture-session start time." }
-        require(durationMillis in 1..UI_CAPTURE_SESSION_MAX_DURATION_MILLIS) {
-            "Invalid capture-session duration."
-        }
+    fun active(deadline: UiCaptureSessionDeadline) {
         mutableState.value = UiCaptureSessionState(
             status = UiCaptureSessionStatus.ACTIVE,
-            startedAtEpochMillis = nowEpochMillis,
-            expiresAtEpochMillis = nowEpochMillis + durationMillis,
+            startedAtElapsedRealtimeMillis = deadline.startedAtElapsedRealtimeMillis,
+            expiresAtElapsedRealtimeMillis = deadline.expiresAtElapsedRealtimeMillis,
             message = "Screen-capture session is active.",
         )
     }

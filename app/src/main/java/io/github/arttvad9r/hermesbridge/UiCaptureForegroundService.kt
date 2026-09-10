@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -29,10 +30,22 @@ class UiCaptureForegroundService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var projection: MediaProjection? = null
     private var projectionCallback: MediaProjection.Callback? = null
+    private var sessionDeadline: UiCaptureSessionDeadline? = null
     private var tearingDown = false
 
-    private val expiryRunnable = Runnable {
-        finishSession("Screen-capture session expired after five minutes.")
+    private val expiryRunnable = object : Runnable {
+        override fun run() {
+            val deadline = sessionDeadline ?: return
+            val nextDelayMillis = uiCaptureSessionWatchdogDelayMillis(
+                deadline = deadline,
+                nowElapsedRealtimeMillis = SystemClock.elapsedRealtime(),
+            )
+            if (nextDelayMillis == null) {
+                finishSession("Screen-capture session expired after five minutes.")
+            } else {
+                mainHandler.postDelayed(this, nextDelayMillis)
+            }
+        }
     }
 
     override fun onCreate() {
@@ -107,10 +120,11 @@ class UiCaptureForegroundService : Service() {
         projectionCallback = callback
         resolvedProjection.registerCallback(callback, mainHandler)
 
-        val now = System.currentTimeMillis()
-        UiCaptureSessionRuntime.active(now)
+        val deadline = newUiCaptureSessionDeadline(SystemClock.elapsedRealtime())
+        sessionDeadline = deadline
+        UiCaptureSessionRuntime.active(deadline)
         mainHandler.removeCallbacks(expiryRunnable)
-        mainHandler.postDelayed(expiryRunnable, UI_CAPTURE_SESSION_MAX_DURATION_MILLIS)
+        mainHandler.postDelayed(expiryRunnable, UI_CAPTURE_SESSION_WATCHDOG_INTERVAL_MILLIS)
     }
 
     private fun finishSession(message: String) {
@@ -121,6 +135,7 @@ class UiCaptureForegroundService : Service() {
 
     private fun stopWithoutSession(message: String) {
         UiCaptureSessionRuntime.error(message)
+        sessionDeadline = null
         mainHandler.removeCallbacks(expiryRunnable)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -130,6 +145,7 @@ class UiCaptureForegroundService : Service() {
         if (tearingDown) return
         tearingDown = true
         try {
+            sessionDeadline = null
             mainHandler.removeCallbacks(expiryRunnable)
             val currentProjection = projection
             val currentCallback = projectionCallback
