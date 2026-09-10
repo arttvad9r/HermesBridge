@@ -8,6 +8,8 @@ Android opens an outbound `wss://` connection to the Hermes Bridge relay.
 
 The relay does not initiate a network connection to the phone. This allows the phone to work behind carrier NAT, on mobile data and while changing networks.
 
+Both Android and the relay enforce a 256 KiB WebSocket frame limit. Oversized application data must use a dedicated bounded transfer mechanism rather than increasing the control-channel frame size.
+
 ## Envelope
 
 Every application message uses a versioned envelope:

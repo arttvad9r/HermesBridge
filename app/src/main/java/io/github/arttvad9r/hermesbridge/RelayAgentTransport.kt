@@ -77,7 +77,9 @@ class RelayAgentTransport(
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = HttpClient(CIO) {
-        install(WebSockets)
+        install(WebSockets) {
+            applyRelayWebSocketPolicy()
+        }
     }
 
     private val mutableConnectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
