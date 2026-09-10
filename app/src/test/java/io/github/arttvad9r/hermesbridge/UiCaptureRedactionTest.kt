@@ -7,6 +7,59 @@ import org.junit.Test
 
 class UiCaptureRedactionTest {
     @Test
+    fun independentEdgeInsetsCombineByUnionWithoutDoubleCounting() {
+        assertEquals(
+            UiCaptureEdgeInsets(left = 8, top = 24, right = 6, bottom = 640),
+            combineUiCaptureEdgeInsets(
+                UiCaptureEdgeInsets(left = 8, top = 24, right = 6, bottom = 96),
+                UiCaptureEdgeInsets(bottom = 640),
+            ),
+        )
+        assertEquals(
+            UiCaptureEdgeInsets(left = 8, top = 24, right = 6, bottom = 96),
+            combineUiCaptureEdgeInsets(
+                UiCaptureEdgeInsets(left = 8, top = 24, right = 6, bottom = 96),
+                UiCaptureEdgeInsets(),
+            ),
+        )
+    }
+
+    @Test
+    fun currentFrameInsetsUseFreshImeUnionAndConservativeScaling() {
+        assertEquals(
+            UiCaptureEdgeInsets(left = 4, top = 12, right = 3, bottom = 320),
+            currentUiCaptureRedactionInsets(
+                expectedSourceWidth = 1080,
+                expectedSourceHeight = 2400,
+                currentSourceWidth = 1080,
+                currentSourceHeight = 2400,
+                targetWidth = 540,
+                targetHeight = 1200,
+                systemInsets = UiCaptureEdgeInsets(left = 8, top = 24, right = 6, bottom = 96),
+                visibleImeInsets = UiCaptureEdgeInsets(bottom = 640),
+            ),
+        )
+    }
+
+    @Test
+    fun currentFrameInsetsFailClosedWhenSourceGeometryChanged() {
+        assertTrue(
+            runCatching {
+                currentUiCaptureRedactionInsets(
+                    expectedSourceWidth = 1080,
+                    expectedSourceHeight = 2400,
+                    currentSourceWidth = 2400,
+                    currentSourceHeight = 1080,
+                    targetWidth = 540,
+                    targetHeight = 1200,
+                    systemInsets = UiCaptureEdgeInsets(top = 24, bottom = 96),
+                    visibleImeInsets = UiCaptureEdgeInsets(bottom = 640),
+                )
+            }.isFailure,
+        )
+    }
+
+    @Test
     fun sourceInsetsScaleConservativelyIntoCaptureSurface() {
         assertEquals(
             UiCaptureEdgeInsets(left = 5, top = 13, right = 3, bottom = 25),
