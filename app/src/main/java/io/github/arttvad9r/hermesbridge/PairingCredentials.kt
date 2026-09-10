@@ -14,8 +14,9 @@ class PairingCredentialManager(
         } catch (error: Throwable) {
             return Result.failure(
                 DeviceIdentityUnavailableException(
-                    "Android Keystore is temporarily unavailable. Try reconnecting again.",
-                    error,
+                    message = "Android Keystore is temporarily unavailable. Try reconnecting again.",
+                    mode = DeviceIdentityFailureMode.TRANSIENT,
+                    cause = error,
                 )
             )
         }
@@ -24,7 +25,8 @@ class PairingCredentialManager(
             pairingStore.clear()
             return Result.failure(
                 DeviceIdentityUnavailableException(
-                    "The stored device identity is missing. Pair the phone with Hermes again."
+                    message = "The stored device identity is missing. Pair the phone with Hermes again.",
+                    mode = DeviceIdentityFailureMode.REPAIR_REQUIRED,
                 )
             )
         }
