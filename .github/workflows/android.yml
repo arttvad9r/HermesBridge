@@ -34,7 +34,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Validate deployment scripts
-        run: bash -n deploy/install-relay.sh
+        run: |
+          bash -n deploy/install-relay.sh
+          bash deploy/install-relay.sh --help >/dev/null
 
       - name: Unit tests
         run: ./gradlew --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
@@ -56,7 +58,11 @@ jobs:
           test -s app/build/outputs/mapping/release/mapping.txt
 
       - name: Build relay distribution
-        run: ./gradlew --no-daemon :relay:distTar
+        run: |
+          ./gradlew --no-daemon :relay:distTar
+          relay_tar=$(find relay/build/distributions -maxdepth 1 -type f -name '*.tar' -print -quit)
+          test -n "$relay_tar"
+          tar -tf "$relay_tar" | grep -qx 'relay/bin/relay'
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -76,6 +82,4 @@ jobs:
           name: hermes-bridge-relay
           path: |
             relay/build/distributions/*.tar
-            deploy/install-relay.sh
-            deploy/hermes-bridge-relay.service
-            deploy/relay.env.example
+            deploy/**
