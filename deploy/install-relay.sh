@@ -11,7 +11,7 @@ DEFAULT_PORT="8080"
 
 usage() {
     cat <<'EOF'
-Usage: sudo ./deploy/install-relay.sh PATH_TO_RELAY_TAR
+Usage: sudo bash install-relay.sh PATH_TO_RELAY_TAR
 
 Installs or upgrades the Hermes Bridge relay on a systemd-based Linux VPS.
 The script does not configure DNS, TLS, Caddy/Nginx, or firewall rules.
@@ -46,7 +46,7 @@ if [[ ! -f "$service_source" ]]; then
     exit 1
 fi
 
-for command in tar systemctl groupadd useradd install mktemp grep od tr cp mv rm chmod chown; do
+for command in tar systemctl groupadd useradd install mktemp grep od tr cp mv rm chmod chown sleep; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "error: required command is missing: $command" >&2
         exit 1
@@ -90,11 +90,13 @@ chmod 0755 "$tmp_dir/relay/bin/relay"
 # explicitly, then bind the system account to that exact group.
 groupadd --system --force "$SERVICE_GROUP"
 if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    nologin_shell=$(command -v nologin || true)
+    [[ -n "$nologin_shell" ]] || nologin_shell=/bin/false
     useradd \
         --system \
         --gid "$SERVICE_GROUP" \
         --home-dir "$STATE_DIR" \
-        --shell /usr/sbin/nologin \
+        --shell "$nologin_shell" \
         "$SERVICE_USER"
 fi
 
@@ -154,8 +156,14 @@ fi
 
 # `enable --now` does not restart an already-running unit after an upgrade.
 # Always restart explicitly so the new distribution is actually executing.
-if ! systemctl restart "$SERVICE_NAME" || ! systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo "error: new relay did not become active; attempting rollback" >&2
+if ! systemctl restart "$SERVICE_NAME"; then
+    echo "error: systemd could not start the new relay; attempting rollback" >&2
+    rollback_binary
+    exit 1
+fi
+sleep 1
+if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+    echo "error: new relay did not remain active; attempting rollback" >&2
     rollback_binary
     exit 1
 fi
