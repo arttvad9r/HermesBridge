@@ -65,7 +65,7 @@ The pairing code is never used as a durable secret.
 
 ## Message types
 
-Initial set:
+Initial implemented/control set:
 
 - `session.hello`
 - `auth.challenge`
@@ -74,10 +74,10 @@ Initial set:
 - `heartbeat.ping`
 - `heartbeat.pong`
 - `command.request`
-- `command.accepted`
 - `command.result`
 - `approval.request`
-- `approval.result`
+- `device.revoke.request`
+- `device.revoke.ok`
 - `error`
 
 ## Command request
@@ -97,14 +97,30 @@ Rules:
 - local policy decides allow / approval / deny;
 - a duplicate `requestId` must not repeat a completed destructive action.
 
-## Approvals
+## Approval notifications
 
-For commands requiring approval:
+Android remains the only authority for V1 approval state. A relay or Hermes process must not be able to turn a pending local ticket into an approved one because the threat model includes a compromised VPS.
 
-1. Android marks command pending and emits `approval.request`.
-2. Approval can be resolved locally or by an authenticated Hermes-side approval channel according to user policy.
-3. Expired requests are denied.
-4. Approval binds to the exact request/tool/arguments hash. Editing parameters invalidates it.
+When a typed command requires approval:
+
+1. Android creates or reuses a local approval ticket bound to the canonical normalized tool arguments.
+2. Android returns `approval_required` for the command and may additionally emit `approval.request` over the already authenticated device WebSocket.
+3. `approval.request` contains only target-free metadata:
+   - `approvalId`;
+   - one currently allowlisted approval tool name;
+   - that tool's expected `MUTATING` or `PRIVILEGED` risk class;
+   - relative `expiresInMillis`, capped at 10 minutes.
+4. Package names, permission names, SAF paths, APK filenames, raw arguments and the Android approval-card display summary do not cross this notification boundary.
+5. Relay validates the authenticated `deviceId`, approval ID, exact allowlisted `tool↔risk` pair and TTL, then stores at most 200 notification records in memory. Relay computes its own local expiry from the relative TTL.
+6. The authenticated admin/Hermes side can read unexpired notification records with `GET /api/v1/devices/{deviceId}/approvals` or the MCP `pending_approvals` tool. These records are not authoritative ticket state and can remain until TTL expiry after local resolution.
+7. Approval still happens locally on Android. The existing exact-argument fingerprint, expiry and one-use consume rules remain authoritative.
+8. After local approval, Hermes retries the same typed tool call; changed arguments require another ticket.
+
+Current notification tools are limited to `files.delete`, `apps.install`, `apps.uninstall`, `apps.forceStop` and `apps.revokePermission`. Unknown tools or mismatched risk classifications remain local and are not queued for remote notification.
+
+There is deliberately **no** `approval.result`, relay `approve` endpoint or MCP approval tool in this phase. A normal Telegram callback, relay admin token or other credential available on the same VPS cannot be trusted as an approval authority under the compromised-VPS model. Fully remote approval requires a separate design with an independently verifiable user-controlled signature whose private key is not available to the VPS.
+
+When the device pairing identity is revoked, missing or invalidated for repair, Android clears its local pending approvals and unsent remote-notification queue so stale tickets cannot be associated with a future `deviceId`.
 
 ## Reliability
 
@@ -112,8 +128,9 @@ For commands requiring approval:
 - exponential reconnect backoff with jitter;
 - connection resumes after Wi-Fi/mobile handover;
 - only bounded in-memory queues before durable queue design is reviewed;
-- destructive commands use idempotency keys;
-- results include structured error codes, not only strings.
+- destructive commands use idempotency keys where safe;
+- results include structured error codes, not only strings;
+- approval notifications are best-effort convenience data: losing one never changes or weakens the local approval ticket.
 
 ## Not in V1
 
@@ -121,4 +138,5 @@ For commands requiring approval:
 - raw MCP exposed over the public internet;
 - general shell transport;
 - custom end-to-end encryption layered over TLS;
-- offline destructive command queue without explicit expiry.
+- offline destructive command queue without explicit expiry;
+- VPS-authoritative remote approval.

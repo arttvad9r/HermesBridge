@@ -28,6 +28,7 @@ MAX_PACKAGE_NAME_LENGTH = 255
 MAX_PERMISSION_NAME_LENGTH = 255
 MAX_APK_NAME_LENGTH = 120
 MAX_APK_BYTES = 200 * 1024 * 1024
+MAX_PENDING_APPROVALS = 200
 HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
 APK_NAME_HEADER = "X-Hermes-Apk-Name"
 
@@ -251,6 +252,22 @@ def list_devices() -> list[dict[str, Any]]:
     result = _request_json("GET", "/api/v1/devices")
     if not isinstance(result, list):
         raise RuntimeError("Relay returned an invalid device list.")
+    return result
+
+
+@mcp.tool()
+def pending_approvals(device_id: str) -> list[dict[str, Any]]:
+    """List short-lived approval notifications created by the phone. This never approves or executes an operation."""
+    if not DEVICE_ID_RE.fullmatch(device_id):
+        raise ValueError("device_id has an invalid format.")
+    result = _request_json(
+        "GET",
+        f"/api/v1/devices/{quote(device_id, safe='')}/approvals",
+    )
+    if not isinstance(result, list) or len(result) > MAX_PENDING_APPROVALS:
+        raise RuntimeError("Relay returned an invalid pending approval list.")
+    if any(not isinstance(item, dict) for item in result):
+        raise RuntimeError("Relay returned an invalid pending approval entry.")
     return result
 
 

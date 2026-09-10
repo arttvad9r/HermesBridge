@@ -54,6 +54,22 @@ Reload MCP servers in Hermes after configuration changes.
 
 Lists paired relay devices and whether each is currently connected.
 
+### `pending_approvals(device_id)`
+
+Lists short-lived approval **notifications** emitted by the authenticated Android device for that device ID. Despite the historical function name, this endpoint is not authoritative approval state: an entry can remain visible until its relay TTL expires after the user has already resolved the local Android ticket.
+
+Each notification contains only:
+
+- `deviceId`;
+- `approvalId`;
+- one allowlisted typed tool name;
+- its expected `MUTATING` or `PRIVILEGED` risk class;
+- relay-local expiry time.
+
+No package name, permission name, SAF path, APK filename, raw command argument or Android approval display summary is sent to the VPS through this notification path.
+
+This tool cannot approve, deny or execute anything. There is intentionally no MCP approval tool in the current design: the threat model includes a compromised VPS, so the relay admin token, Hermes process or a Telegram bot callback on that VPS cannot be treated as an approval authority. Approval still happens locally on Android; after approval Hermes retries the same typed operation and Android performs its normal exact-argument, expiry and one-use checks.
+
 ### `create_pairing_code()`
 
 Creates a short-lived one-time pairing code for the Android app.
@@ -201,7 +217,11 @@ tool name + canonical normalized arguments
 
 Additionally, APK install approval binds verified content/package/signing metadata, SAF deletion binds current target metadata, and permission revoke binds package + permission + derived Android user. Approved tickets expire and are one-use only.
 
-Current approval is local to the Android app. Telegram/Hermes-side approval routing is planned separately.
+Android may emit a best-effort `approval.request` notification after creating a local ticket. The relay validates the authenticated device, exact allowlisted tool/risk pair and a relative TTL, then keeps only target-free metadata in bounded memory. `pending_approvals` exposes those notification records read-only to Hermes. Loss, duplication, staleness or forgery of a relay notification cannot approve an Android ticket and does not alter the local state machine.
+
+When pairing identity is revoked, missing or invalidated for repair, Android clears both pending local approvals and unsent approval notifications before a future re-pair can occur.
+
+Fully remote approval is not implemented. It would require a separate user-controlled signing mechanism independently verifiable by Android; a credential available to the same VPS is insufficient under the compromised-VPS threat model.
 
 ## Security boundary
 
@@ -215,6 +235,7 @@ install_from_url(url)
 install_from_path(path)
 delete_raw_path(path)
 pm_permission(command, flags)
+approve_operation(approval_id)
 ```
 
 Each public MCP function hardcodes one Android tool name. Android applies another typed router/registry and risk policy before execution.
@@ -225,6 +246,7 @@ Keep these properties:
 - relay admin API stays loopback-only;
 - Android transport uses WSS through the public reverse proxy;
 - only tokenized `/device-artifacts/*` downloads are additionally exposed for APK transfer;
+- approval notifications contain no target arguments or local display summary and cannot resolve tickets;
 - read-only tools remain fixed and bounded;
 - package metadata tools remain launcher-scoped;
 - permission changes are revoke-only, exact-target and locally approved;
@@ -243,8 +265,9 @@ After relay and MCP are configured:
 6. Enable Usage Access and test `app_usage`.
 7. Grant a SAF folder and test `list_files` / `analyze_files`.
 8. Activate/authorize Shizuku and call `battery_usage`.
-9. On a disposable app with a granted dangerous permission, call `revoke_app_permission`, approve the exact package/permission shown on Android and retry the same call.
-10. Test `delete_path`, `force_stop_app` or `uninstall_app` on disposable targets, approving the exact Android card and retrying the same call.
-11. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
+9. Trigger one mutating command and verify `pending_approvals` exposes only target-free notification metadata while the Android card shows the exact target locally.
+10. On a disposable app with a granted dangerous permission, call `revoke_app_permission`, approve the exact package/permission shown on Android and retry the same call.
+11. Test `delete_path`, `force_stop_app` or `uninstall_app` on disposable targets, approving the exact Android card and retrying the same call.
+12. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
 
 Physical-device end-to-end validation is still required before Shizuku-backed and mutating actions should be treated as production-ready.
