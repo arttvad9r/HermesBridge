@@ -95,7 +95,7 @@
 - [x] Usage Access status/setup card with manual Android special-access flow.
 - [x] Guided first-run flow: connect Hermes, choose optional capabilities, finish into the normal dashboard.
 - [x] Local "История Hermes" screen reachable from the foreground-service notification.
-- [ ] Accessibility setup as an optional separate step.
+- [x] Gate any UI-control setup behind ADR 0003; do not ship an Accessibility placeholder before a concrete compliant backend/session exists.
 
 ## P1 — privileged actions
 
@@ -128,11 +128,12 @@
 
 ## P2 — UI automation
 
-- [ ] Accessibility service.
-- [ ] Screen structure/screenshot strategy.
+- [x] Backend/release-channel ADR: the standard build does not use `AccessibilityService` for autonomous Hermes UI control.
+- [ ] Prototype narrow typed Android/Shizuku UI actions without a generic shell surface.
+- [ ] User-consented MediaProjection screen-capture strategy with one explicit short-lived capture session at a time.
 - [ ] Tap/swipe/input typed actions.
-- [ ] Short-lived UI-control sessions.
-- [ ] Sensitive-field redaction where feasible.
+- [ ] Short-lived UI-control sessions with visible local state and explicit revocation.
+- [ ] Sensitive-field/screenshot redaction where feasible; never bypass secure windows.
 
 ## P2 — hardening/release
 
