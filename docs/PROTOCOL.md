@@ -12,6 +12,8 @@ Both Android and the relay enforce a 256 KiB WebSocket frame limit. Oversized ap
 
 List-like Android results are bounded independently of that transport ceiling. `apps.list` and `apps.usage` return at most 128 app entries per command result, bound remote label/version strings, and expose `count`, `totalVisibleCount` and `truncated` so Hermes can distinguish a complete result from a bounded projection. The larger launcher-visible repository remains available locally for package-visibility policy checks; remote truncation must not widen or redefine that security boundary.
 
+As a final shared backstop, Android also limits every serialized `command.result` payload to 224 KiB, reserving 32 KiB for the surrounding control-channel envelope. Tool-specific truncation remains preferred because it preserves useful data. If a handler still produces a larger result, the router fails closed with a small `result_too_large` error instead of sending an oversized frame and entering a reconnect/retry loop.
+
 ## Envelope
 
 Every application message uses a versioned envelope:
@@ -141,6 +143,7 @@ When the device pairing identity is revoked, missing or invalidated for repair, 
 - bounded request-ID replay protection prevents duplicate in-process execution of current destructive tools without pretending to provide durable exactly-once semantics;
 - results include structured error codes, not only strings;
 - list-like app results include explicit completeness metadata instead of silently exceeding the WebSocket frame budget;
+- a shared 224 KiB `command.result` payload backstop converts any remaining oversized result into `result_too_large` before replay caching/audit/transport;
 - approval notifications are best-effort convenience data: losing one never changes or weakens the local approval ticket.
 
 ## Not in V1
