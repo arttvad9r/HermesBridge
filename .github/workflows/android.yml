@@ -38,7 +38,7 @@ jobs:
           bash -n deploy/install-relay.sh
           bash deploy/install-relay.sh --help >/dev/null
           bash -n release/build-signed-apk.sh
-          bash -n release/verify-reproducible-signed-apk.sh
+          bash -n release/verify-reproducible-unsigned-apk.sh
 
       - name: Reject partial release signing configuration
         run: |
@@ -75,7 +75,7 @@ jobs:
           name: hermes-bridge-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Verify reproducible signed release path
+      - name: Verify signed release path
         run: |
           test_keystore="$RUNNER_TEMP/hermes-bridge-ci-release.jks"
           keytool -genkeypair -noprompt \
@@ -94,15 +94,10 @@ jobs:
           export HERMES_BRIDGE_SIGNING_STORE_PASSWORD=ci-test-only
           export HERMES_BRIDGE_SIGNING_KEY_ALIAS=ci-release
           export HERMES_BRIDGE_SIGNING_KEY_PASSWORD=ci-test-only
-          release/verify-reproducible-signed-apk.sh
+          release/build-signed-apk.sh
 
-      - name: Build minified unsigned release APK
-        run: |
-          ./gradlew --no-daemon :app:clean :app:assembleRelease
-          test -s app/build/outputs/mapping/release/mapping.txt
-          test -s app/build/outputs/apk/release/app-release-unsigned.apk
-          sha256sum app/build/outputs/apk/release/app-release-unsigned.apk \
-            > app/build/outputs/apk/release/app-release-unsigned.apk.sha256
+      - name: Verify reproducible unsigned release APK
+        run: release/verify-reproducible-unsigned-apk.sh
 
       - name: Build relay distribution
         run: |
