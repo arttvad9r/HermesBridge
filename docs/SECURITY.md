@@ -61,6 +61,7 @@ Mitigations:
 - no generic shell endpoint;
 - tool allowlist enforced on device;
 - relay-supplied error messages are treated as untrusted; Android surfaces only fixed local text selected from an allowlisted protocol error code;
+- Android command-result errors cross the phone→relay boundary only as a bounded protocol-style code plus deterministic local text selected at the top-level command router; arbitrary local exception messages, system stderr, paths, URLs and backend detail are not forwarded;
 - remote approval notifications are informational only: the relay admin token, Hermes process and Telegram/VPS callbacks cannot approve, deny or consume an Android ticket;
 - approval notifications contain only device/approval IDs, an exact allowlisted tool/risk pair and a short relative TTL; target package names, permission names, SAF paths, APK filenames, raw arguments and the local approval-card summary remain on-device;
 - unknown approval tools or mismatched risk classifications are never queued for the remote notification path;
