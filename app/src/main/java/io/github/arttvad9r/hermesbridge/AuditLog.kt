@@ -16,6 +16,7 @@ import kotlinx.serialization.json.Json
 enum class AuditEventType {
     COMMAND,
     APPROVAL,
+    SESSION,
 }
 
 @Serializable
@@ -121,6 +122,18 @@ object BridgeAuditRuntime {
         )
     }
 
+    internal fun recordUiControlSession(outcome: String) {
+        append(
+            AuditLogEntry(
+                id = UUID.randomUUID().toString(),
+                timestampEpochMillis = System.currentTimeMillis(),
+                type = AuditEventType.SESSION,
+                tool = auditSafeToolName(UI_CONTROL_SESSION_AUDIT_TOOL),
+                outcome = sanitizeAuditText(outcome, MAX_OUTCOME_LENGTH),
+            )
+        )
+    }
+
     fun clear() {
         synchronized(lock) {
             store?.clear()
@@ -141,6 +154,8 @@ object BridgeAuditRuntime {
 
     const val APPROVAL_APPROVED = "approved"
     const val APPROVAL_DENIED = "denied"
+    internal const val UI_CONTROL_SESSION_STARTED = "started"
+    internal const val UI_CONTROL_SESSION_STOPPED = "stopped"
     private const val OUTCOME_SUCCESS = "success"
     private const val OUTCOME_ERROR = "error"
     private const val MAX_OUTCOME_LENGTH = 32
@@ -180,6 +195,7 @@ internal fun sanitizeAuditText(value: String, maxLength: Int): String {
 
 internal const val MAX_AUDIT_ENTRIES = 200
 internal const val UNKNOWN_TOOL = "unknown_tool"
+internal const val UI_CONTROL_SESSION_AUDIT_TOOL = "ui.control.session"
 
 private val AUDIT_ERROR_CODE_REGEX = Regex("^[a-z0-9_]{1,64}$")
 private val AUDITED_TOOL_NAMES = setOf(
@@ -196,4 +212,5 @@ private val AUDITED_TOOL_NAMES = setOf(
     "apps.install",
     "apps.uninstall",
     "apps.forceStop",
+    UI_CONTROL_SESSION_AUDIT_TOOL,
 )
