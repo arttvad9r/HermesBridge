@@ -24,6 +24,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import java.io.IOException
 import kotlin.math.min
 import kotlin.random.Random
 import kotlinx.coroutines.CompletableDeferred
@@ -187,9 +188,10 @@ class RelayAgentTransport(
         var backoffMillis = 1_000L
 
         while (currentCoroutineContext().isActive) {
-            val authenticated = runCatching {
+            var sessionFailure: Throwable? = null
+            val authenticated = try {
                 runSession(pairingCode, ready)
-            }.getOrElse { error ->
+            } catch (error: Throwable) {
                 if (
                     error is DeviceIdentityUnavailableException &&
                     error.mode == DeviceIdentityFailureMode.REPAIR_REQUIRED
@@ -209,29 +211,43 @@ class RelayAgentTransport(
                     if (!ready.isCompleted) ready.complete(Result.failure(terminalError))
                     return
                 }
-                if (pairingStore.deviceId() == null) {
-                    BridgeApprovalRuntime.clear()
-                    mutableConnectionState.value = ConnectionState.ERROR
-                    if (!ready.isCompleted) {
-                        ready.complete(Result.failure(error))
-                    }
-                    return
-                }
-                if (!ready.isCompleted) {
-                    mutableConnectionState.value = ConnectionState.ERROR
-                    ready.complete(Result.failure(error))
-                    return
-                }
+                sessionFailure = error
                 false
             }
 
             if (!ready.isCompleted) {
-                mutableConnectionState.value = ConnectionState.ERROR
-                ready.complete(
-                    Result.failure(IllegalStateException("Relay connection closed before authentication."))
-                )
-                return
+                val hasStoredPairing = pairingStore.deviceId() != null
+                if (!hasStoredPairing) {
+                    BridgeApprovalRuntime.clear()
+                    mutableConnectionState.value = ConnectionState.ERROR
+                    ready.complete(
+                        Result.failure(
+                            sessionFailure
+                                ?: IllegalStateException("Relay connection closed before authentication.")
+                        )
+                    )
+                    return
+                }
+
+                if (!shouldRetryInitialAuthentication(hasStoredPairing, pairingCode, sessionFailure)) {
+                    mutableConnectionState.value = ConnectionState.ERROR
+                    ready.complete(
+                        Result.failure(
+                            sessionFailure
+                                ?: IllegalStateException("Relay connection closed before authentication.")
+                        )
+                    )
+                    return
+                }
+
+                pairingCode = null
+                mutableConnectionState.value = ConnectionState.RECONNECTING
+                val jitter = Random.nextLong(0L, min(1_000L, backoffMillis))
+                delay(backoffMillis + jitter)
+                backoffMillis = nextRelayReconnectBackoffMillis(backoffMillis)
+                continue
             }
+
             if (pairingStore.deviceId() == null) {
                 BridgeApprovalRuntime.clear()
                 mutableConnectionState.value = ConnectionState.DISCONNECTED
@@ -244,7 +260,7 @@ class RelayAgentTransport(
 
             val jitter = Random.nextLong(0L, min(1_000L, backoffMillis))
             delay(backoffMillis + jitter)
-            backoffMillis = min(backoffMillis * 2L, 30_000L)
+            backoffMillis = nextRelayReconnectBackoffMillis(backoffMillis)
         }
     }
 
@@ -414,3 +430,19 @@ class RelayAgentTransport(
         const val REVOKE_TIMEOUT_MILLIS = 15_000L
     }
 }
+
+internal fun shouldRetryInitialAuthentication(
+    hasStoredPairing: Boolean,
+    pairingCode: String?,
+    failure: Throwable?,
+): Boolean =
+    hasStoredPairing &&
+        pairingCode == null &&
+        (failure == null || failure is IOException)
+
+internal fun nextRelayReconnectBackoffMillis(currentMillis: Long): Long {
+    require(currentMillis > 0L)
+    return min(currentMillis * 2L, MAX_RELAY_RECONNECT_BACKOFF_MILLIS)
+}
+
+internal const val MAX_RELAY_RECONNECT_BACKOFF_MILLIS = 30_000L
