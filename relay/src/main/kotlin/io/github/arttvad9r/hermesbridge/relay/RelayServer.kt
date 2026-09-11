@@ -417,9 +417,9 @@ private suspend fun ApplicationCall.requireAdmin(adminToken: String): Boolean {
 
 private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: RelayRuntime) {
     var pendingDevice: DeviceRecord? = null
+    var pendingRegistration: DeviceRecord? = null
     var challenge: String? = null
     var authenticatedDeviceId: String? = null
-    var newlyRegisteredDeviceId: String? = null
 
     try {
         for (frame in incoming) {
@@ -471,9 +471,12 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         return
                     }
 
-                    val device = runtime.devices.register(publicKey, payload.deviceLabel)
+                    // Allocate the device identity for the challenge, but do not write a trusted
+                    // registry record until proof-of-possession succeeds. This remains safe even if
+                    // the relay process dies between PAIR_OK and AUTH_RESPONSE.
+                    val device = runtime.devices.prepareRegistration(publicKey, payload.deviceLabel)
                     pendingDevice = device
-                    newlyRegisteredDeviceId = device.deviceId
+                    pendingRegistration = device
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.PAIR_OK,
@@ -548,7 +551,10 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         return
                     }
 
-                    newlyRegisteredDeviceId = null
+                    pendingRegistration?.let { registration ->
+                        runtime.devices.commitRegistration(registration)
+                        pendingRegistration = null
+                    }
                     authenticatedDeviceId = device.deviceId
                     challenge = null
                     runtime.sessions.register(device.deviceId, this)
@@ -633,7 +639,6 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
         }
     } finally {
         authenticatedDeviceId?.let { runtime.sessions.unregister(it, this) }
-        newlyRegisteredDeviceId?.let { runtime.devices.revoke(it) }
     }
 }
 
