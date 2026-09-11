@@ -24,19 +24,21 @@ Mutating/privileged, with Android-side approval:
 
 - `revoke_app_permission(device_id, package_name, permission_name, idempotency_key=None)` — revoke one currently granted Android-`dangerous` permission from one launcher-visible app; no grant/all-permissions/user-id/flags surface is exposed.
 - `delete_path(device_id, path_segments, idempotency_key=None)`.
-- `install_apk(device_id, apk_name, replace=true)`.
+- `install_apk(device_id, apk_name, replace=true, idempotency_key=None)`.
 - `uninstall_app(device_id, package_name, keep_data=false, idempotency_key=None)`.
 - `force_stop_app(device_id, package_name, idempotency_key=None)`.
 
 `app_permissions`, `permissions_audit` and permission revoke do not widen Android package visibility: the Android side first derives candidates from the same launcher-visible set used by `list_apps`.
 
-### Retrying stable-argument mutations
+### Retrying mutations
 
-`force_stop_app`, `uninstall_app`, `revoke_app_permission`, and `delete_path` accept an optional `idempotency_key`. For a mutation that may need an exact retry, choose the key before the first call and reuse the same key with the same action arguments after `approval_required` and after a lost/unknown MCP or relay response. Valid keys are 1–128 characters, start with an alphanumeric character, and otherwise contain only alphanumerics plus `.`, `_`, `:`, and `-`.
+The mutating tools accept an optional `idempotency_key`. For a mutation that may need an exact retry, choose the key before the first call and reuse the same key with the same action arguments after `approval_required` and after a lost/unknown MCP or relay response. Valid keys are 1–128 characters, start with an alphanumeric character, and otherwise contain only alphanumerics plus `.`, `_`, `:`, and `-`.
 
-Calls that omit `idempotency_key` keep the original behavior: the relay creates a fresh protocol request ID, so a second invocation is a new request rather than a safe retry of an unknown mutation outcome. Reusing a key for different arguments fails closed with `request_id_conflict`.
+Calls that omit `idempotency_key` keep the original behavior: the relay creates a fresh protocol request ID, so a second invocation is a new request rather than a safe retry of an unknown mutation outcome. Reusing a key for different command arguments fails closed with `request_id_conflict`.
 
-`install_apk` is deliberately excluded from this retry contract. Each MCP invocation currently stages a new artifact and therefore changes the protocol arguments (`artifactId`/`downloadToken`). An unknown install outcome must not be retried automatically until staging correlation is designed separately. The retry table is also process-local: these keys do not claim durable exactly-once behavior across Android process death. See `docs/IDEMPOTENCY.md`.
+`install_apk` has an additional staging identity. When an install idempotency key is supplied, the MCP adapter validates it before upload and derives a device-scoped staging key from `(device_id, idempotency_key)`. The relay binds that staging key to the first APK it actually reads and verifies: sanitized file name, byte length and SHA-256. An exact retry with the same staging identity and identical verified content returns the same still-live `artifactId`/`downloadToken`, so the raw Android `apps.install` arguments remain stable. Reuse of that staging identity with changed name/bytes fails closed with `apk_staging_conflict` before command dispatch.
+
+Unkeyed install staging remains fresh: uploading the same APK again without an idempotency key creates a new artifact descriptor rather than borrowing a previous attempt's remaining TTL. Keyed staging is short-lived and process-local. If its artifact expires, reuse of the same staging identity fails explicitly with `apk_staging_expired`; after relay restart the correlation is lost. A caller starting a genuinely new install attempt after either boundary must choose a new install idempotency key instead of silently reusing the old one. These keys do not claim durable exactly-once behavior across relay or Android process death. See `docs/IDEMPOTENCY.md`.
 
 ## Install on the Hermes VPS
 
@@ -118,4 +120,5 @@ The MCP adapter is a second allowlist in addition to the Android app allowlist:
 7. The relay admin API remains local to the VPS.
 8. Destructive actions are separate typed MCP tools with Android-side exact-target approval; there is no generic `run_command(tool, args)` entry point.
 9. Optional mutation idempotency keys are transport/replay identities only; they cannot approve a command or change Android's exact-argument policy.
-10. Remote approval/Telegram routing is informational only and cannot consume or resolve an Android approval ticket.
+10. APK staging reuse requires an explicit device-scoped retry identity and relay-verified content equality; unkeyed uploads remain fresh and Android still fingerprints the actual artifact credentials.
+11. Remote approval/Telegram routing is informational only and cannot consume or resolve an Android approval ticket.

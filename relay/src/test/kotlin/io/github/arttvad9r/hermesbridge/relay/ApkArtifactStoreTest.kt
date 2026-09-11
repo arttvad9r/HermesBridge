@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
@@ -33,15 +34,87 @@ class ApkArtifactStoreTest {
     }
 
     @Test
-    fun expiredArtifactIsDeniedAndDeleted() {
+    fun unkeyedRestageRemainsAFreshArtifact() {
+        val directory = Files.createTempDirectory("hermes-bridge-apk-fresh")
+        val store = ApkArtifactStore(directory)
+        val bytes = "same apk bytes".toByteArray()
+
+        val first = store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
+        )
+        val second = store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
+        )
+
+        assertNotEquals(first.artifactId, second.artifactId)
+        assertNotEquals(first.downloadToken, second.downloadToken)
+    }
+
+    @Test
+    fun exactKeyedRestageReusesVerifiedDescriptor() {
+        val directory = Files.createTempDirectory("hermes-bridge-apk-retry")
+        val store = ApkArtifactStore(directory)
+        val bytes = "same apk bytes".toByteArray()
+
+        val first = store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
+            stagingKey = STAGING_KEY,
+        )
+        val retry = store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
+            stagingKey = STAGING_KEY,
+        )
+
+        assertEquals(first, retry)
+        Files.list(directory).use { files ->
+            assertEquals(1L, files.count())
+        }
+    }
+
+    @Test
+    fun sameStagingKeyRejectsChangedVerifiedContent() {
+        val directory = Files.createTempDirectory("hermes-bridge-apk-conflict")
+        val store = ApkArtifactStore(directory)
+        val firstBytes = "first apk bytes".toByteArray()
+        val changedBytes = "changed apk bytes".toByteArray()
+
+        store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(firstBytes),
+            declaredLength = firstBytes.size.toLong(),
+            stagingKey = STAGING_KEY,
+        )
+
+        assertThrows(ApkStagingConflictException::class.java) {
+            store.stage(
+                fileName = "example.apk",
+                input = ByteArrayInputStream(changedBytes),
+                declaredLength = changedBytes.size.toLong(),
+                stagingKey = STAGING_KEY,
+            )
+        }
+    }
+
+    @Test
+    fun expiredKeyedArtifactFailsClosedAndNewIdentityCanRestage() {
         var now = 10_000L
         val directory = Files.createTempDirectory("hermes-bridge-apk-expiry")
         val store = ApkArtifactStore(directory, nowMillis = { now })
+        val bytes = byteArrayOf(1, 2, 3)
         val staged = store.stage(
             fileName = "example.apk",
-            input = ByteArrayInputStream(byteArrayOf(1, 2, 3)),
-            declaredLength = 3,
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
             ttlMillis = 1_000L,
+            stagingKey = STAGING_KEY,
         )
         val artifact = store.findAuthorized(staged.artifactId, staged.downloadToken)
         assertNotNull(artifact)
@@ -52,6 +125,25 @@ class ApkArtifactStoreTest {
 
         assertNull(store.findAuthorized(staged.artifactId, staged.downloadToken))
         assertFalse(Files.exists(path))
+        assertThrows(ApkStagingExpiredException::class.java) {
+            store.stage(
+                fileName = "example.apk",
+                input = ByteArrayInputStream(bytes),
+                declaredLength = bytes.size.toLong(),
+                ttlMillis = 1_000L,
+                stagingKey = STAGING_KEY,
+            )
+        }
+
+        val restaged = store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
+            ttlMillis = 1_000L,
+            stagingKey = OTHER_STAGING_KEY,
+        )
+        assertNotEquals(staged.artifactId, restaged.artifactId)
+        assertNotEquals(staged.downloadToken, restaged.downloadToken)
     }
 
     @Test
@@ -87,5 +179,10 @@ class ApkArtifactStoreTest {
                 declaredLength = ApkArtifactStore.MAX_APK_BYTES + 1,
             )
         }
+    }
+
+    private companion object {
+        const val STAGING_KEY = "stage:retry-1"
+        const val OTHER_STAGING_KEY = "stage:retry-2"
     }
 }

@@ -5,6 +5,7 @@ from hermes_bridge_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
+OTHER_DEVICE_ID = "device_223e4567-e89b-12d3-a456-426614174000"
 IDEMPOTENCY_KEY = "retry:123e4567-e89b-12d3-a456-426614174000"
 
 
@@ -80,6 +81,63 @@ class IdempotencyKeyTest(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         for _, _, payload, _ in calls:
             self.assertEqual(payload["idempotencyKey"], IDEMPOTENCY_KEY)
+
+    def test_install_forwards_retry_identity_with_device_scoped_staging_key(self) -> None:
+        staged = {
+            "artifactId": "apk_123e4567-e89b-12d3-a456-426614174000",
+            "downloadToken": "A" * 43,
+            "fileName": "example.apk",
+            "sizeBytes": 1234,
+            "sha256": "a" * 64,
+        }
+        calls = []
+
+        def fake_device_command(device_id, tool, arguments=None, **kwargs):
+            calls.append((device_id, tool, arguments, kwargs))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with (
+            patch.object(server, "_stage_apk", return_value=staged) as stage,
+            patch.object(server, "_device_command", side_effect=fake_device_command),
+        ):
+            result = server.install_apk(
+                DEVICE_ID,
+                "example.apk",
+                replace=False,
+                idempotency_key=IDEMPOTENCY_KEY,
+            )
+
+        self.assertFalse(result["ok"])
+        stage.assert_called_once_with(
+            "example.apk",
+            staging_key=server._install_staging_key(DEVICE_ID, IDEMPOTENCY_KEY),
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], DEVICE_ID)
+        self.assertEqual(calls[0][1], "apps.install")
+        self.assertEqual(calls[0][2]["artifactId"], staged["artifactId"])
+        self.assertEqual(calls[0][2]["downloadToken"], staged["downloadToken"])
+        self.assertEqual(calls[0][2]["replace"], False)
+        self.assertEqual(
+            calls[0][3],
+            {"timeout": 300, "idempotency_key": IDEMPOTENCY_KEY},
+        )
+
+    def test_install_staging_identity_is_device_scoped(self) -> None:
+        self.assertNotEqual(
+            server._install_staging_key(DEVICE_ID, IDEMPOTENCY_KEY),
+            server._install_staging_key(OTHER_DEVICE_ID, IDEMPOTENCY_KEY),
+        )
+
+    def test_invalid_install_key_is_rejected_before_staging(self) -> None:
+        with patch.object(server, "_stage_apk") as stage:
+            with self.assertRaises(ValueError):
+                server.install_apk(
+                    DEVICE_ID,
+                    "example.apk",
+                    idempotency_key="contains space",
+                )
+            stage.assert_not_called()
 
     def test_calls_without_key_remain_backward_compatible(self) -> None:
         calls = []
