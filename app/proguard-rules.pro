@@ -5,9 +5,13 @@
 # retained @Serializable classes, and the Shizuku provider AAR ships its own
 # narrow BinderContainer consumer rule.
 #
-# Shizuku loads the typed privileged UserService by class name in a separate
-# app_process. Keep only that reflective entry point and its required no-arg
-# constructor; the AIDL surface and implementation remain shrinkable otherwise.
+# Shizuku loads typed UserServices by class name in separate app_process instances.
+# Keep only those reflective entry points and their required no-arg constructors;
+# the AIDL surfaces and implementations remain shrinkable otherwise.
 -keep class io.github.arttvad9r.hermesbridge.HermesBridgeUserService {
+    public <init>();
+}
+
+-keep class io.github.arttvad9r.hermesbridge.HermesBridgeUiControlUserService {
     public <init>();
 }
