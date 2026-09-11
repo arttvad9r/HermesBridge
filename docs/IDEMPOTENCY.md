@@ -24,7 +24,9 @@ While a keyed command is pending in the relay:
 - an exact concurrent duplicate with the same key, tool, and JSON arguments shares the original in-flight result and does not send a second WebSocket command;
 - the same key with a different tool or arguments fails closed with `request_id_conflict` and does not replace the original waiter.
 
-After a relay-side timeout the pending correlation entry is removed. A caller may retry the exact same keyed command; if the original command is still in flight on Android, the Android replay guard coalesces it, and if Android already retained a terminal result, that retained result is returned. This is why the same key must never be reused for a different action.
+The pending correlation is owned by a relay coroutine rather than by whichever HTTP request happened to create it. That owner performs the single WebSocket dispatch and keeps the shared deferred alive until a device result, dispatch failure, or the tool's common command deadline. Cancelling one HTTP waiter therefore only stops that caller from waiting; it does not remove the `(deviceId, requestId)` correlation or orphan another exact duplicate. Device completion and deadline completion both finish the shared deferred before conditionally removing the map entry, so a retry arriving during that transition still observes the original payload/result boundary instead of opening a second dispatch window.
+
+After the shared relay deadline the pending correlation entry is removed. A caller may retry the exact same keyed command; if the original command is still in flight on Android, the Android replay guard coalesces it, and if Android already retained a terminal result, that retained result is returned. This is why the same key must never be reused for a different action.
 
 The Hermes MCP adapter exposes optional `idempotency_key` parameters for the current mutating tools:
 
@@ -65,7 +67,7 @@ Changing only the request ID still creates a distinct replay-guard entry, and it
 
 The Android replay table is deliberately in-memory and bounded to 200 request IDs. After Android process death the bridge cannot prove whether a previous mutation completed, and the replay table no longer contains its terminal result. Approval state is also process-local and is cleared with the process.
 
-Relay command in-flight correlation and keyed APK staging correlation are also process-local and bounded. A relay restart loses those tables. A subsequent stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, but install cannot reconstruct the old artifact descriptor after relay restart and must surface that retry boundary rather than restage under the old identity.
+Relay command in-flight correlation and keyed APK staging correlation are also process-local and bounded. Individual HTTP waiter cancellation does not erase an active relay command correlation, but relay process death still does. A relay restart loses those tables. A subsequent stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, but install cannot reconstruct the old artifact descriptor after relay restart and must surface that retry boundary rather than restage under the old identity.
 
 Therefore the current idempotency key provides safe retry across lost MCP/HTTP responses only while the required replay identity and, for install, its exact keyed staged descriptor still exist. It does not provide durable exactly-once semantics across Android process death or relay restart. A persistent operation journal and persistent staging correlation would be required for that stronger guarantee.
 

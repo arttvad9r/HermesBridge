@@ -29,7 +29,9 @@ import java.security.KeyPairGenerator
 import java.security.Signature
 import java.util.Base64
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -41,7 +43,7 @@ import org.junit.Test
 
 class RelayCommandIdempotencyTest {
     @Test
-    fun `idempotency key coalesces exact concurrent retries and rejects conflicting payload`() =
+    fun `pending command survives first waiter cancellation and still rejects conflicting payload`() =
         testApplication {
             val directory = Files.createTempDirectory("hermes-bridge-idempotency-e2e")
             application {
@@ -155,6 +157,22 @@ class RelayCommandIdempotencyTest {
                     val unexpectedFrame = withTimeoutOrNull(250L) { incoming.receive() }
                     assertNull("Concurrent retry must not send a second WebSocket command.", unexpectedFrame)
 
+                    first.cancelAndJoin()
+                    delay(50L)
+
+                    val survivor = async {
+                        client.post("/api/v1/devices/${pairOk.deviceId}/commands") {
+                            header(HttpHeaders.Authorization, "Bearer $ADMIN_TOKEN")
+                            contentType(ContentType.Application.Json)
+                            setBody(exactBody)
+                        }
+                    }
+                    val unexpectedAfterCancellation = withTimeoutOrNull(250L) { incoming.receive() }
+                    assertNull(
+                        "Cancelling one HTTP waiter must not remove the shared pending command.",
+                        unexpectedAfterCancellation,
+                    )
+
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.COMMAND_RESULT,
@@ -168,14 +186,14 @@ class RelayCommandIdempotencyTest {
                         )
                     )
 
-                    val firstResult = BridgeProtocol.json.decodeFromString<CommandResultPayload>(
-                        first.await().bodyAsText()
-                    )
                     val duplicateResult = BridgeProtocol.json.decodeFromString<CommandResultPayload>(
                         duplicate.await().bodyAsText()
                     )
-                    assertEquals(IDEMPOTENCY_KEY, firstResult.requestId)
-                    assertEquals(firstResult, duplicateResult)
+                    val survivorResult = BridgeProtocol.json.decodeFromString<CommandResultPayload>(
+                        survivor.await().bodyAsText()
+                    )
+                    assertEquals(IDEMPOTENCY_KEY, duplicateResult.requestId)
+                    assertEquals(duplicateResult, survivorResult)
                 }
             }
         }
