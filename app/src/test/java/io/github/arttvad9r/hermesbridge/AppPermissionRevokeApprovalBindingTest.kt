@@ -18,6 +18,7 @@ class AppPermissionRevokeApprovalBindingTest {
 
     @Test
     fun changedPermissionCannotConsumeCameraApproval() = runBlocking {
+        BridgeApprovalRuntime.clear()
         val backend = RecordingBackend()
         val handler = AppPermissionRevokeToolHandler(
             appsRepository = object : InstalledAppsRepository {
