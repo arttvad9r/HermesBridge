@@ -63,6 +63,7 @@ data class PairingCodeResponse(
 data class RelayCommandRequest(
     val tool: String,
     val arguments: JsonObject = JsonObject(emptyMap()),
+    val idempotencyKey: String? = null,
 )
 
 @Serializable
@@ -79,8 +80,13 @@ data class RelayRevokeResponse(
 )
 
 private class DeviceSessionHub {
+    private data class PendingCommand(
+        val request: RelayCommandRequest,
+        val deferred: CompletableDeferred<CommandResultPayload>,
+    )
+
     private val sessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
-    private val pending = ConcurrentHashMap<String, CompletableDeferred<CommandResultPayload>>()
+    private val pending = ConcurrentHashMap<String, PendingCommand>()
 
     suspend fun register(deviceId: String, session: DefaultWebSocketServerSession) {
         val old = sessions.put(deviceId, session)
@@ -112,15 +118,37 @@ private class DeviceSessionHub {
         deviceId: String,
         request: RelayCommandRequest,
     ): CommandResultPayload {
+        val requestId = request.idempotencyKey ?: UUID.randomUUID().toString()
         val session = sessions[deviceId]
             ?: return CommandResultPayload(
-                requestId = "",
+                requestId = requestId,
                 ok = false,
                 error = ProtocolError("device_offline", "Device is not connected."),
             )
-        val requestId = UUID.randomUUID().toString()
-        val deferred = CompletableDeferred<CommandResultPayload>()
-        pending[requestId] = deferred
+
+        val pendingKey = pendingKey(deviceId, requestId)
+        val command = PendingCommand(
+            request = request,
+            deferred = CompletableDeferred(),
+        )
+        val existing = pending.putIfAbsent(pendingKey, command)
+        if (existing != null) {
+            if (
+                existing.request.tool != request.tool ||
+                existing.request.arguments != request.arguments
+            ) {
+                return CommandResultPayload(
+                    requestId = requestId,
+                    ok = false,
+                    error = ProtocolError(
+                        "request_id_conflict",
+                        "idempotencyKey is already bound to a different command payload.",
+                    ),
+                )
+            }
+            return withTimeout(commandTimeoutMillis(request.tool)) { existing.deferred.await() }
+        }
+
         try {
             val payload = CommandRequestPayload(
                 tool = request.tool,
@@ -133,15 +161,17 @@ private class DeviceSessionHub {
                 payload = BridgeProtocol.payload(payload),
             )
             session.send(Frame.Text(BridgeProtocol.encode(envelope)))
-            return withTimeout(commandTimeoutMillis(request.tool)) { deferred.await() }
+            return withTimeout(commandTimeoutMillis(request.tool)) { command.deferred.await() }
         } finally {
-            pending.remove(requestId)
+            pending.remove(pendingKey, command)
         }
     }
 
-    fun complete(result: CommandResultPayload) {
-        pending[result.requestId]?.complete(result)
+    fun complete(deviceId: String, result: CommandResultPayload) {
+        pending[pendingKey(deviceId, result.requestId)]?.deferred?.complete(result)
     }
+
+    private fun pendingKey(deviceId: String, requestId: String): String = "$deviceId\n$requestId"
 }
 
 private class RelayRuntime(
@@ -169,6 +199,9 @@ internal fun commandTimeoutMillis(tool: String): Long = when (tool) {
     -> 60_000L
     else -> 20_000L
 }
+
+internal fun isValidIdempotencyKey(value: String): Boolean =
+    value.length in 1..MAX_IDEMPOTENCY_KEY_LENGTH && IDEMPOTENCY_KEY_REGEX.matches(value)
 
 fun main() {
     val token = System.getenv("HERMES_BRIDGE_ADMIN_TOKEN")
@@ -385,12 +418,21 @@ fun Application.relayModule(
                 )
                 return@post
             }
+            val idempotencyKey = request.idempotencyKey
+            if (idempotencyKey != null && !isValidIdempotencyKey(idempotencyKey)) {
+                call.respondText(
+                    "{\"error\":\"invalid_idempotency_key\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.BadRequest,
+                )
+                return@post
+            }
 
             val result = try {
                 runtime.sessions.sendCommand(deviceId, request)
             } catch (_: Exception) {
                 CommandResultPayload(
-                    requestId = "",
+                    requestId = idempotencyKey.orEmpty(),
                     ok = false,
                     error = ProtocolError("command_timeout", "Device did not return a result in time."),
                 )
@@ -620,7 +662,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         sendError("invalid_payload", "Invalid command result payload.")
                         continue
                     }
-                    runtime.sessions.complete(payload)
+                    runtime.sessions.complete(deviceId, payload)
                 }
 
                 MessageType.HEARTBEAT_PONG -> Unit
@@ -647,4 +689,6 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
 }
 
 private const val APK_NAME_HEADER = "X-Hermes-Apk-Name"
+private const val MAX_IDEMPOTENCY_KEY_LENGTH = 128
 private val DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9-]{1,80}$")
+private val IDEMPOTENCY_KEY_REGEX = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
