@@ -5,11 +5,9 @@
 # retained @Serializable classes, and the Shizuku provider AAR ships its own
 # narrow BinderContainer consumer rule.
 #
-# Shizuku API 13.1.5 keeps newProcess private/deprecated, so Hermes Bridge must
-# access this one legacy entry point reflectively until the privileged backend
-# is migrated to a typed UserService. Preserve only that exact member: keeping
-# the whole Shizuku class/package would hide shrinker regressions and largely
-# disable useful optimization.
--keepclassmembers class rikka.shizuku.Shizuku {
-    private static *** newProcess(java.lang.String[], java.lang.String[], java.lang.String);
+# Shizuku loads the typed privileged UserService by class name in a separate
+# app_process. Keep only that reflective entry point and its required no-arg
+# constructor; the AIDL surface and implementation remain shrinkable otherwise.
+-keep class io.github.arttvad9r.hermesbridge.HermesBridgeUserService {
+    public <init>();
 }

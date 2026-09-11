@@ -1,19 +1,5 @@
 package io.github.arttvad9r.hermesbridge
 
-import android.content.pm.PackageManager
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.lang.reflect.InvocationTargetException
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import rikka.shizuku.Shizuku
-
 interface PrivilegedAppsBackend {
     fun readiness(): PrivilegedBackendReadiness
 
@@ -56,187 +42,72 @@ data class PrivilegedOperationResult(
  * Narrow Shizuku package backend adapted from the Apache-2.0 droid-mcp project,
  * pinned to upstream commit aeaa5b9e8e96f56ef64a7ca23d0726585f7b1103 (0.10.1 era).
  *
- * Only fixed typed package operations are retained here. No generic command
- * execution method is exposed through Hermes Bridge.
+ * Package mutations are executed in a typed Shizuku UserService. The Binder
+ * contract has one method per supported operation and does not expose shell,
+ * argv, or a generic command passthrough to the app process or Hermes agent.
  * See THIRD_PARTY_NOTICES.md for attribution.
  */
 class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
-    override fun readiness(): PrivilegedBackendReadiness {
-        val localState = ShizukuRuntime.state.value
-        if (localState.status != ShizukuAccessStatus.READY) {
-            return PrivilegedBackendReadiness(
-                ready = false,
-                code = "shizuku_unavailable",
-                message = localState.message ?: "Shizuku is not ready for privileged app operations.",
-            )
-        }
-
-        val binderReady = runCatching {
-            Shizuku.pingBinder() &&
-                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        }.getOrDefault(false)
-        return if (binderReady) {
-            PrivilegedBackendReadiness(ready = true)
-        } else {
-            PrivilegedBackendReadiness(
-                ready = false,
-                code = "shizuku_unavailable",
-                message = "Shizuku binder or permission is no longer available.",
-            )
-        }
-    }
+    override fun readiness(): PrivilegedBackendReadiness =
+        ShizukuPrivilegedUserServiceClient.readiness()
 
     override suspend fun install(
         artifact: VerifiedApkArtifact,
         replace: Boolean,
-    ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
-        readinessFailure()?.let { return@withContext it }
+    ): PrivilegedOperationResult {
+        readinessFailure()?.let { return it }
         if (!artifact.file.isFile || artifact.sizeBytes !in 1..MAX_APK_ARTIFACT_BYTES) {
-            return@withContext PrivilegedOperationResult(
+            return PrivilegedOperationResult(
                 ok = false,
                 code = "invalid_apk_artifact",
                 message = "Verified APK file is missing or has an invalid size.",
             )
         }
         if (artifact.file.length() != artifact.sizeBytes) {
-            return@withContext PrivilegedOperationResult(
+            return PrivilegedOperationResult(
                 ok = false,
                 code = "invalid_apk_artifact",
                 message = "Verified APK size changed before installation.",
             )
         }
-
-        when (
-            val attempt = executeAttempt(
-                argv = buildPmInstallCommand(artifact.sizeBytes, replace),
-                timeoutCode = "install_timeout",
-                timeoutMessage = "Package manager did not finish installation within ${INSTALL_TIMEOUT_MILLIS / 1000} seconds.",
-                timeoutMillis = INSTALL_TIMEOUT_MILLIS,
-                stdinFile = artifact.file,
-            )
-        ) {
-            is FixedCommandAttempt.Failure -> attempt.result
-            is FixedCommandAttempt.Success -> {
-                val command = attempt.result
-                if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
-                    PrivilegedOperationResult(ok = true)
-                } else {
-                    PrivilegedOperationResult(
-                        ok = false,
-                        code = "install_failed",
-                        message = command.firstOutputLine()
-                            ?: "Package manager rejected the APK installation.",
-                    )
-                }
-            }
-        }
+        return ShizukuPrivilegedUserServiceClient.install(artifact, replace)
     }
 
     override suspend fun uninstall(
         packageName: String,
         keepData: Boolean,
-    ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
-        readinessFailure()?.let { return@withContext it }
-        invalidPackageFailure(packageName)?.let { return@withContext it }
-
-        val argv = buildList {
-            add("pm")
-            add("uninstall")
-            if (keepData) add("-k")
-            add(packageName)
-        }.toTypedArray()
-
-        when (
-            val attempt = executeAttempt(
-                argv = argv,
-                timeoutCode = "uninstall_timeout",
-                timeoutMessage = "Package manager did not finish within ${EXEC_TIMEOUT_MILLIS / 1000} seconds.",
-            )
-        ) {
-            is FixedCommandAttempt.Failure -> attempt.result
-            is FixedCommandAttempt.Success -> {
-                val command = attempt.result
-                if (command.exitCode == 0 && command.stdout.contains("Success", ignoreCase = true)) {
-                    PrivilegedOperationResult(ok = true)
-                } else {
-                    PrivilegedOperationResult(
-                        ok = false,
-                        code = "uninstall_failed",
-                        message = command.firstOutputLine()
-                            ?: "Package manager rejected the uninstall request.",
-                    )
-                }
-            }
-        }
+    ): PrivilegedOperationResult {
+        readinessFailure()?.let { return it }
+        invalidPackageFailure(packageName)?.let { return it }
+        return ShizukuPrivilegedUserServiceClient.uninstall(packageName, keepData)
     }
 
-    override suspend fun forceStop(packageName: String): PrivilegedOperationResult =
-        withContext(Dispatchers.IO) {
-            readinessFailure()?.let { return@withContext it }
-            invalidPackageFailure(packageName)?.let { return@withContext it }
-
-            when (
-                val attempt = executeAttempt(
-                    argv = arrayOf("am", "force-stop", packageName),
-                    timeoutCode = "force_stop_timeout",
-                    timeoutMessage = "Activity manager did not finish within ${EXEC_TIMEOUT_MILLIS / 1000} seconds.",
-                )
-            ) {
-                is FixedCommandAttempt.Failure -> attempt.result
-                is FixedCommandAttempt.Success -> {
-                    val command = attempt.result
-                    if (command.exitCode == 0) {
-                        PrivilegedOperationResult(ok = true)
-                    } else {
-                        PrivilegedOperationResult(
-                            ok = false,
-                            code = "force_stop_failed",
-                            message = command.firstOutputLine()
-                                ?: "Activity manager rejected the force-stop request.",
-                        )
-                    }
-                }
-            }
-        }
+    override suspend fun forceStop(packageName: String): PrivilegedOperationResult {
+        readinessFailure()?.let { return it }
+        invalidPackageFailure(packageName)?.let { return it }
+        return ShizukuPrivilegedUserServiceClient.forceStop(packageName)
+    }
 
     override suspend fun revokePermission(
         packageName: String,
         permissionName: String,
         userId: Int,
-    ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
-        readinessFailure()?.let { return@withContext it }
-        invalidPackageFailure(packageName)?.let { return@withContext it }
-        invalidPermissionFailure(permissionName)?.let { return@withContext it }
-        if (userId !in 0..MAX_ANDROID_USER_ID) {
-            return@withContext PrivilegedOperationResult(
+    ): PrivilegedOperationResult {
+        readinessFailure()?.let { return it }
+        invalidPackageFailure(packageName)?.let { return it }
+        invalidPermissionFailure(permissionName)?.let { return it }
+        if (!isSupportedAndroidUserId(userId)) {
+            return PrivilegedOperationResult(
                 ok = false,
                 code = "invalid_user_id",
                 message = "Android user ID is outside the supported range.",
             )
         }
-
-        when (
-            val attempt = executeAttempt(
-                argv = buildPmRevokePermissionCommand(packageName, permissionName, userId),
-                timeoutCode = "permission_revoke_timeout",
-                timeoutMessage = "Package manager did not finish permission revocation within ${EXEC_TIMEOUT_MILLIS / 1000} seconds.",
-            )
-        ) {
-            is FixedCommandAttempt.Failure -> attempt.result
-            is FixedCommandAttempt.Success -> {
-                val command = attempt.result
-                if (command.exitCode == 0) {
-                    PrivilegedOperationResult(ok = true)
-                } else {
-                    PrivilegedOperationResult(
-                        ok = false,
-                        code = "permission_revoke_failed",
-                        message = command.firstOutputLine()
-                            ?: "Package manager rejected the permission revoke request.",
-                    )
-                }
-            }
-        }
+        return ShizukuPrivilegedUserServiceClient.revokePermission(
+            packageName = packageName,
+            permissionName = permissionName,
+            userId = userId,
+        )
     }
 
     private fun readinessFailure(): PrivilegedOperationResult? {
@@ -249,7 +120,7 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
     }
 
     private fun invalidPackageFailure(packageName: String): PrivilegedOperationResult? =
-        if (ANDROID_NAME_REGEX.matches(packageName) && packageName.length in 3..MAX_ANDROID_NAME_LENGTH) {
+        if (isValidAndroidQualifiedName(packageName)) {
             null
         } else {
             PrivilegedOperationResult(
@@ -260,7 +131,7 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         }
 
     private fun invalidPermissionFailure(permissionName: String): PrivilegedOperationResult? =
-        if (ANDROID_NAME_REGEX.matches(permissionName) && permissionName.length in 3..MAX_ANDROID_NAME_LENGTH) {
+        if (isValidAndroidQualifiedName(permissionName)) {
             null
         } else {
             PrivilegedOperationResult(
@@ -269,143 +140,6 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
                 message = "The permission name is invalid.",
             )
         }
-
-    private suspend fun executeAttempt(
-        argv: Array<String>,
-        timeoutCode: String,
-        timeoutMessage: String,
-        timeoutMillis: Long = EXEC_TIMEOUT_MILLIS,
-        stdinFile: File? = null,
-    ): FixedCommandAttempt {
-        return try {
-            FixedCommandAttempt.Success(
-                executeFixedCommand(
-                    argv = argv,
-                    timeoutMillis = timeoutMillis,
-                    stdinFile = stdinFile,
-                )
-            )
-        } catch (_: TimeoutCancellationException) {
-            FixedCommandAttempt.Failure(
-                PrivilegedOperationResult(
-                    ok = false,
-                    code = timeoutCode,
-                    message = timeoutMessage,
-                )
-            )
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            FixedCommandAttempt.Failure(
-                PrivilegedOperationResult(
-                    ok = false,
-                    code = "shizuku_spawn_failed",
-                    message = (error.message ?: error::class.java.simpleName).take(200),
-                )
-            )
-        }
-    }
-
-    private suspend fun executeFixedCommand(
-        argv: Array<String>,
-        timeoutMillis: Long,
-        stdinFile: File?,
-    ): FixedCommandResult {
-        if (!Shizuku.pingBinder()) {
-            error("Shizuku binder is not reachable.")
-        }
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            error("Shizuku permission is not granted to Hermes Bridge.")
-        }
-
-        val process = spawnViaShizuku(argv)
-        val stdoutBuffer = ByteArrayOutputStream()
-        val stderrBuffer = ByteArrayOutputStream()
-
-        return withTimeout(timeoutMillis) {
-            coroutineScope {
-                val stdoutJob = launch(Dispatchers.IO) {
-                    runCatching { process.inputStream.use { it.copyTo(stdoutBuffer) } }
-                }
-                val stderrJob = launch(Dispatchers.IO) {
-                    runCatching { process.errorStream.use { it.copyTo(stderrBuffer) } }
-                }
-                val stdinJob = launch(Dispatchers.IO) {
-                    process.outputStream.use { output ->
-                        if (stdinFile != null) {
-                            stdinFile.inputStream().buffered().use { input ->
-                                input.copyTo(output)
-                            }
-                        }
-                    }
-                }
-                try {
-                    val exitCode = runInterruptible(Dispatchers.IO) { process.waitFor() }
-                    stdinJob.join()
-                    stdoutJob.join()
-                    stderrJob.join()
-                    FixedCommandResult(
-                        exitCode = exitCode,
-                        stdout = stdoutBuffer.toString(Charsets.UTF_8.name()),
-                        stderr = stderrBuffer.toString(Charsets.UTF_8.name()),
-                    )
-                } finally {
-                    runCatching { process.destroy() }
-                }
-            }
-        }
-    }
-
-    private fun spawnViaShizuku(argv: Array<String>): Process {
-        val method = newProcessMethod
-            ?: error("Shizuku.newProcess is unavailable in the linked Shizuku API.")
-        return try {
-            method.invoke(null, argv, null, null) as Process
-        } catch (error: InvocationTargetException) {
-            val cause = error.targetException ?: error
-            throw IllegalStateException(
-                "Shizuku.newProcess failed: ${cause.message ?: cause::class.java.simpleName}",
-                cause,
-            )
-        } catch (error: ReflectiveOperationException) {
-            throw IllegalStateException("Shizuku.newProcess reflection failed: ${error.message}", error)
-        }
-    }
-
-    private sealed interface FixedCommandAttempt {
-        data class Success(val result: FixedCommandResult) : FixedCommandAttempt
-        data class Failure(val result: PrivilegedOperationResult) : FixedCommandAttempt
-    }
-
-    private data class FixedCommandResult(
-        val exitCode: Int,
-        val stdout: String,
-        val stderr: String,
-    ) {
-        fun firstOutputLine(): String? = sequenceOf(stderr, stdout)
-            .flatMap { it.lineSequence() }
-            .map(String::trim)
-            .firstOrNull(String::isNotEmpty)
-            ?.take(200)
-    }
-
-    companion object {
-        private const val EXEC_TIMEOUT_MILLIS = 30_000L
-        private const val INSTALL_TIMEOUT_MILLIS = 180_000L
-
-        @Volatile
-        private var cachedNewProcessMethod: java.lang.reflect.Method? = null
-
-        private val newProcessMethod: java.lang.reflect.Method?
-            get() = cachedNewProcessMethod ?: runCatching {
-                Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java,
-                ).apply { isAccessible = true }
-            }.getOrNull().also { cachedNewProcessMethod = it }
-    }
 }
 
 internal fun buildPmInstallCommand(sizeBytes: Long, replace: Boolean): Array<String> {
@@ -420,18 +154,32 @@ internal fun buildPmInstallCommand(sizeBytes: Long, replace: Boolean): Array<Str
     }.toTypedArray()
 }
 
+internal fun buildPmUninstallCommand(
+    packageName: String,
+    keepData: Boolean,
+): Array<String> {
+    require(isValidAndroidQualifiedName(packageName)) { "Invalid package name." }
+    return buildList {
+        add("pm")
+        add("uninstall")
+        if (keepData) add("-k")
+        add(packageName)
+    }.toTypedArray()
+}
+
+internal fun buildAmForceStopCommand(packageName: String): Array<String> {
+    require(isValidAndroidQualifiedName(packageName)) { "Invalid package name." }
+    return arrayOf("am", "force-stop", packageName)
+}
+
 internal fun buildPmRevokePermissionCommand(
     packageName: String,
     permissionName: String,
     userId: Int,
 ): Array<String> {
-    require(packageName.length in 3..MAX_ANDROID_NAME_LENGTH && ANDROID_NAME_REGEX.matches(packageName)) {
-        "Invalid package name."
-    }
-    require(permissionName.length in 3..MAX_ANDROID_NAME_LENGTH && ANDROID_NAME_REGEX.matches(permissionName)) {
-        "Invalid permission name."
-    }
-    require(userId in 0..MAX_ANDROID_USER_ID) { "Invalid Android user ID." }
+    require(isValidAndroidQualifiedName(packageName)) { "Invalid package name." }
+    require(isValidAndroidQualifiedName(permissionName)) { "Invalid permission name." }
+    require(isSupportedAndroidUserId(userId)) { "Invalid Android user ID." }
     return arrayOf(
         "pm",
         "revoke",
@@ -441,6 +189,9 @@ internal fun buildPmRevokePermissionCommand(
         permissionName,
     )
 }
+
+internal fun isSupportedAndroidUserId(userId: Int): Boolean =
+    userId in 0..MAX_ANDROID_USER_ID
 
 object DisabledPrivilegedAppsBackend : PrivilegedAppsBackend {
     override fun readiness() = PrivilegedBackendReadiness(
@@ -474,8 +225,4 @@ object DisabledPrivilegedAppsBackend : PrivilegedAppsBackend {
     )
 }
 
-private const val MAX_ANDROID_NAME_LENGTH = 255
 private const val MAX_ANDROID_USER_ID = 99_999
-private val ANDROID_NAME_REGEX = Regex(
-    "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
-)

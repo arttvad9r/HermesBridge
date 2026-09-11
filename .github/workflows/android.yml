@@ -130,6 +130,27 @@ jobs:
             exit 1
           fi
 
+      - name: Verify minified UserService entry point
+        run: |
+          apk=app/build/outputs/apk/release/app-release-unsigned.apk
+          mapping=app/build/outputs/mapping/release/mapping.txt
+          user_service=io.github.arttvad9r.hermesbridge.HermesBridgeUserService
+
+          test -s "$apk"
+          test -s "$mapping"
+
+          apkanalyzer_bin="$(command -v apkanalyzer || true)"
+          if [ -z "$apkanalyzer_bin" ]; then
+            apkanalyzer_bin="$(find "${ANDROID_HOME:?}/cmdline-tools" -type f -name apkanalyzer -perm -u+x -print -quit)"
+          fi
+          test -x "$apkanalyzer_bin"
+
+          "$apkanalyzer_bin" dex code \
+            --class "$user_service" \
+            --method '<init>()V' \
+            "$apk" >/dev/null
+          grep -Fqx "$user_service -> $user_service:" "$mapping"
+
       - name: Build relay distribution
         run: |
           ./gradlew --no-daemon :relay:distTar
