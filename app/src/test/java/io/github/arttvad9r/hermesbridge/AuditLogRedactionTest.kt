@@ -32,6 +32,29 @@ class AuditLogRedactionTest {
     }
 
     @Test
+    fun approvalAuditDoesNotPersistTargetSummary() {
+        BridgeAuditRuntime.clear()
+        val sensitivePath = "Documents/private/fixture-secret.txt"
+        BridgeAuditRuntime.recordApproval(
+            ticket = ApprovalTicket(
+                id = "approval-delete",
+                tool = "files.delete",
+                risk = ToolRisk.MUTATING,
+                argumentsFingerprint = "fingerprint",
+                displaySummary = "Удалить файл $sensitivePath",
+                createdAtEpochMillis = 1L,
+                expiresAtEpochMillis = 2L,
+                status = ApprovalStatus.APPROVED,
+            ),
+            outcome = BridgeAuditRuntime.APPROVAL_APPROVED,
+        )
+
+        val entry = BridgeAuditRuntime.entries.value.single()
+        assertEquals("files.delete", entry.tool)
+        assertNull(entry.summary)
+    }
+
+    @Test
     fun installApprovalDoesNotPersistTransportControlledSummary() {
         BridgeAuditRuntime.clear()
         val tokenLikeFileName = "A".repeat(43) + ".apk"
