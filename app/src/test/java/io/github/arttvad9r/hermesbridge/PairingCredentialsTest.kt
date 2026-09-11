@@ -20,6 +20,19 @@ class PairingCredentialsTest {
     }
 
     @Test
+    fun `resume succeeds from pending pairing when identity still exists`() {
+        val store = FakePairingStore("device_pending", pending = true)
+        val identity = FakeIdentity(hasKey = true)
+
+        val result = PairingCredentialManager(store, identity).validateResume()
+
+        assertTrue(result.isSuccess)
+        assertEquals("device_pending", result.getOrNull())
+        assertTrue(store.hasPendingDeviceId())
+        assertFalse(store.cleared)
+    }
+
+    @Test
     fun `resume rejects unpaired device without touching identity`() {
         val store = FakePairingStore(null)
         val identity = FakeIdentity(hasKey = true)
@@ -113,8 +126,12 @@ class PairingCredentialsTest {
         assertTrue(identity.resetCalled)
     }
 
-    private class FakePairingStore(initialDeviceId: String?) : PairingRecordStore {
+    private class FakePairingStore(
+        initialDeviceId: String?,
+        pending: Boolean = false,
+    ) : PairingRecordStore {
         private var currentDeviceId = initialDeviceId
+        private var currentPending = initialDeviceId != null && pending
         var cleared = false
             private set
 
@@ -122,10 +139,24 @@ class PairingCredentialsTest {
 
         override fun saveDeviceId(deviceId: String) {
             currentDeviceId = deviceId
+            currentPending = false
         }
+
+        override fun stageDeviceId(deviceId: String) {
+            currentDeviceId = deviceId
+            currentPending = true
+        }
+
+        override fun confirmDeviceId(deviceId: String) {
+            require(currentDeviceId == deviceId)
+            currentPending = false
+        }
+
+        override fun hasPendingDeviceId(): Boolean = currentPending
 
         override fun clear() {
             currentDeviceId = null
+            currentPending = false
             cleared = true
         }
     }
