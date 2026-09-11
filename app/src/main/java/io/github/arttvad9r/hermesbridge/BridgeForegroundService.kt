@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -61,7 +62,20 @@ class BridgeForegroundService : Service() {
                 if (shizuku.status == ShizukuAccessStatus.READY) {
                     advancedAccessStore.markConfigured()
                     ShizukuRestorationNotifier.cancel(applicationContext)
+                } else if (UiControlSessionRuntime.state.value.status == UiControlSessionStatus.ACTIVE) {
+                    UiControlSessionRuntime.stopLocalSession(
+                        UiControlSessionStopReason.SHIZUKU_UNAVAILABLE.displayMessage(),
+                    )
                 }
+                refreshForegroundNotification()
+            }
+        }
+
+        serviceScope.launch {
+            UiControlSessionRuntime.state.collectLatest { session ->
+                refreshForegroundNotification()
+                if (session.status != UiControlSessionStatus.ACTIVE) return@collectLatest
+                monitorUiControlSession()
             }
         }
     }
@@ -91,9 +105,12 @@ class BridgeForegroundService : Service() {
     override fun onDestroy() {
         commandJob?.cancel()
         shizukuRestorationJob?.cancel()
-        transport.close()
         serviceScope.cancel()
         BridgeRuntime.update(ConnectionState.DISCONNECTED)
+        UiControlSessionRuntime.stopLocalSession(
+            "UI-control session stopped with Hermes Bridge.",
+        )
+        transport.close()
         super.onDestroy()
     }
 
@@ -125,12 +142,37 @@ class BridgeForegroundService : Service() {
         }
     }
 
+    private suspend fun monitorUiControlSession() {
+        while (UiControlSessionRuntime.state.value.status == UiControlSessionStatus.ACTIVE) {
+            val session = UiControlSessionRuntime.state.value
+            val now = SystemClock.elapsedRealtime()
+            val stopReason = uiControlSessionStopReason(
+                sessionState = session,
+                nowElapsedRealtimeMillis = now,
+                connectionState = BridgeRuntime.state.value.connectionState,
+                shizukuStatus = ShizukuRuntime.state.value.status,
+                notificationVisible = BridgeNotificationPermission.isBridgeStatusVisible(applicationContext),
+            )
+            if (stopReason != null) {
+                UiControlSessionRuntime.stopLocalSession(stopReason.displayMessage())
+                return
+            }
+
+            val expiresAt = session.expiresAtElapsedRealtimeMillis ?: now
+            val remaining = (expiresAt - now).coerceAtLeast(1L)
+            delay(minOf(UI_CONTROL_SESSION_WATCHDOG_INTERVAL_MILLIS, remaining))
+        }
+    }
+
     private fun revokePairing() {
         commandJob?.cancel()
         commandJob = serviceScope.launch {
             transport.revokePairing()
                 .onSuccess {
                     BridgeRuntime.update(ConnectionState.DISCONNECTED)
+                    UiControlSessionRuntime.stopLocalSession(
+                        "UI-control session stopped because the phone was unpaired.",
+                    )
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
                 }
@@ -146,21 +188,41 @@ class BridgeForegroundService : Service() {
     private fun stopBridge() {
         commandJob?.cancel()
         BridgeRuntime.update(ConnectionState.DISCONNECTED)
+        UiControlSessionRuntime.stopLocalSession(
+            "UI-control session stopped because Hermes Bridge was stopped.",
+        )
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun onTransportState(state: ConnectionState, message: String?) {
         BridgeRuntime.update(state, message)
-        val text = when (state) {
+        if (state != ConnectionState.CONNECTED &&
+            UiControlSessionRuntime.state.value.status == UiControlSessionStatus.ACTIVE
+        ) {
+            UiControlSessionRuntime.stopLocalSession(
+                UiControlSessionStopReason.BRIDGE_DISCONNECTED.displayMessage(),
+            )
+        }
+        startAsForeground("Hermes Bridge", transportNotificationText(state, message))
+    }
+
+    private fun refreshForegroundNotification() {
+        val runtime = BridgeRuntime.state.value
+        startAsForeground(
+            "Hermes Bridge",
+            transportNotificationText(runtime.connectionState, runtime.message),
+        )
+    }
+
+    private fun transportNotificationText(state: ConnectionState, message: String?): String =
+        when (state) {
             ConnectionState.DISCONNECTED -> "Соединение остановлено"
             ConnectionState.PAIRING -> "Подключение к Hermes…"
             ConnectionState.RECONNECTING -> "Соединение потеряно. Переподключение…"
             ConnectionState.CONNECTED -> "Hermes подключён к телефону"
             ConnectionState.ERROR -> message ?: "Ошибка соединения"
         }
-        startAsForeground("Hermes Bridge", text)
-    }
 
     private fun startAsForeground(title: String, text: String) {
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -177,10 +239,19 @@ class BridgeForegroundService : Service() {
     }
 
     private fun buildNotification(title: String, text: String): Notification {
+        val bridgeConnected = BridgeRuntime.state.value.connectionState == ConnectionState.CONNECTED
+        val shizukuReady = ShizukuRuntime.state.value.status == ShizukuAccessStatus.READY
+        val uiControlActive =
+            UiControlSessionRuntime.state.value.status == UiControlSessionStatus.ACTIVE
+        val contentTarget = if (bridgeConnected && shizukuReady) {
+            UiControlSessionActivity::class.java
+        } else {
+            MainActivity::class.java
+        }
         val contentIntent = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, contentTarget),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stopIntent = PendingIntent.getService(
@@ -201,11 +272,16 @@ class BridgeForegroundService : Service() {
             Intent(this, UiCaptureConsentActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val visibleText = when {
+            uiControlActive -> "$text · UI-контроль включён максимум на 5 минут; нажмите для управления"
+            bridgeConnected && shizukuReady -> "$text · Нажмите для локальной UI-сессии"
+            else -> text
+        }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, BRIDGE_NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
             .setContentTitle(title)
-            .setContentText(text)
+            .setContentText(visibleText)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -219,7 +295,7 @@ class BridgeForegroundService : Service() {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
-            CHANNEL_ID,
+            BRIDGE_NOTIFICATION_CHANNEL_ID,
             "Hermes Bridge",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
@@ -230,7 +306,6 @@ class BridgeForegroundService : Service() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "hermes_bridge_connection"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_CONNECT = "io.github.arttvad9r.hermesbridge.CONNECT"
         private const val ACTION_CONNECT_AFTER_BOOT = "io.github.arttvad9r.hermesbridge.CONNECT_AFTER_BOOT"
@@ -239,6 +314,7 @@ class BridgeForegroundService : Service() {
         private const val ACTION_STOP = "io.github.arttvad9r.hermesbridge.STOP"
         private const val EXTRA_PAIRING_CODE = "pairing_code"
         private const val SHIZUKU_RESTORE_CHECK_DELAY_MILLIS = 8_000L
+        private const val UI_CONTROL_SESSION_WATCHDOG_INTERVAL_MILLIS = 1_000L
 
         fun connect(context: Context) {
             ContextCompat.startForegroundService(
