@@ -38,6 +38,10 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     init {
         viewModelScope.launch {
             BridgeRuntime.state.collectLatest { runtime ->
+                val hasStoredPairing = pairingStore.deviceId() != null
+                if (!hasStoredPairing && _state.value.setupCompleted) {
+                    setupStore.reset()
+                }
                 _state.update { current ->
                     current.copy(
                         connectionState = runtime.connectionState,
@@ -47,6 +51,10 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
                             current.pairingCode
                         },
                         message = runtime.message,
+                        setupCompleted = reconciledSetupCompletion(
+                            currentSetupCompleted = current.setupCompleted,
+                            hasStoredPairing = hasStoredPairing,
+                        ),
                     )
                 }
             }
@@ -195,8 +203,6 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с Hermes.") }
             return
         }
-        setupStore.reset()
-        _state.update { it.copy(setupCompleted = false) }
         runCatching { BridgeForegroundService.revokePairing(app) }
             .onFailure { error ->
                 BridgeRuntime.update(
@@ -220,3 +226,8 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(setupCompleted = false, message = null) }
     }
 }
+
+internal fun reconciledSetupCompletion(
+    currentSetupCompleted: Boolean,
+    hasStoredPairing: Boolean,
+): Boolean = currentSetupCompleted && hasStoredPairing
