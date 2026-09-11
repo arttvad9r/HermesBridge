@@ -7,21 +7,19 @@ import org.junit.Test
 
 class PrivilegedCommandBuildersTest {
     @Test
-    fun installCommandUsesOnlyFixedPmArgumentsAndValidatedSize() {
+    fun installCommandUsesOnlyServiceGeneratedStagingPath() {
+        val stagedPath = createShizukuApkStagingPath("12345678-1234-1234-1234-1234567890ab")
         assertArrayEquals(
-            arrayOf("pm", "install", "-S", "4096", "-"),
-            buildPmInstallCommand(sizeBytes = 4096, replace = false),
+            arrayOf("pm", "install", stagedPath),
+            buildPmInstallCommand(stagedApkPath = stagedPath, replace = false),
         )
         assertArrayEquals(
-            arrayOf("pm", "install", "-r", "-S", "4096", "-"),
-            buildPmInstallCommand(sizeBytes = 4096, replace = true),
+            arrayOf("pm", "install", "-r", stagedPath),
+            buildPmInstallCommand(stagedApkPath = stagedPath, replace = true),
         )
-        assertTrue(runCatching { buildPmInstallCommand(0, replace = false) }.isFailure)
-        assertTrue(
-            runCatching {
-                buildPmInstallCommand(MAX_APK_ARTIFACT_BYTES + 1, replace = false)
-            }.isFailure
-        )
+        assertTrue(runCatching { buildPmInstallCommand("/data/local/tmp/arbitrary.apk", false) }.isFailure)
+        assertTrue(runCatching { buildPmInstallCommand("$stagedPath;id", false) }.isFailure)
+        assertTrue(runCatching { buildPmInstallCommand("../escape.apk", false) }.isFailure)
     }
 
     @Test
