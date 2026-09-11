@@ -2,6 +2,8 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.protocol.CommandRequestPayload
 import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
+import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
+import kotlinx.coroutines.CancellationException
 
 /**
  * Top-level typed command router for the Android bridge.
@@ -33,27 +35,56 @@ class BridgeCommandRouter(
 
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         val outcome = replayGuard.execute(request) {
-            val routedResult = when (request.tool) {
-                AppsListToolHandler.TOOL_NAME -> appsListHandler.execute(request)
-                AppPermissionsToolHandler.TOOL_NAME -> appPermissionsHandler.execute(request)
-                AppPermissionsAuditToolHandler.TOOL_NAME -> appPermissionsAuditHandler.execute(request)
-                AppPermissionRevokeToolHandler.TOOL_NAME -> appPermissionRevokeHandler.execute(request)
-                else -> coreRegistry.execute(request)
+            try {
+                val routedResult = when (request.tool) {
+                    AppsListToolHandler.TOOL_NAME -> appsListHandler.execute(request)
+                    AppPermissionsToolHandler.TOOL_NAME -> appPermissionsHandler.execute(request)
+                    AppPermissionsAuditToolHandler.TOOL_NAME -> appPermissionsAuditHandler.execute(request)
+                    AppPermissionRevokeToolHandler.TOOL_NAME -> appPermissionRevokeHandler.execute(request)
+                    else -> coreRegistry.execute(request)
+                }
+                val projectedResult = when (request.tool) {
+                    BridgeToolRegistry.FILES_LIST -> projectFilesListForRemoteResult(routedResult)
+                    BridgeToolRegistry.FILES_ANALYZE -> projectFilesAnalyzeForRemoteResult(routedResult)
+                    else -> routedResult
+                }
+                enforceRemoteCommandResultBudget(remoteSafeCommandResult(projectedResult))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                unexpectedExecutionFailure(request.requestId)
             }
-            val projectedResult = when (request.tool) {
-                BridgeToolRegistry.FILES_LIST -> projectFilesListForRemoteResult(routedResult)
-                BridgeToolRegistry.FILES_ANALYZE -> projectFilesAnalyzeForRemoteResult(routedResult)
-                else -> routedResult
-            }
-            enforceRemoteCommandResultBudget(remoteSafeCommandResult(projectedResult))
         }
         // Replay-guard generated failures do not pass through the action above, so enforce both
         // remote boundaries once more on the final result. Both policies are intentionally
         // idempotent and the bounded result is what gets recorded in the audit history.
-        val result = enforceRemoteCommandResultBudget(remoteSafeCommandResult(outcome.result))
+        val result = try {
+            enforceRemoteCommandResultBudget(remoteSafeCommandResult(outcome.result))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            unexpectedExecutionFailure(request.requestId)
+        }
         if (outcome.shouldAudit) {
-            BridgeAuditRuntime.recordCommand(request.tool, result)
+            // Audit persistence is a local observability feature, not part of the remote command
+            // transaction. A storage/serialization failure must not tear down the WebSocket after
+            // a mutation has already completed and thereby invite an unsafe retry.
+            try {
+                BridgeAuditRuntime.recordCommand(request.tool, result)
+            } catch (_: Exception) {
+                // Physical/audit validation will expose the missing local entry. Keep the exact
+                // command result authoritative and deliverable to the relay.
+            }
         }
         return result
     }
+
+    private fun unexpectedExecutionFailure(requestId: String) = CommandResultPayload(
+        requestId = requestId,
+        ok = false,
+        error = ProtocolError(
+            code = "command_execution_failed",
+            message = "Command execution failed before a safe result could be produced.",
+        ),
+    )
 }

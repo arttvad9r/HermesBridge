@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -69,8 +70,10 @@ private object UiControlSmokeRuntime {
         )
         scope.launch {
             delay(FIXTURE_FOREGROUND_SETTLE_MILLIS)
-            val result = ShizukuUiControlPrototype.tapPrimaryDisplay(x, y)
-            mutableState.value = UiControlSmokeState(result = formatSmokeResult(result))
+            val result = safeSmokeDispatch {
+                ShizukuUiControlPrototype.tapPrimaryDisplay(x, y)
+            }
+            mutableState.value = UiControlSmokeState(result = result)
         }
     }
 
@@ -88,15 +91,27 @@ private object UiControlSmokeRuntime {
         )
         scope.launch {
             delay(FIXTURE_FOREGROUND_SETTLE_MILLIS)
-            val result = ShizukuUiControlPrototype.swipePrimaryDisplay(
-                startX = startX,
-                startY = startY,
-                endX = endX,
-                endY = endY,
-                durationMillis = durationMillis,
-            )
-            mutableState.value = UiControlSmokeState(result = formatSmokeResult(result))
+            val result = safeSmokeDispatch {
+                ShizukuUiControlPrototype.swipePrimaryDisplay(
+                    startX = startX,
+                    startY = startY,
+                    endX = endX,
+                    endY = endY,
+                    durationMillis = durationMillis,
+                )
+            }
+            mutableState.value = UiControlSmokeState(result = result)
         }
+    }
+
+    private suspend fun safeSmokeDispatch(
+        block: suspend () -> PrivilegedOperationResult,
+    ): String = try {
+        formatSmokeResult(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        "ERROR · smoke_dispatch_failed · ${error::class.java.simpleName.take(80)}"
     }
 }
 

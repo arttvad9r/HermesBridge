@@ -12,6 +12,30 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
 - Do not expose relay port `8080` publicly; Hermes/admin traffic stays loopback-only.
 - Do not disable the Android-side approval or UI-control session policy for the test.
 - Record failures and exact Android/OxygenOS version before changing battery/background settings.
+- Keep USB ADB connected throughout the run when available. Wi-Fi/mobile handover is a bridge-network test; the ADB transport should stay on USB and must not be treated as evidence that the bridge itself reconnected.
+- For a release-gate rerun, pin one exact Git commit. Use the fixture and relay artifacts produced by the successful exact-head CI run for that commit. Build the Android APK from that same commit with the real relay WSS URL, because the generic CI debug artifact intentionally uses the default `wss://bridge.invalid/ws/device` endpoint unless the workflow is explicitly configured otherwise.
+
+## 0. Release-gate preflight
+
+Before changing the phone or VPS state:
+
+1. Record the exact commit to validate and confirm the physical-run branch still points to that commit.
+2. Confirm the exact-head Android CI run completed successfully.
+3. Download the E2E fixture APK and relay distribution from that exact CI run. Do not mix artifacts from older runs or another branch.
+4. Build the Hermes Bridge debug APK locally from the exact same commit with the real relay endpoint:
+
+   ```bash
+   ./gradlew --no-daemon \
+     -PHERMES_BRIDGE_RELAY_WS_URL=wss://YOUR_HOST/ws/device \
+     :app:assembleDebug
+   ```
+
+   Do not install the generic Actions debug artifact for the live bridge test unless its embedded endpoint has been independently confirmed to be the intended real host.
+5. Record the locally built debug APK SHA-256, the exact WSS endpoint used for the build, and the downloaded fixture/relay artifact SHA-256 or GitHub artifact digests.
+6. Confirm `adb devices -l` shows the intended physical phone in `device` state over USB. Reject `offline`, `unauthorized` and emulator targets.
+7. Start a local logcat capture before installing/restarting Hermes Bridge. Do not persist pairing codes, APK download tokens or other secrets in the result record.
+
+Expected: the physical result is attributable to one exact source commit, one exact successful CI run, one host-specific Android build from that commit, and the fixture/relay artifacts from that run.
 
 ## 1. VPS and public TLS
 
@@ -28,7 +52,7 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
    curl --fail http://127.0.0.1:8080/health
    ```
 
-4. Configure the documented Caddy/Nginx TLS route.
+4. Confirm the relay listener itself is loopback-only (`127.0.0.1:8080`), then configure the documented Caddy/Nginx TLS route.
 5. From a machine outside the VPS, confirm:
 
    ```bash
@@ -36,7 +60,7 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
    ```
 
 6. Verify that `https://YOUR_HOST/api/v1/devices` is **not** publicly proxied.
-7. Build the Android APK with exactly:
+7. Install the host-specific Android APK built in preflight with exactly:
 
    ```text
    wss://YOUR_HOST/ws/device
@@ -47,23 +71,23 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
 1. Install the current debug/release-test APK on the phone.
 2. Start the relay and Hermes MCP adapter.
 3. Create a one-time pairing code through Hermes/MCP.
-4. Enter it in Hermes Bridge.
+4. Enter it in Hermes Bridge. Do not record the pairing code in screenshots, logs or the result file.
 5. Confirm the app reaches `Hermes подключён`.
 6. Confirm `list_devices` shows this phone as connected.
 7. Run `device_health` from Hermes and compare the returned battery/storage values with the phone UI.
 
-Expected: no laptop or same-Wi-Fi requirement is involved in the actual bridge connection.
+Expected: no laptop or same-Wi-Fi requirement is involved in the actual bridge connection. A first-pair identity must not remain trusted on the relay unless the authentication handshake completes.
 
 ## 3. Mobile network handover
 
-1. Keep Hermes running on the VPS.
-2. Turn Wi-Fi off on the phone so it moves to LTE/5G.
+1. Keep USB ADB connected and Hermes running on the VPS.
+2. Turn Wi-Fi off on the phone so the bridge moves to LTE/5G.
 3. Wait for the bridge to reconnect.
-4. Run `device_health` again.
+4. Run `device_health` again through Hermes/relay.
 5. Turn Wi-Fi back on and repeat.
 6. Lock the phone for at least several minutes and repeat the command.
 
-Expected: connection state may briefly show reconnecting, but pairing is retained and commands resume without user pairing action.
+Expected: connection state may briefly show reconnecting, but pairing is retained and commands resume without user pairing action. USB ADB staying alive does **not** count as bridge reconnection evidence.
 
 Record reconnect latency for both Wi-Fi -> mobile and mobile -> Wi-Fi transitions.
 
@@ -89,24 +113,29 @@ Verify that:
 
 Build/install the repository-owned `e2e-fixture` and prepare a disposable test directory. The fixture package is `io.github.arttvad9r.hermesbridge.fixture`; for permission revoke tests, grant `android.permission.CAMERA` from the fixture UI first. The fixture never opens the camera.
 
-For each mutating tool, verify this exact sequence:
+For each mutating tool, verify this exact sequence. The changed-argument probe must happen **after approval but before the approved action is consumed**; otherwise the test does not prove approval binding:
 
-1. Hermes sends the command.
+1. Hermes sends the original command.
 2. Nothing changes yet; the phone shows a local approval card.
 3. Deny once and verify the action does not happen.
-4. Request again, approve, then have Hermes retry the exact same command.
-5. Verify the action happens exactly once.
-6. Change an argument after approval and verify the old approval is rejected.
+4. Request the original command again and approve its local approval card, but do **not** execute the approved original retry yet.
+5. Send the safe changed-semantic probe from `PHYSICAL_E2E_ARGUMENT_MATRIX.md`. Verify it does not execute under the original approval. If the changed probe creates its own approval card, deny that changed ticket so it cannot interfere with the rest of the check.
+6. Retry the original normalized command. Verify the original approved action now happens exactly once.
+7. Send the original command once more without granting a new approval. Verify no second mutation occurs and a fresh approval is required.
+
+This proves that one local approval authorizes only one matching semantic mutation. Request-ID replay behavior is separately covered by the bounded `CommandReplayGuard` tests; the normal relay admin/MCP command path allocates a new request ID for each new command submission.
 
 Exercise:
 
-- `delete_path` on a disposable file;
-- `force_stop_app` on `io.github.arttvad9r.hermesbridge.fixture`;
-- `revoke_app_permission` for `android.permission.CAMERA` on the fixture package;
-- `uninstall_app` on the fixture package;
-- `install_apk` using the fixture APK from the dedicated VPS APK staging directory.
+- `delete_path` on a disposable file; change the target path for the mismatch check.
+- `force_stop_app` on `io.github.arttvad9r.hermesbridge.fixture`; change the target package for the mismatch check.
+- `revoke_app_permission` for `android.permission.CAMERA` on the fixture package; change the permission or target package for the mismatch check.
+- `uninstall_app` on the fixture package; change `keepData` (or the target package where supported) for the mismatch check.
+- `install_apk` using the fixture APK from the dedicated VPS APK staging directory; change `replace` or verified APK content for the mismatch check. Changing only transport artifact ID/token/file name for the **same verified APK identity** is intentionally not a new local approval target.
 
 Do not use Hermes Bridge's own package as the target; self-protection should reject those attempts before mutation.
+
+For `install_apk`, additionally verify the fixture is actually present after the approved execution. The unapproved follow-up in step 7 must not reinstall it. This is the regression check for the physical package-install staging fix plus one-approval/one-mutation behavior.
 
 ## 6. Typed UI-control physical smoke (debug only)
 
@@ -139,7 +168,7 @@ Do not use the smoke harness against any app other than the disposable repositor
 7. Open/reactivate Shizuku from the notification/setup card.
 8. Verify a privileged test action works again after authorization is restored.
 
-Expected: Shizuku loss after a stock non-root reboot must not destroy the Hermes pairing or base read-only connection.
+Expected: Shizuku loss after a stock non-root reboot must not destroy the Hermes pairing or base read-only connection. This is also the regression check for paired relay resume before the first post-boot authentication.
 
 ## 8. Process death and service recovery
 
@@ -160,7 +189,7 @@ After the previous checks:
 
 1. Open `История Hermes` from the app/foreground notification.
 2. Verify command outcomes, approval decisions and UI-control session lifecycle events are present.
-3. Verify APK tokens, pairing codes, raw command arguments, file contents, UI coordinates, swipe durations and raw error/stop messages are absent.
+3. Verify APK tokens, pairing codes, raw command arguments, file contents, SAF paths/target names, package/permission target values from approval decisions, UI coordinates, swipe durations and raw error/stop messages are absent.
 4. Clear history and verify it stays cleared after reopening the screen.
 
 ## 10. Pairing revocation
@@ -172,6 +201,8 @@ After the previous checks:
 
 Separately test the localhost-only admin revoke path as an emergency recovery mechanism.
 
+For the first-pair rollback regression, also perform one disposable interrupted pairing: create a new one-time code, start pairing, terminate the socket/app before authentication completes, then confirm the relay did not retain a trusted device record from that incomplete handshake.
+
 ## Result record
 
 For each physical run, record:
@@ -181,6 +212,11 @@ For each physical run, record:
 | Phone model | |
 | Android/OxygenOS version | |
 | Hermes Bridge commit | |
+| Exact-head CI run | |
+| Android debug APK SHA-256 | |
+| Embedded relay WSS endpoint | |
+| Fixture artifact digest | |
+| Relay artifact digest | |
 | APK type | debug / release-test |
 | Relay commit | |
 | Shizuku version/mode | |
@@ -197,7 +233,8 @@ For each physical run, record:
 | Typed fixture swipe | pass/fail |
 | Stop/Shizuku-loss/notification-loss rejection | pass/fail |
 | Debug smoke launcher absent from release | pass/fail |
-| Audit redaction incl. UI session | pass/fail |
+| Audit redaction incl. approval target data + UI session | pass/fail |
+| Interrupted first-pair rollback | pass/fail |
 | Pairing revoke/re-pair | pass/fail |
 | Battery impact notes | |
 | Open defects | |

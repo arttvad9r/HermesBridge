@@ -27,6 +27,7 @@ import io.ktor.websocket.send
 import java.io.IOException
 import kotlin.math.min
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,10 +112,15 @@ class RelayAgentTransport(
         return startConnection(null)
     }
 
-    override suspend fun disconnect(): Result<Unit> = runCatching {
+    override suspend fun disconnect(): Result<Unit> = try {
         connectionJob?.cancelAndJoin()
         connectionJob = null
         mutableConnectionState.value = ConnectionState.DISCONNECTED
+        Result.success(Unit)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        Result.failure(error)
     }
 
     suspend fun revokePairing(): Result<Unit> {
@@ -145,6 +151,8 @@ class RelayAgentTransport(
             )
             withTimeout(REVOKE_TIMEOUT_MILLIS) { ack.await().getOrThrow() }
             Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             Result.failure(error)
         } finally {
@@ -173,10 +181,14 @@ class RelayAgentTransport(
             connectionLoop(pairingCode, ready)
         }
 
-        return runCatching {
+        return try {
             withTimeout(20_000L) { ready.await().getOrThrow() }
-        }.onFailure {
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
             mutableConnectionState.value = ConnectionState.ERROR
+            Result.failure(error)
         }
     }
 
@@ -191,6 +203,8 @@ class RelayAgentTransport(
             var sessionFailure: Throwable? = null
             val authenticated = try {
                 runSession(pairingCode, ready)
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Throwable) {
                 if (
                     error is DeviceIdentityUnavailableException &&
@@ -269,6 +283,7 @@ class RelayAgentTransport(
         ready: CompletableDeferred<Result<Unit>>,
     ): Boolean {
         var authenticated = false
+        var pendingPairDeviceId: String? = null
 
         client.webSocket(relayWsUrl) {
             activeSession = this
@@ -300,17 +315,24 @@ class RelayAgentTransport(
                     val envelope = BridgeProtocol.decode(frame.readText())
                     when (envelope.type) {
                         MessageType.PAIR_OK -> {
+                            if (existingDeviceId != null || pendingPairDeviceId != null) {
+                                error("Relay returned pairing success in an invalid session state.")
+                            }
                             val payload = BridgeProtocol.decodePayload<PairOkPayload>(envelope)
                             if (envelope.deviceId != payload.deviceId) {
                                 error("Relay returned inconsistent device identity.")
                             }
-                            pairingStore.saveDeviceId(payload.deviceId)
+                            // Do not persist a relay-side registration before proof-of-possession
+                            // authentication succeeds. A process death or failed AUTH_RESPONSE must
+                            // leave the phone locally unpaired so the next attempt can use a fresh code.
+                            pendingPairDeviceId = payload.deviceId
                         }
 
                         MessageType.AUTH_CHALLENGE -> {
-                            val deviceId = envelope.deviceId ?: pairingStore.deviceId()
-                                ?: error("Authentication challenge has no device ID.")
-                            if (pairingStore.deviceId() != deviceId) {
+                            val expectedDeviceId = pendingPairDeviceId ?: existingDeviceId
+                                ?: error("Authentication challenge arrived before a device identity was established.")
+                            val deviceId = envelope.deviceId ?: expectedDeviceId
+                            if (deviceId != expectedDeviceId) {
                                 error("Authentication challenge targets another device.")
                             }
                             val payload = BridgeProtocol.decodePayload<AuthChallengePayload>(envelope)
@@ -325,6 +347,15 @@ class RelayAgentTransport(
                         }
 
                         MessageType.AUTH_OK -> {
+                            val expectedDeviceId = pendingPairDeviceId ?: existingDeviceId
+                                ?: error("Authentication succeeded without an established device identity.")
+                            if (envelope.deviceId != expectedDeviceId) {
+                                error("Relay returned authentication success for another device.")
+                            }
+                            pendingPairDeviceId?.let { newDeviceId ->
+                                pairingStore.saveDeviceId(newDeviceId)
+                                pendingPairDeviceId = null
+                            }
                             authenticated = true
                             mutableConnectionState.value = ConnectionState.CONNECTED
                             if (!ready.isCompleted) ready.complete(Result.success(Unit))

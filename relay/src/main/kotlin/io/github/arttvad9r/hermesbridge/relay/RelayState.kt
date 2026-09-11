@@ -79,18 +79,37 @@ class DeviceRegistry(
         loadFromDisk()
     }
 
-    fun register(publicKey: PublicKey, label: String): DeviceRecord {
-        val record = DeviceRecord(
-            deviceId = "device_${UUID.randomUUID()}",
-            publicKey = publicKey,
-            label = label.take(80),
-        )
+    /**
+     * Allocates the identity returned in PAIR_OK without making it trusted or durable yet.
+     * The relay commits this exact record only after the client proves possession of its private key.
+     */
+    internal fun prepareRegistration(publicKey: PublicKey, label: String): DeviceRecord = DeviceRecord(
+        deviceId = "device_${UUID.randomUUID()}",
+        publicKey = publicKey,
+        label = label.take(80),
+    )
+
+    internal fun commitRegistration(record: DeviceRecord): DeviceRecord {
+        require(record.deviceId.startsWith("device_")) { "Invalid prepared device ID." }
+        val normalized = record.copy(label = record.label.take(80))
         synchronized(persistenceLock) {
-            devices[record.deviceId] = record
-            persistLocked()
+            require(!devices.containsKey(normalized.deviceId)) { "Device ID is already registered." }
+            devices[normalized.deviceId] = normalized
+            try {
+                persistLocked()
+            } catch (error: Throwable) {
+                // Trust is not established until the durable registry reflects it. Keep memory and
+                // disk consistent so a transient storage failure cannot create a process-local
+                // device that disappears or changes meaning after relay restart.
+                devices.remove(normalized.deviceId, normalized)
+                throw error
+            }
         }
-        return record
+        return normalized
     }
+
+    fun register(publicKey: PublicKey, label: String): DeviceRecord =
+        commitRegistration(prepareRegistration(publicKey, label))
 
     fun find(deviceId: String): DeviceRecord? = devices[deviceId]
 
@@ -98,8 +117,15 @@ class DeviceRegistry(
 
     fun revoke(deviceId: String): Boolean = synchronized(persistenceLock) {
         val removed = devices.remove(deviceId) ?: return@synchronized false
-        persistLocked()
-        removed.deviceId == deviceId
+        try {
+            persistLocked()
+        } catch (error: Throwable) {
+            // A revocation that was not durably persisted must not be reported as effective in
+            // memory. Restore the exact trusted record and let the caller surface the failure.
+            devices[deviceId] = removed
+            throw error
+        }
+        true
     }
 
     private fun loadFromDisk() {

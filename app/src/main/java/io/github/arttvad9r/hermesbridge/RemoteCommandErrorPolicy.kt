@@ -34,6 +34,8 @@ internal fun remoteSafeCommandErrorMessage(code: String): String = when (code) {
     "request_id_conflict" -> "The command request ID is already bound to another payload."
     "request_replay_busy" -> "The Android request replay guard is temporarily full."
     "result_too_large" -> "The Android command result exceeded the control-channel safety limit."
+    "command_execution_failed" ->
+        "Command execution failed before a safe result could be produced."
     "invalid_arguments" -> "The command arguments are invalid."
     "unknown_tool" -> "The requested tool is not available on the Android device."
     "policy_denied" -> "Local Android policy denied the command."

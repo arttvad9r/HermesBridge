@@ -104,20 +104,17 @@ object BridgeAuditRuntime {
     }
 
     fun recordApproval(ticket: ApprovalTicket, outcome: String) {
-        val safeTool = auditSafeToolName(ticket.tool)
         append(
             AuditLogEntry(
                 id = UUID.randomUUID().toString(),
                 timestampEpochMillis = System.currentTimeMillis(),
                 type = AuditEventType.APPROVAL,
-                tool = safeTool,
+                tool = auditSafeToolName(ticket.tool),
                 outcome = sanitizeAuditText(outcome, MAX_OUTCOME_LENGTH),
-                summary = if (safeTool == UNKNOWN_TOOL) {
-                    null
-                } else {
-                    sanitizeAuditText(ticket.displaySummary, MAX_SUMMARY_LENGTH)
-                        .takeIf(String::isNotEmpty)
-                },
+                // Approval cards may contain package names, permission names or SAF paths derived
+                // from command arguments. Those details are useful for the live local decision but
+                // are intentionally not persisted in history. Audit retains only tool + decision.
+                summary = null,
             )
         )
     }
@@ -159,7 +156,6 @@ object BridgeAuditRuntime {
     private const val OUTCOME_SUCCESS = "success"
     private const val OUTCOME_ERROR = "error"
     private const val MAX_OUTCOME_LENGTH = 32
-    private const val MAX_SUMMARY_LENGTH = 180
 }
 
 internal fun auditSafeToolName(tool: String): String =

@@ -10,6 +10,7 @@ import java.security.Signature
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -45,6 +46,24 @@ class RelayStateTest {
     }
 
     @Test
+    fun preparedPairingIsNotTrustedOrPersistedUntilCommitted() {
+        val directory = Files.createTempDirectory("hermes-bridge-provisional-state")
+        val store = directory.resolve("devices.json")
+        val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+        val registry = DeviceRegistry(store)
+
+        val prepared = registry.prepareRegistration(keyPair.public, "Pending phone")
+
+        assertNull(registry.find(prepared.deviceId))
+        assertTrue(registry.list().isEmpty())
+        assertTrue(DeviceRegistry(store).list().isEmpty())
+
+        registry.commitRegistration(prepared)
+        assertNotNull(registry.find(prepared.deviceId))
+        assertNotNull(DeviceRegistry(store).find(prepared.deviceId))
+    }
+
+    @Test
     fun registeredDeviceSurvivesRegistryRestart() {
         val directory = Files.createTempDirectory("hermes-bridge-relay-test")
         val store = directory.resolve("devices.json")
@@ -58,6 +77,20 @@ class RelayStateTest {
 
         assertEquals("My phone", restored.label)
         assertTrue(keyPair.public.encoded.contentEquals(restored.publicKey.encoded))
+    }
+
+    @Test
+    fun registerPersistenceFailureDoesNotLeaveProcessLocalTrustedDevice() {
+        val root = Files.createTempDirectory("hermes-bridge-register-failure")
+        val blockedParent = root.resolve("not-a-directory")
+        Files.writeString(blockedParent, "block directory creation")
+        val registry = DeviceRegistry(blockedParent.resolve("devices.json"))
+        val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+
+        val failure = runCatching { registry.register(keyPair.public, "Should not survive") }
+
+        assertTrue(failure.isFailure)
+        assertTrue(registry.list().isEmpty())
     }
 
     @Test
@@ -75,6 +108,26 @@ class RelayStateTest {
         val restoredRegistry = DeviceRegistry(store)
         assertNull(restoredRegistry.find(registered.deviceId))
         assertTrue(restoredRegistry.list().isEmpty())
+    }
+
+    @Test
+    fun revokePersistenceFailureRestoresTrustedDeviceInMemory() {
+        val root = Files.createTempDirectory("hermes-bridge-revoke-failure")
+        val stateDirectory = root.resolve("state")
+        Files.createDirectories(stateDirectory)
+        val store = stateDirectory.resolve("devices.json")
+        val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+        val registry = DeviceRegistry(store)
+        val registered = registry.register(keyPair.public, "Still trusted")
+
+        Files.delete(store)
+        Files.delete(stateDirectory)
+        Files.writeString(stateDirectory, "block persistence")
+
+        val failure = runCatching { registry.revoke(registered.deviceId) }
+
+        assertTrue(failure.isFailure)
+        assertNotNull(registry.find(registered.deviceId))
     }
 
     @Test

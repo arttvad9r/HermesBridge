@@ -120,7 +120,10 @@ class ApprovalManager(
         require(decision == ApprovalStatus.APPROVED || decision == ApprovalStatus.DENIED)
         expireLocked()
         val current = tickets[id] ?: return null
-        if (current.status != ApprovalStatus.PENDING) return current
+        // A local approval control is a one-shot decision surface. Once another tap, expiry or
+        // command execution has resolved the ticket, stale UI events must not look successful or
+        // generate a second audit decision for the old capability.
+        if (current.status != ApprovalStatus.PENDING) return null
         val updated = current.copy(status = decision)
         tickets[id] = updated
         return updated
