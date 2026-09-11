@@ -18,6 +18,7 @@ class ForceStopApprovalBindingTest {
 
     @Test
     fun changedPackageCannotConsumeApprovedForceStop() = runBlocking {
+        BridgeApprovalRuntime.clear()
         val backend = RecordingBackend()
         val registry = BridgeToolRegistry(
             healthRepository = object : DeviceHealthRepository {
