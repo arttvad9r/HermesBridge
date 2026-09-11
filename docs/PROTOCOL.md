@@ -103,9 +103,11 @@ Rules:
 - while a request ID remains in the Android replay table, it is bound to `SHA-256(tool + canonical arguments)`; the same ID with another payload fails closed with `request_id_conflict`;
 - concurrent exact duplicates of one request ID share the same in-flight execution rather than executing the tool twice;
 - for the current non-idempotent tools (`files.delete`, install, uninstall, force-stop and permission revoke), a terminal result is retained in the bounded replay table and returned to exact duplicates without running the operation again;
-- `approval_required` is deliberately non-terminal so Hermes can retry the exact same request after the local ticket is approved;
+- `approval_required` is deliberately non-terminal in replay accounting; local approval is bound to the exact normalized action arguments rather than `requestId`, so the current relay/MCP flow can repeat the same typed tool call after approval even though the relay allocates a fresh protocol request ID;
 - read-only duplicate requests may be evaluated again because repeating those observations does not mutate device state;
 - the replay table is in-memory and bounded to 200 request IDs; it is an in-process duplicate-execution guard, not a claim of durable exactly-once delivery.
+
+The current relay HTTP command API does not accept a caller-supplied protocol `requestId`; it allocates a fresh ID for every HTTP command call, and the current Hermes MCP adapter does not expose an idempotency key. Consequently the Android replay table protects duplicate delivery of one protocol request, but it does not make a second MCP/HTTP invocation a safe retry after a lost response. See `IDEMPOTENCY.md` for the boundary in detail.
 
 All current mutating/privileged tools still require an exact, one-use Android approval before their actual mutation. Therefore process death cannot silently turn a replayed destructive request into a second mutation: after approval state is lost, a retry must obtain a new local approval. The previous operation's outcome can nevertheless be unknown after a crash, so Hermes must not automatically approve/retry such a request merely because the transport reconnected.
 
@@ -126,7 +128,7 @@ When a typed command requires approval:
 5. Relay validates the authenticated `deviceId`, approval ID, exact allowlisted `tool↔risk` pair and TTL, then stores at most 200 notification records in memory. Relay computes its own local expiry from the relative TTL.
 6. The authenticated admin/Hermes side can read unexpired notification records with `GET /api/v1/devices/{deviceId}/approvals` or the MCP `pending_approvals` tool. These records are not authoritative ticket state and can remain until TTL expiry after local resolution.
 7. Approval still happens locally on Android. The existing exact-argument fingerprint, expiry and one-use consume rules remain authoritative.
-8. After local approval, Hermes retries the same typed tool call; changed arguments require another ticket.
+8. After local approval, Hermes retries the same typed tool call and arguments. The relay currently assigns that retry a fresh protocol `requestId`; the approved ticket remains applicable because it is bound to the normalized action fingerprint rather than the transport ID. Changed arguments require another ticket.
 
 Current notification tools are limited to `files.delete`, `apps.install`, `apps.uninstall`, `apps.forceStop` and `apps.revokePermission`. Unknown tools or mismatched risk classifications remain local and are not queued for remote notification.
 
