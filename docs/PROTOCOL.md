@@ -119,13 +119,21 @@ The relay HTTP command request accepts an optional retry identity alongside the 
 
 If `idempotencyKey` is omitted, the relay preserves the original behavior and allocates a fresh UUID for the protocol `requestId`. If it is supplied, the relay validates the same 1–128 character request-ID alphabet and propagates the key as the protocol `requestId`. While that keyed command is pending, an exact concurrent duplicate shares the same in-flight result and sends no second WebSocket command; the same key with another tool or JSON argument object fails closed with `request_id_conflict` and cannot replace the original waiter.
 
-The Hermes MCP adapter exposes optional `idempotency_key` parameters for stable-argument mutations: `force_stop_app`, `uninstall_app`, `revoke_app_permission` and `delete_path`. For retry-safe use, the caller chooses a key before the first invocation and reuses the exact same key with the exact same action arguments after `approval_required` or after a lost/unknown MCP or HTTP response. Calls without a key retain the fresh-ID behavior and are not safe retries of an unknown mutation outcome.
+The Hermes MCP adapter exposes optional `idempotency_key` parameters for `force_stop_app`, `uninstall_app`, `revoke_app_permission`, `delete_path` and `install_apk`. For retry-safe use, the caller chooses a key before the first invocation and reuses the exact same key with the exact same action arguments after `approval_required` or after a lost/unknown MCP or HTTP response. Calls without a key retain the fresh-ID behavior and are not safe retries of an unknown mutation outcome.
 
-`install_apk` is intentionally outside this first retry-safe MCP contract. Each invocation currently stages a fresh artifact and therefore changes `artifactId` and `downloadToken`, which are protocol arguments. Reusing an old key with a newly staged artifact correctly fails Android replay validation with `request_id_conflict`. Install needs separately reviewed staging correlation before it can make the same retry guarantee.
+### APK install staging identity
+
+`apps.install` additionally depends on stable relay-created artifact credentials. For a keyed MCP install, the adapter validates the command idempotency key before upload and derives a separate staging identity as SHA-256 of `(device_id, idempotency_key)`. It sends the derived value in the bounded `X-Hermes-Apk-Staging-Key` header to `POST /api/v1/apk-artifacts`; the original idempotency key is still used as the Android protocol `requestId`.
+
+The relay reads and hashes every upload. The first use of one staging identity is bound to the relay-verified sanitized file name, byte length and SHA-256 plus the resulting staged descriptor. An exact retry with that same identity and verified content while the artifact remains live returns the identical `artifactId`, `downloadToken`, size, hash and expiry without extending TTL. Reuse of the same staging identity with changed name, length or bytes fails before command dispatch with HTTP 409 `apk_staging_conflict`.
+
+Unkeyed staging remains fresh and always creates a new descriptor. This prevents a genuinely new install attempt for the same APK from accidentally inheriting an older artifact's remaining TTL. If a keyed artifact expires, reuse of its staging identity fails explicitly with HTTP 409 `apk_staging_expired`; a genuinely new attempt must use a new install idempotency key. The staging table is bounded to 200 identities; when all retained entries still point to live artifacts, a new keyed stage fails closed with `apk_staging_busy` rather than evicting a live retry identity.
+
+The relay does not remove `artifactId` or `downloadToken` from Android's replay fingerprint. Relay restart loses staging correlation and therefore terminates the install retry guarantee; durable exactly-once install semantics are not claimed.
 
 All current mutating/privileged tools still require an exact, one-use Android approval before their actual mutation. Therefore process death cannot silently turn a replayed destructive request into a second mutation: after approval state is lost, a retry must obtain a new local approval. The previous operation's outcome can nevertheless be unknown after a crash, so Hermes must not automatically approve/retry such a request merely because the transport reconnected.
 
-The relay keyed waiter table and Android replay table are both process-local. A relay restart loses only relay-side in-flight correlation; a retry can still benefit from Android replay protection if the Android process and replay entry survived. Android process death removes the replay proof entirely, so the key does not provide durable exactly-once semantics across Android process recreation.
+The relay keyed waiter table, APK staging table and Android replay table are all process-local. A relay restart loses relay-side in-flight/staging correlation; a stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, while install cannot reconstruct the old descriptor after relay restart. Android process death removes the replay proof entirely, so the key does not provide durable exactly-once semantics across Android process recreation.
 
 ## Approval notifications
 
@@ -144,7 +152,7 @@ When a typed command requires approval:
 5. Relay validates the authenticated `deviceId`, approval ID, exact allowlisted `tool↔risk` pair and TTL, then stores at most 200 notification records in memory. Relay computes its own local expiry from the relative TTL.
 6. The authenticated admin/Hermes side can read unexpired notification records with `GET /api/v1/devices/{deviceId}/approvals` or the MCP `pending_approvals` tool. These records are not authoritative ticket state and can remain until TTL expiry after local resolution.
 7. Approval still happens locally on Android. The existing exact-argument fingerprint, expiry and one-use consume rules remain authoritative.
-8. After local approval, Hermes retries the same typed tool call and arguments. For the supported stable-argument mutations, a caller that supplied an idempotency key reuses that same key; otherwise the relay assigns a fresh protocol `requestId`. In either case the approval remains applicable because it is bound to the normalized action fingerprint rather than the transport ID. Changed arguments require another ticket.
+8. After local approval, Hermes retries the same typed tool call and arguments. A caller that supplied an idempotency key reuses that same key; for install, the same live staging identity must also resolve to the same staged descriptor. Otherwise the relay assigns a fresh protocol `requestId`. In every case the approval remains applicable because it is bound to the normalized action fingerprint rather than the transport ID. Changed action arguments require another ticket.
 
 Current notification tools are limited to `files.delete`, `apps.install`, `apps.uninstall`, `apps.forceStop` and `apps.revokePermission`. Unknown tools or mismatched risk classifications remain local and are not queued for remote notification.
 
@@ -159,7 +167,8 @@ When the device pairing identity is revoked, missing or invalidated for repair, 
 - connection resumes after Wi-Fi/mobile handover;
 - only bounded in-memory queues before durable queue design is reviewed;
 - bounded request-ID replay protection prevents duplicate in-process execution of current destructive tools without pretending to provide durable exactly-once semantics;
-- optional relay/MCP idempotency keys let stable-argument mutations reuse that Android replay identity across lost MCP/HTTP responses, with relay-side exact in-flight coalescing and payload-conflict rejection;
+- optional relay/MCP idempotency keys let exact mutating requests reuse that Android replay identity across lost MCP/HTTP responses, with relay-side exact in-flight coalescing and payload-conflict rejection;
+- keyed APK staging preserves install protocol arguments only for the same explicit device-scoped retry identity and relay-verified content; unkeyed staging remains fresh;
 - results include structured error codes, not only strings;
 - list-like app results include explicit completeness metadata instead of silently exceeding the WebSocket frame budget;
 - a shared 224 KiB `command.result` payload backstop converts any remaining oversized result into `result_too_large` before replay caching/audit/transport;

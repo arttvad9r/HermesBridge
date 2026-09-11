@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import os
@@ -32,6 +33,7 @@ MAX_APK_BYTES = 200 * 1024 * 1024
 MAX_PENDING_APPROVALS = 200
 HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
 APK_NAME_HEADER = "X-Hermes-Apk-Name"
+APK_STAGING_KEY_HEADER = "X-Hermes-Apk-Staging-Key"
 
 mcp = MCPServer("Hermes Bridge")
 
@@ -156,6 +158,13 @@ def _idempotency_kwargs(idempotency_key: str | None) -> dict[str, str]:
     return {"idempotency_key": idempotency_key}
 
 
+def _install_staging_key(device_id: str, idempotency_key: str) -> str:
+    if not DEVICE_ID_RE.fullmatch(device_id):
+        raise ValueError("device_id has an invalid format.")
+    validated = _validate_idempotency_key(idempotency_key)
+    return hashlib.sha256(f"{device_id}\n{validated}".encode("utf-8")).hexdigest()
+
+
 def _validate_path_segments(path_segments: list[str]) -> None:
     if len(path_segments) > MAX_PATH_DEPTH:
         raise ValueError("path_segments exceeds the maximum depth.")
@@ -209,7 +218,7 @@ def _resolve_apk_file(apk_name: str) -> Path:
     return candidate
 
 
-def _stage_apk(apk_name: str) -> dict[str, Any]:
+def _stage_apk(apk_name: str, *, staging_key: str | None = None) -> dict[str, Any]:
     apk_path = _resolve_apk_file(apk_name)
     size_bytes = apk_path.stat().st_size
     parsed = urlsplit(_relay_url())
@@ -225,6 +234,8 @@ def _stage_apk(apk_name: str) -> dict[str, Any]:
         connection.putheader("Content-Type", "application/vnd.android.package-archive")
         connection.putheader("Content-Length", str(size_bytes))
         connection.putheader(APK_NAME_HEADER, apk_path.name)
+        if staging_key is not None:
+            connection.putheader(APK_STAGING_KEY_HEADER, _validate_idempotency_key(staging_key))
         connection.endheaders()
 
         with apk_path.open("rb") as source:
@@ -426,11 +437,23 @@ def install_apk(
     device_id: str,
     apk_name: str,
     replace: bool = True,
+    *,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Stage one APK and request installation. This operation is not retry-safe after an unknown MCP/HTTP outcome because each invocation creates a new staged artifact."""
+    """Stage one APK and request installation. Supply and reuse idempotency_key for an exact approval retry or unknown response outcome while the staged artifact remains live."""
     if not isinstance(replace, bool):
         raise ValueError("replace must be a boolean.")
-    staged = _stage_apk(apk_name)
+
+    if idempotency_key is None:
+        staged = _stage_apk(apk_name)
+        command_key = None
+    else:
+        command_key = _validate_idempotency_key(idempotency_key)
+        staged = _stage_apk(
+            apk_name,
+            staging_key=_install_staging_key(device_id, command_key),
+        )
+
     return _device_command(
         device_id,
         "apps.install",
@@ -443,6 +466,7 @@ def install_apk(
             "replace": replace,
         },
         timeout=300,
+        **_idempotency_kwargs(command_key),
     )
 
 
