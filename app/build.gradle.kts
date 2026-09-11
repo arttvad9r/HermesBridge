@@ -5,6 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val kotlinxSerializationVersion = providers.gradleProperty("kotlinxSerializationVersion").get()
+
 val releaseSigningVariableNames = listOf(
     "HERMES_BRIDGE_SIGNING_STORE_FILE",
     "HERMES_BRIDGE_SIGNING_STORE_PASSWORD",
@@ -111,7 +113,7 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:3.1.2")
     implementation("io.ktor:ktor-client-websockets:3.1.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion")
 
     testImplementation("junit:junit:4.13.2")
 

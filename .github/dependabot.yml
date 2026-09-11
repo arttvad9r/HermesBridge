@@ -15,6 +15,13 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      kotlinx-serialization:
+        applies-to: "version-updates"
+        patterns:
+          - "org.jetbrains.kotlinx:kotlinx-serialization-*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "pip"
     directory: "/hermes_mcp"
