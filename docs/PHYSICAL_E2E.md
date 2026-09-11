@@ -113,14 +113,17 @@ Verify that:
 
 Build/install the repository-owned `e2e-fixture` and prepare a disposable test directory. The fixture package is `io.github.arttvad9r.hermesbridge.fixture`; for permission revoke tests, grant `android.permission.CAMERA` from the fixture UI first. The fixture never opens the camera.
 
-For each mutating tool, verify this exact sequence:
+For each mutating tool, verify this exact sequence. The changed-argument probe must happen **after approval but before the approved action is consumed**; otherwise the test does not prove approval binding:
 
-1. Hermes sends the command.
+1. Hermes sends the original command.
 2. Nothing changes yet; the phone shows a local approval card.
 3. Deny once and verify the action does not happen.
-4. Request again, approve, then have Hermes retry the exact same command.
-5. Verify the action happens exactly once.
-6. Change a **semantic** argument after approval and verify the old approval is rejected.
+4. Request the original command again and approve its local approval card, but do **not** execute the approved original retry yet.
+5. Send the safe changed-semantic probe from `PHYSICAL_E2E_ARGUMENT_MATRIX.md`. Verify it does not execute under the original approval. If the changed probe creates its own approval card, deny that changed ticket so it cannot interfere with the rest of the check.
+6. Retry the original normalized command. Verify the original approved action now happens exactly once.
+7. Send the original command once more without granting a new approval. Verify no second mutation occurs and a fresh approval is required.
+
+This proves that one local approval authorizes only one matching semantic mutation. Request-ID replay behavior is separately covered by the bounded `CommandReplayGuard` tests; the normal relay admin/MCP command path allocates a new request ID for each new command submission.
 
 Exercise:
 
@@ -132,7 +135,7 @@ Exercise:
 
 Do not use Hermes Bridge's own package as the target; self-protection should reject those attempts before mutation.
 
-For `install_apk`, additionally verify the fixture is actually present after success and that an exact retry does not reinstall it a second time. This is the regression check for the physical package-install staging fix.
+For `install_apk`, additionally verify the fixture is actually present after the approved execution. The unapproved follow-up in step 7 must not reinstall it. This is the regression check for the physical package-install staging fix plus one-approval/one-mutation behavior.
 
 ## 6. Typed UI-control physical smoke (debug only)
 
