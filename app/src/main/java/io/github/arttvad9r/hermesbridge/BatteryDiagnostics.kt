@@ -1,20 +1,9 @@
 package io.github.arttvad9r.hermesbridge
 
-import android.content.pm.PackageManager
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.lang.reflect.InvocationTargetException
 import java.util.Locale
 import java.util.PriorityQueue
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
-import rikka.shizuku.Shizuku
 
 data class BatteryPowerSummarySnapshot(
     val batteryCapacityMah: Double,
@@ -261,197 +250,80 @@ interface BatteryDiagnosticsBackend {
 }
 
 class ShizukuBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
-    override fun readiness(): PrivilegedBackendReadiness {
-        val localState = ShizukuRuntime.state.value
-        if (localState.status != ShizukuAccessStatus.READY) {
-            return PrivilegedBackendReadiness(
-                ready = false,
-                code = "shizuku_unavailable",
-                message = localState.message ?: "Shizuku is not ready for battery diagnostics.",
-            )
-        }
+    override fun readiness(): PrivilegedBackendReadiness =
+        ShizukuPrivilegedUserServiceClient.readiness()
 
-        val binderReady = runCatching {
-            Shizuku.pingBinder() &&
-                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        }.getOrDefault(false)
-        return if (binderReady) {
-            PrivilegedBackendReadiness(ready = true)
-        } else {
-            PrivilegedBackendReadiness(
-                ready = false,
-                code = "shizuku_unavailable",
-                message = "Shizuku binder or permission is no longer available.",
+    override suspend fun readUsage(): BatteryDiagnosticsResult {
+        val transport = ShizukuPrivilegedUserServiceClient.readBatteryStats()
+        if (!transport.ok) {
+            return BatteryDiagnosticsResult(
+                ok = false,
+                code = transport.code,
+                message = transport.message,
             )
         }
-    }
-
-    override suspend fun readUsage(): BatteryDiagnosticsResult = withContext(Dispatchers.IO) {
-        val readiness = readiness()
-        if (!readiness.ready) {
-            return@withContext BatteryDiagnosticsResult(
-                ok = false,
-                code = readiness.code,
-                message = readiness.message,
-            )
-        }
-
-        val command = try {
-            executeBatteryStatsCommand()
-        } catch (_: TimeoutCancellationException) {
-            return@withContext BatteryDiagnosticsResult(
-                ok = false,
-                code = "battery_stats_timeout",
-                message = "Battery diagnostics did not finish within ${BATTERY_STATS_TIMEOUT_MILLIS / 1000} seconds.",
-            )
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            return@withContext BatteryDiagnosticsResult(
-                ok = false,
-                code = "shizuku_spawn_failed",
-                message = (error.message ?: error::class.java.simpleName).take(200),
-            )
-        }
-
-        if (command.exitCode != 0) {
-            return@withContext BatteryDiagnosticsResult(
-                ok = false,
-                code = "battery_stats_failed",
-                message = command.firstOutputLine() ?: "dumpsys batterystats failed.",
-            )
-        }
-        if (command.stdout.truncated) {
-            return@withContext BatteryDiagnosticsResult(
+        if (transport.truncated) {
+            return BatteryDiagnosticsResult(
                 ok = false,
                 code = "battery_stats_too_large",
-                message = "Battery diagnostics exceeded the ${MAX_STDOUT_BYTES / (1024 * 1024)} MiB safety limit.",
+                message = "Battery diagnostics exceeded the ${MAX_BATTERY_STATS_OUTPUT_BYTES / (1024 * 1024)} MiB safety limit.",
             )
         }
 
+        val text = transport.text ?: return BatteryDiagnosticsResult(
+            ok = false,
+            code = "battery_stats_stream_failed",
+            message = "Battery diagnostics returned no streamed output.",
+        )
         val snapshot = try {
-            BatteryStatsCheckinParser.parse(command.stdout.text)
+            BatteryStatsCheckinParser.parse(text)
         } catch (error: BatteryStatsParseException) {
-            return@withContext BatteryDiagnosticsResult(
+            return BatteryDiagnosticsResult(
                 ok = false,
                 code = "battery_stats_parse_failed",
                 message = error.message ?: "Battery diagnostics could not be parsed.",
             )
         }
 
-        BatteryDiagnosticsResult(ok = true, snapshot = snapshot)
-    }
-
-    private suspend fun executeBatteryStatsCommand(): BatteryCommandResult {
-        if (!Shizuku.pingBinder()) error("Shizuku binder is not reachable.")
-        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            error("Shizuku permission is not granted to Hermes Bridge.")
-        }
-
-        val process = spawnViaShizuku(buildBatteryStatsCommand())
-        return withTimeout(BATTERY_STATS_TIMEOUT_MILLIS) {
-            coroutineScope {
-                runCatching { process.outputStream.close() }
-                val stdoutDeferred = async(Dispatchers.IO) {
-                    readBounded(process.inputStream, MAX_STDOUT_BYTES)
-                }
-                val stderrDeferred = async(Dispatchers.IO) {
-                    readBounded(process.errorStream, MAX_STDERR_BYTES)
-                }
-
-                try {
-                    val exitCode = runInterruptible(Dispatchers.IO) { process.waitFor() }
-                    BatteryCommandResult(
-                        exitCode = exitCode,
-                        stdout = stdoutDeferred.await(),
-                        stderr = stderrDeferred.await(),
-                    )
-                } finally {
-                    runCatching { process.destroy() }
-                }
-            }
-        }
-    }
-
-    private fun spawnViaShizuku(argv: Array<String>): Process {
-        val method = newProcessMethod
-            ?: error("Shizuku.newProcess is unavailable in the linked Shizuku API.")
-        return try {
-            method.invoke(null, argv, null, null) as Process
-        } catch (error: InvocationTargetException) {
-            val cause = error.targetException ?: error
-            throw IllegalStateException(
-                "Shizuku.newProcess failed: ${cause.message ?: cause::class.java.simpleName}",
-                cause,
-            )
-        } catch (error: ReflectiveOperationException) {
-            throw IllegalStateException("Shizuku.newProcess reflection failed: ${error.message}", error)
-        }
-    }
-
-    private fun readBounded(input: InputStream, limitBytes: Int): BoundedText {
-        val output = ByteArrayOutputStream(minOf(limitBytes, 64 * 1024))
-        val buffer = ByteArray(16 * 1024)
-        var retained = 0
-        var truncated = false
-
-        input.use { stream ->
-            while (true) {
-                val read = stream.read(buffer)
-                if (read < 0) break
-                if (retained < limitBytes) {
-                    val accepted = minOf(read, limitBytes - retained)
-                    output.write(buffer, 0, accepted)
-                    retained += accepted
-                    if (accepted < read) truncated = true
-                } else {
-                    truncated = true
-                }
-            }
-        }
-
-        return BoundedText(
-            text = output.toString(Charsets.UTF_8.name()),
-            truncated = truncated,
-        )
-    }
-
-    private data class BoundedText(
-        val text: String,
-        val truncated: Boolean,
-    )
-
-    private data class BatteryCommandResult(
-        val exitCode: Int,
-        val stdout: BoundedText,
-        val stderr: BoundedText,
-    ) {
-        fun firstOutputLine(): String? = sequenceOf(stderr.text, stdout.text)
-            .flatMap { it.lineSequence() }
-            .map(String::trim)
-            .firstOrNull(String::isNotEmpty)
-            ?.take(200)
-    }
-
-    companion object {
-        private const val BATTERY_STATS_TIMEOUT_MILLIS = 45_000L
-        private const val MAX_STDOUT_BYTES = 4 * 1024 * 1024
-        private const val MAX_STDERR_BYTES = 64 * 1024
-
-        @Volatile
-        private var cachedNewProcessMethod: java.lang.reflect.Method? = null
-
-        private val newProcessMethod: java.lang.reflect.Method?
-            get() = cachedNewProcessMethod ?: runCatching {
-                Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java,
-                ).apply { isAccessible = true }
-            }.getOrNull().also { cachedNewProcessMethod = it }
+        return BatteryDiagnosticsResult(ok = true, snapshot = snapshot)
     }
 }
+
+internal data class BoundedBatteryStatsText(
+    val text: String,
+    val truncated: Boolean,
+)
+
+internal fun readBoundedBatteryStats(
+    input: InputStream,
+    limitBytes: Int = MAX_BATTERY_STATS_OUTPUT_BYTES,
+): BoundedBatteryStatsText {
+    require(limitBytes > 0) { "Battery diagnostics output limit must be positive." }
+    val output = ByteArrayOutputStream(minOf(limitBytes, 64 * 1024))
+    val buffer = ByteArray(16 * 1024)
+    var retained = 0
+    var truncated = false
+
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        if (retained < limitBytes) {
+            val accepted = minOf(read, limitBytes - retained)
+            output.write(buffer, 0, accepted)
+            retained += accepted
+            if (accepted < read) truncated = true
+        } else {
+            truncated = true
+        }
+    }
+
+    return BoundedBatteryStatsText(
+        text = output.toString(Charsets.UTF_8.name()),
+        truncated = truncated,
+    )
+}
+
+internal const val MAX_BATTERY_STATS_OUTPUT_BYTES = 4 * 1024 * 1024
 
 internal fun buildBatteryStatsCommand(): Array<String> =
     arrayOf("dumpsys", "batterystats", "-c", "--charged")

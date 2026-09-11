@@ -1,7 +1,9 @@
 package io.github.arttvad9r.hermesbridge
 
+import java.io.ByteArrayInputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -96,6 +98,27 @@ class BatteryDiagnosticsTest {
         )
         assertEquals(1, snapshot.systemPowerItems.size)
         assertEquals("cell", snapshot.systemPowerItems.single().label)
+    }
+
+    @Test
+    fun boundedReaderRetainsLimitAndDrainsRemainingBytes() {
+        val input = ByteArrayInputStream("abcdefgh".toByteArray(Charsets.UTF_8))
+
+        val result = readBoundedBatteryStats(input, limitBytes = 4)
+
+        assertEquals("abcd", result.text)
+        assertTrue(result.truncated)
+        assertEquals(0, input.available())
+    }
+
+    @Test
+    fun boundedReaderDoesNotTruncateExactLimit() {
+        val input = ByteArrayInputStream("abcd".toByteArray(Charsets.UTF_8))
+
+        val result = readBoundedBatteryStats(input, limitBytes = 4)
+
+        assertEquals("abcd", result.text)
+        assertFalse(result.truncated)
     }
 
     @Test
