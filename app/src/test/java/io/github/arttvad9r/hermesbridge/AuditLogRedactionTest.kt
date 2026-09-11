@@ -2,7 +2,11 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
 import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
+import io.github.arttvad9r.hermesbridge.security.ApprovalStatus
+import io.github.arttvad9r.hermesbridge.security.ApprovalTicket
+import io.github.arttvad9r.hermesbridge.security.ToolRisk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AuditLogRedactionTest {
@@ -25,5 +29,28 @@ class AuditLogRedactionTest {
     fun malformedErrorCodeIsCollapsedToGenericValue() {
         assertEquals("other_error", auditSafeErrorCode("secret value with spaces"))
         assertEquals("approval_required", auditSafeErrorCode("approval_required"))
+    }
+
+    @Test
+    fun installApprovalDoesNotPersistTransportControlledSummary() {
+        BridgeAuditRuntime.clear()
+        val tokenLikeFileName = "A".repeat(43) + ".apk"
+        BridgeAuditRuntime.recordApproval(
+            ticket = ApprovalTicket(
+                id = "approval-test",
+                tool = "apps.install",
+                risk = ToolRisk.MUTATING,
+                argumentsFingerprint = "fingerprint",
+                displaySummary = "Установить io.github.arttvad9r.hermesbridge.fixture 1.0 из $tokenLikeFileName",
+                createdAtEpochMillis = 1L,
+                expiresAtEpochMillis = 2L,
+                status = ApprovalStatus.APPROVED,
+            ),
+            outcome = BridgeAuditRuntime.APPROVAL_APPROVED,
+        )
+
+        val entry = BridgeAuditRuntime.entries.value.single()
+        assertEquals("apps.install", entry.tool)
+        assertNull(entry.summary)
     }
 }
