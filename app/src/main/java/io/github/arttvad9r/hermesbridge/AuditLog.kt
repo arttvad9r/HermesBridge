@@ -103,20 +103,17 @@ object BridgeAuditRuntime {
     }
 
     fun recordApproval(ticket: ApprovalTicket, outcome: String) {
-        val safeTool = auditSafeToolName(ticket.tool)
         append(
             AuditLogEntry(
                 id = UUID.randomUUID().toString(),
                 timestampEpochMillis = System.currentTimeMillis(),
                 type = AuditEventType.APPROVAL,
-                tool = safeTool,
+                tool = auditSafeToolName(ticket.tool),
                 outcome = sanitizeAuditText(outcome, MAX_OUTCOME_LENGTH),
-                summary = if (safeTool == UNKNOWN_TOOL || safeTool == APPS_INSTALL_AUDIT_TOOL) {
-                    null
-                } else {
-                    sanitizeAuditText(ticket.displaySummary, MAX_SUMMARY_LENGTH)
-                        .takeIf(String::isNotEmpty)
-                },
+                // Approval cards may contain package names, permission names or SAF paths derived
+                // from command arguments. Those details are useful for the live local decision but
+                // are intentionally not persisted in history. Audit retains only tool + decision.
+                summary = null,
             )
         )
     }
@@ -144,7 +141,6 @@ object BridgeAuditRuntime {
     private const val OUTCOME_SUCCESS = "success"
     private const val OUTCOME_ERROR = "error"
     private const val MAX_OUTCOME_LENGTH = 32
-    private const val MAX_SUMMARY_LENGTH = 180
 }
 
 internal fun auditSafeToolName(tool: String): String =
@@ -180,8 +176,6 @@ internal fun sanitizeAuditText(value: String, maxLength: Int): String {
 
 internal const val MAX_AUDIT_ENTRIES = 200
 internal const val UNKNOWN_TOOL = "unknown_tool"
-private const val APPS_INSTALL_AUDIT_TOOL = "apps.install"
-
 private val AUDIT_ERROR_CODE_REGEX = Regex("^[a-z0-9_]{1,64}$")
 private val AUDITED_TOOL_NAMES = setOf(
     "device.health",
@@ -194,7 +188,7 @@ private val AUDITED_TOOL_NAMES = setOf(
     "files.list",
     "files.analyze",
     "files.delete",
-    APPS_INSTALL_AUDIT_TOOL,
+    "apps.install",
     "apps.uninstall",
     "apps.forceStop",
 )
