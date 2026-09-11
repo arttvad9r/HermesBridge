@@ -87,7 +87,15 @@ class DeviceRegistry(
         )
         synchronized(persistenceLock) {
             devices[record.deviceId] = record
-            persistLocked()
+            try {
+                persistLocked()
+            } catch (error: Throwable) {
+                // Trust is not established until the durable registry reflects it. Keep memory and
+                // disk consistent so a transient storage failure cannot create a process-local
+                // device that disappears or changes meaning after relay restart.
+                devices.remove(record.deviceId, record)
+                throw error
+            }
         }
         return record
     }
@@ -98,8 +106,15 @@ class DeviceRegistry(
 
     fun revoke(deviceId: String): Boolean = synchronized(persistenceLock) {
         val removed = devices.remove(deviceId) ?: return@synchronized false
-        persistLocked()
-        removed.deviceId == deviceId
+        try {
+            persistLocked()
+        } catch (error: Throwable) {
+            // A revocation that was not durably persisted must not be reported as effective in
+            // memory. Restore the exact trusted record and let the caller surface the failure.
+            devices[deviceId] = removed
+            throw error
+        }
+        true
     }
 
     private fun loadFromDisk() {
