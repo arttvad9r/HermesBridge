@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.security.ToolRisk
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -48,13 +49,13 @@ class PhysicalMutationApprovalContractTest {
             tool = "files.delete",
             risk = ToolRisk.MUTATING,
             original = buildJsonObject {
-                put("pathSegments", buildJsonArray { add("fixture-a.txt") })
+                put("pathSegments", buildJsonArray { add(JsonPrimitive("fixture-a.txt")) })
                 put("directory", false)
                 put("sizeBytes", 10L)
                 put("lastModifiedEpochMillis", 100L)
             },
             changed = buildJsonObject {
-                put("pathSegments", buildJsonArray { add("fixture-b.txt") })
+                put("pathSegments", buildJsonArray { add(JsonPrimitive("fixture-b.txt")) })
                 put("directory", false)
                 put("sizeBytes", 10L)
                 put("lastModifiedEpochMillis", 100L)
