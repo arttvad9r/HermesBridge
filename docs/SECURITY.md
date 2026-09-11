@@ -102,11 +102,17 @@ MediaProjection is an explicit local capability, not an implicit extension of th
 - the virtual display is non-secure, so Android continues to blank `FLAG_SECURE` / protected window content instead of Hermes Bridge attempting to capture it;
 - the capture surface is aspect-ratio preserving and bounded to at most 1,600 pixels on either axis and 1,500,000 total pixels;
 - the process-local copied RGBA frame is therefore bounded to 6,000,000 bytes;
-- exactly one frame is acquired, its copied byte array is overwritten immediately, and the `Image`, `ImageReader`, `VirtualDisplay`, and `MediaProjection` resources are then released;
+- exactly one frame is acquired;
+- before that temporary RGBA copy is erased, Hermes Bridge masks locally derived system-bar and display-cutout edge regions with opaque black pixels;
+- when the software keyboard is visible, its visibility-sensitive IME inset is read from a fresh `WindowInsets` snapshot after the frame arrives and unioned with the system-edge mask; `getInsetsIgnoringVisibility(Type.ime())` is not used;
+- if the maximum-window source geometry changed between capture setup and frame redaction, the redaction path fails closed rather than applying fresh insets in a stale coordinate system;
+- after local masking, the copied byte array is overwritten immediately, and the `Image`, `ImageReader`, `VirtualDisplay`, and `MediaProjection` resources are released;
 - no screenshot pixels enter `UiCaptureSessionRuntime`, app-private files, logs, audit history, Android intents, protocol models, relay state, MCP results, or Telegram notifications;
 - there is no remote screenshot/capture command and the relay cannot start MediaProjection consent.
 
-Any future screenshot retention, redaction, serialization, transport, remote trigger, or repeated-frame processing is a separate privacy/security boundary and must be reviewed explicitly rather than inheriting permission from this local one-frame primitive.
+This edge-mask policy does **not** claim semantic redaction of arbitrary app-owned text fields, messages, form values, notifications rendered inside app content, or other sensitive pixels. Those cases remain outside the current pixel-consumer boundary because captured pixels are not retained or transported.
+
+Any future screenshot retention, semantic app-content redaction, serialization, transport, remote trigger, or repeated-frame processing is a separate privacy/security boundary and must be reviewed explicitly rather than inheriting permission from this local one-frame primitive.
 
 ## Pairing
 
