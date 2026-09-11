@@ -181,7 +181,7 @@ fun main() {
             ?: ".hermes-bridge",
     )
 
-    embeddedServer(Netty, port = port, host = "0.0.0.0") {
+    embeddedServer(Netty, port = port, host = RELAY_BIND_HOST) {
         relayModule(
             adminToken = token,
             deviceRegistryPath = stateDirectory.resolve("devices.json"),
@@ -419,6 +419,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
     var pendingDevice: DeviceRecord? = null
     var challenge: String? = null
     var authenticatedDeviceId: String? = null
+    var newlyRegisteredDeviceId: String? = null
 
     try {
         for (frame in incoming) {
@@ -472,6 +473,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
 
                     val device = runtime.devices.register(publicKey, payload.deviceLabel)
                     pendingDevice = device
+                    newlyRegisteredDeviceId = device.deviceId
                     sendEnvelope(
                         BridgeProtocol.envelope(
                             type = MessageType.PAIR_OK,
@@ -546,6 +548,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                         return
                     }
 
+                    newlyRegisteredDeviceId = null
                     authenticatedDeviceId = device.deviceId
                     challenge = null
                     runtime.sessions.register(device.deviceId, this)
@@ -630,6 +633,7 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
         }
     } finally {
         authenticatedDeviceId?.let { runtime.sessions.unregister(it, this) }
+        newlyRegisteredDeviceId?.let { runtime.devices.revoke(it) }
     }
 }
 
@@ -646,5 +650,6 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
     )
 }
 
+internal const val RELAY_BIND_HOST = "127.0.0.1"
 private const val APK_NAME_HEADER = "X-Hermes-Apk-Name"
 private val DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9-]{1,80}$")
