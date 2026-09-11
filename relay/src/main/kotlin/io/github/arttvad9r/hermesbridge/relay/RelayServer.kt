@@ -335,6 +335,15 @@ fun Application.relayModule(
                 )
                 return@post
             }
+            val stagingKey = call.request.headers[APK_STAGING_KEY_HEADER]
+            if (stagingKey != null && !isValidIdempotencyKey(stagingKey)) {
+                call.respondText(
+                    "{\"error\":\"invalid_apk_staging_key\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.BadRequest,
+                )
+                return@post
+            }
 
             val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
             if (declaredLength != null && declaredLength !in 1..ApkArtifactStore.MAX_APK_BYTES) {
@@ -349,7 +358,12 @@ fun Application.relayModule(
             val staged = try {
                 call.receiveStream().use { input ->
                     withContext(Dispatchers.IO) {
-                        runtime.apkArtifacts.stage(fileName, input, declaredLength)
+                        runtime.apkArtifacts.stage(
+                            fileName,
+                            input,
+                            declaredLength,
+                            stagingKey = stagingKey,
+                        )
                     }
                 }
             } catch (error: ApkArtifactTooLargeException) {
@@ -364,6 +378,27 @@ fun Application.relayModule(
                     "{\"error\":\"invalid_apk_artifact\"}",
                     ContentType.Application.Json,
                     HttpStatusCode.BadRequest,
+                )
+                return@post
+            } catch (error: ApkStagingConflictException) {
+                call.respondText(
+                    "{\"error\":\"apk_staging_conflict\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.Conflict,
+                )
+                return@post
+            } catch (error: ApkStagingExpiredException) {
+                call.respondText(
+                    "{\"error\":\"apk_staging_expired\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.Conflict,
+                )
+                return@post
+            } catch (error: ApkStagingBusyException) {
+                call.respondText(
+                    "{\"error\":\"apk_staging_busy\"}",
+                    ContentType.Application.Json,
+                    HttpStatusCode.ServiceUnavailable,
                 )
                 return@post
             }
@@ -689,6 +724,7 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
 }
 
 private const val APK_NAME_HEADER = "X-Hermes-Apk-Name"
+private const val APK_STAGING_KEY_HEADER = "X-Hermes-Apk-Staging-Key"
 private const val MAX_IDEMPOTENCY_KEY_LENGTH = 128
 private val DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9-]{1,80}$")
 private val IDEMPOTENCY_KEY_REGEX = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")

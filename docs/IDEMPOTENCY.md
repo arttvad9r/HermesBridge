@@ -26,20 +26,29 @@ While a keyed command is pending in the relay:
 
 After a relay-side timeout the pending correlation entry is removed. A caller may retry the exact same keyed command; if the original command is still in flight on Android, the Android replay guard coalesces it, and if Android already retained a terminal result, that retained result is returned. This is why the same key must never be reused for a different action.
 
-The Hermes MCP adapter exposes optional `idempotency_key` parameters for the current stable-argument mutating tools:
+The Hermes MCP adapter exposes optional `idempotency_key` parameters for the current mutating tools:
 
 - `force_stop_app`;
 - `uninstall_app`;
 - `revoke_app_permission`;
-- `delete_path`.
+- `delete_path`;
+- `install_apk`.
 
 For retry-safe use, the caller chooses the key before the first invocation and reuses the exact same key with the exact same normalized action arguments after `approval_required` and after a lost/unknown MCP or HTTP response. Calls that omit the key retain the legacy fresh-request behavior and are not safe retries of an unknown mutation outcome.
 
-## APK install is not yet retry-safe through MCP
+## APK install staging correlation
 
-`install_apk` is intentionally excluded from the first end-to-end idempotency-key contract. The MCP adapter stages the APK on every invocation, and staging produces a new `artifactId` and `downloadToken`. Those values are part of the protocol arguments, so reusing an old request ID with a newly staged artifact correctly fails Android replay validation with `request_id_conflict`.
+`apps.install` has raw protocol arguments that include a relay-created `artifactId` and `downloadToken`. Command-key reuse is therefore safe only when an exact retry gets the exact same staged descriptor. Those artifact credentials remain part of Android's replay fingerprint.
 
-Making install retry-safe requires separately reviewed staging correlation that reuses the exact verified staged artifact, or an equivalent design that keeps the protocol arguments stable across retries. Until then, an unknown MCP/HTTP install outcome must not be retried automatically.
+For a keyed `install_apk`, the MCP adapter first validates the caller's install `idempotency_key`, then derives a staging identity as SHA-256 of `(device_id, idempotency_key)`. The derived value is sent only to the relay staging endpoint as `X-Hermes-Apk-Staging-Key`; the original caller key remains the Android protocol `requestId`. Device scoping means the same caller key used independently for two phones does not collide in the staging table.
+
+The relay reads and hashes every uploaded APK before deciding whether a keyed stage is an exact retry. The first use of one staging identity is bound to the relay-verified tuple `(sanitized file name, byte length, SHA-256)` and to one staged descriptor. Re-uploading the same verified content with that same staging identity while its artifact is still live returns the identical `artifactId`, `downloadToken`, size, hash and expiry without extending the expiry. Reusing the staging identity with a changed file name, length or bytes fails closed with HTTP 409 `apk_staging_conflict` before any Android command is dispatched.
+
+Unkeyed staging deliberately remains fresh. Uploading the same APK again without an install idempotency key creates a new descriptor, so a genuinely new install attempt does not accidentally inherit the remaining lifetime of an older staged artifact.
+
+A keyed staging identity is retained in bounded process memory. If its artifact expires, the old binding is kept long enough to make reuse fail explicitly with HTTP 409 `apk_staging_expired` rather than silently creating new raw command arguments under the old install identity. The caller must choose a new install idempotency key for a genuinely new attempt after that boundary. The relay also bounds retained staging identities; if all retained slots still refer to live artifacts, a new keyed stage fails closed with `apk_staging_busy` instead of evicting a live retry identity.
+
+A relay restart loses both staged-artifact metadata and staging bindings. The install retry contract therefore does not survive relay process loss. It also does not claim durable exactly-once semantics across Android process death.
 
 ## Request IDs and approvals are separate identities
 
@@ -56,8 +65,8 @@ Changing only the request ID still creates a distinct replay-guard entry, and it
 
 The Android replay table is deliberately in-memory and bounded to 200 request IDs. After Android process death the bridge cannot prove whether a previous mutation completed, and the replay table no longer contains its terminal result. Approval state is also process-local and is cleared with the process.
 
-Relay in-flight correlation is also process-local. A relay restart loses its pending waiter table, although a subsequent retry using the same key can still benefit from Android replay protection if the Android process and replay entry survived.
+Relay command in-flight correlation and keyed APK staging correlation are also process-local and bounded. A relay restart loses those tables. A subsequent stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, but install cannot reconstruct the old artifact descriptor after relay restart and must surface that retry boundary rather than restage under the old identity.
 
-Therefore the current idempotency key provides safe retry across lost MCP/HTTP responses only while the Android replay identity still exists. It does not provide durable exactly-once semantics across Android process death. A persistent operation journal would be required for that stronger guarantee.
+Therefore the current idempotency key provides safe retry across lost MCP/HTTP responses only while the required replay identity and, for install, its exact keyed staged descriptor still exist. It does not provide durable exactly-once semantics across Android process death or relay restart. A persistent operation journal and persistent staging correlation would be required for that stronger guarantee.
 
-If the outcome is unknown after Android process death, callers must surface the ambiguity rather than blindly repeating the mutation.
+If the outcome is unknown after those boundaries are lost, callers must surface the ambiguity rather than blindly repeating the mutation.
