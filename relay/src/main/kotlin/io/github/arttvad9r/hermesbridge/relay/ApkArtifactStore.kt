@@ -2,6 +2,7 @@ package io.github.arttvad9r.hermesbridge.relay
 
 import java.io.InputStream
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
@@ -63,6 +64,7 @@ class ApkArtifactStore(
 
     init {
         Files.createDirectories(root)
+        cleanupOrphansAtStartup()
     }
 
     fun stage(
@@ -202,6 +204,20 @@ class ApkArtifactStore(
         }
     }
 
+    private fun cleanupOrphansAtStartup() {
+        Files.newDirectoryStream(root).use { entries ->
+            for (path in entries) {
+                val fileName = path.fileName.toString()
+                if (!isStoreOwnedFileName(fileName)) continue
+                if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) continue
+                Files.deleteIfExists(path)
+            }
+        }
+    }
+
+    private fun isStoreOwnedFileName(fileName: String): Boolean =
+        ARTIFACT_FILE_REGEX.matches(fileName) || TEMP_UPLOAD_FILE_REGEX.matches(fileName)
+
     private fun makeRoomForStagingBindingLocked(): Boolean {
         if (stagingBindings.size < MAX_STAGING_BINDINGS) return true
         val removable = stagingBindings.entries.firstOrNull { entry ->
@@ -240,5 +256,9 @@ class ApkArtifactStore(
         private const val DEFAULT_TTL_MILLIS = 10L * 60L * 1000L
         private const val MAX_TTL_MILLIS = 60L * 60L * 1000L
         private const val MAX_STAGING_BINDINGS = 200
+        private val ARTIFACT_FILE_REGEX = Regex(
+            "^apk_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\.apk$"
+        )
+        private val TEMP_UPLOAD_FILE_REGEX = Regex("^\\.upload-.+\\.tmp$")
     }
 }

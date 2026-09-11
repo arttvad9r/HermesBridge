@@ -13,6 +13,41 @@ import org.junit.Test
 
 class ApkArtifactStoreTest {
     @Test
+    fun startupCleanupRemovesOnlyStoreOwnedOrphans() {
+        val directory = Files.createTempDirectory("hermes-bridge-apk-orphans")
+        val orphanArtifact = directory.resolve(
+            "apk_123e4567-e89b-12d3-a456-426614174000.apk"
+        )
+        val orphanUpload = directory.resolve(".upload-abandoned.tmp")
+        val unrelatedApk = directory.resolve("apk_notes.apk")
+        val sentinel = directory.resolve("keep.txt")
+        val matchingDirectory = directory.resolve(
+            "apk_223e4567-e89b-12d3-a456-426614174000.apk"
+        )
+        Files.write(orphanArtifact, byteArrayOf(1, 2, 3))
+        Files.write(orphanUpload, byteArrayOf(4, 5, 6))
+        Files.write(unrelatedApk, byteArrayOf(7))
+        Files.write(sentinel, byteArrayOf(8))
+        Files.createDirectory(matchingDirectory)
+
+        val store = ApkArtifactStore(directory)
+
+        assertFalse(Files.exists(orphanArtifact))
+        assertFalse(Files.exists(orphanUpload))
+        assertTrue(Files.exists(unrelatedApk))
+        assertTrue(Files.exists(sentinel))
+        assertTrue(Files.isDirectory(matchingDirectory))
+
+        val bytes = "new apk after cleanup".toByteArray()
+        val staged = store.stage(
+            fileName = "example.apk",
+            input = ByteArrayInputStream(bytes),
+            declaredLength = bytes.size.toLong(),
+        )
+        assertNotNull(store.findAuthorized(staged.artifactId, staged.downloadToken))
+    }
+
+    @Test
     fun stageComputesDigestAndRequiresExactDownloadToken() {
         val directory = Files.createTempDirectory("hermes-bridge-apk-store")
         val store = ApkArtifactStore(directory)
