@@ -111,7 +111,7 @@ object BridgeAuditRuntime {
                 type = AuditEventType.APPROVAL,
                 tool = safeTool,
                 outcome = sanitizeAuditText(outcome, MAX_OUTCOME_LENGTH),
-                summary = if (safeTool == UNKNOWN_TOOL) {
+                summary = if (safeTool == UNKNOWN_TOOL || safeTool == APPS_INSTALL_AUDIT_TOOL) {
                     null
                 } else {
                     sanitizeAuditText(ticket.displaySummary, MAX_SUMMARY_LENGTH)
@@ -180,6 +180,7 @@ internal fun sanitizeAuditText(value: String, maxLength: Int): String {
 
 internal const val MAX_AUDIT_ENTRIES = 200
 internal const val UNKNOWN_TOOL = "unknown_tool"
+private const val APPS_INSTALL_AUDIT_TOOL = "apps.install"
 
 private val AUDIT_ERROR_CODE_REGEX = Regex("^[a-z0-9_]{1,64}$")
 private val AUDITED_TOOL_NAMES = setOf(
@@ -193,7 +194,7 @@ private val AUDITED_TOOL_NAMES = setOf(
     "files.list",
     "files.analyze",
     "files.delete",
-    "apps.install",
+    APPS_INSTALL_AUDIT_TOOL,
     "apps.uninstall",
     "apps.forceStop",
 )
