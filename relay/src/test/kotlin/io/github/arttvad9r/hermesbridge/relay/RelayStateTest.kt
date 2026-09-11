@@ -46,6 +46,24 @@ class RelayStateTest {
     }
 
     @Test
+    fun preparedPairingIsNotTrustedOrPersistedUntilCommitted() {
+        val directory = Files.createTempDirectory("hermes-bridge-provisional-state")
+        val store = directory.resolve("devices.json")
+        val keyPair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+        val registry = DeviceRegistry(store)
+
+        val prepared = registry.prepareRegistration(keyPair.public, "Pending phone")
+
+        assertNull(registry.find(prepared.deviceId))
+        assertTrue(registry.list().isEmpty())
+        assertTrue(DeviceRegistry(store).list().isEmpty())
+
+        registry.commitRegistration(prepared)
+        assertNotNull(registry.find(prepared.deviceId))
+        assertNotNull(DeviceRegistry(store).find(prepared.deviceId))
+    }
+
+    @Test
     fun registeredDeviceSurvivesRegistryRestart() {
         val directory = Files.createTempDirectory("hermes-bridge-relay-test")
         val store = directory.resolve("devices.json")
