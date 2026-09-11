@@ -21,7 +21,13 @@ class ForceStopApprovalBindingTest {
         val backend = RecordingBackend()
         val registry = BridgeToolRegistry(
             healthRepository = object : DeviceHealthRepository {
-                override fun snapshot() = DeviceHealthSnapshot(null, 0L, 0L, 0L, 0L)
+                override fun snapshot() = DeviceHealthSnapshot(
+                    batteryPercent = 73,
+                    availableMemoryBytes = 10L,
+                    totalMemoryBytes = 20L,
+                    availableStorageBytes = 30L,
+                    totalStorageBytes = 40L,
+                )
             },
             appsRepository = object : InstalledAppsRepository {
                 override fun listLaunchableApps() = emptyList<InstalledAppSnapshot>()
