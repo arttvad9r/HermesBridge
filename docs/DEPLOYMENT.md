@@ -18,7 +18,7 @@ Local VPS only:
 - `POST /api/v1/devices/{deviceId}/commands`
 - `POST /api/v1/devices/{deviceId}/revoke` — emergency/admin revocation of one paired device
 
-Do not publish TCP/8080 directly to the internet. Terminate TLS at Caddy/Nginx and firewall the relay port. In particular, never proxy `/api/v1/*` from the public internet.
+The production relay binds its HTTP/WebSocket listener to `127.0.0.1` by construction. Caddy/Nginx on the same host is therefore the only intended public ingress. Keep TCP/8080 blocked at the VPS firewall as defense in depth, and do not modify the relay to listen on a public interface. In particular, never proxy `/api/v1/*` from the public internet.
 
 The Android app also supports authenticated **self-revocation** over its existing WebSocket session. That protocol message can revoke only the currently authenticated phone and does not require or expose the relay admin token to Android.
 
@@ -62,6 +62,8 @@ HERMES_BRIDGE_STATE_DIR=/var/lib/hermes-bridge
 PORT=8080
 ```
 
+`PORT` selects the loopback listener port; it does not make the relay listen on external interfaces.
+
 Then protect the file:
 
 ```bash
@@ -85,6 +87,8 @@ Local health check:
 ```bash
 curl --fail http://127.0.0.1:8080/health
 ```
+
+As a deployment check, verify that the listener is loopback-only (for example with `ss -ltnp`) and still keep the host firewall closed to TCP/8080.
 
 ## 4. TLS reverse proxy
 
@@ -192,7 +196,7 @@ See [HERMES_MCP.md](HERMES_MCP.md) for the current typed tool surface and Hermes
 After the first successful pairing:
 
 1. Android keeps the private EC key in Android Keystore and stores its `deviceId` locally.
-2. The relay persists the corresponding public key and device metadata.
+2. The relay persists the corresponding public key and device metadata only for a pairing that reaches authenticated trust; a newly registered pairing that disconnects before authentication is rolled back.
 3. The Android foreground service reconnects automatically when the socket drops.
 4. After a normal reboot, `BOOT_COMPLETED` starts the bridge again for an already paired device.
 5. Restarting the relay does not require pairing again as long as its state directory is preserved.
@@ -225,5 +229,5 @@ Device pairing revocation is not an MCP tool. It is controlled by the Android UI
 - Shizuku must be running and Hermes Bridge must be authorized before privileged package actions and Shizuku-backed Batterystats diagnostics can execute.
 - Usage Access must be granted manually in Android before `apps.usage` can execute.
 - Privileged actions are implemented but still require physical-device end-to-end validation before they should be treated as production-ready.
-- The admin API is bearer-token authenticated but has no multi-user authorization model; keep it loopback-only.
+- The admin API is bearer-token authenticated but has no multi-user authorization model; keep it loopback-only and expose only the allowlisted public reverse-proxy paths.
 - A physical-device end-to-end test over real mobile/Wi-Fi network transitions is still required before treating the bridge as production-ready.
