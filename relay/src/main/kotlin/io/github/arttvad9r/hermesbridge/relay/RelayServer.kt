@@ -45,7 +45,11 @@ import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
@@ -87,6 +91,7 @@ private class DeviceSessionHub {
 
     private val sessions = ConcurrentHashMap<String, DefaultWebSocketServerSession>()
     private val pending = ConcurrentHashMap<String, PendingCommand>()
+    private val commandScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     suspend fun register(deviceId: String, session: DefaultWebSocketServerSession) {
         val old = sessions.put(deviceId, session)
@@ -146,29 +151,52 @@ private class DeviceSessionHub {
                     ),
                 )
             }
-            return withTimeout(commandTimeoutMillis(request.tool)) { existing.deferred.await() }
+            return existing.deferred.await()
         }
 
-        try {
-            val payload = CommandRequestPayload(
-                tool = request.tool,
-                requestId = requestId,
-                arguments = request.arguments,
-            )
-            val envelope = BridgeProtocol.envelope(
-                type = MessageType.COMMAND_REQUEST,
-                deviceId = deviceId,
-                payload = BridgeProtocol.payload(payload),
-            )
-            session.send(Frame.Text(BridgeProtocol.encode(envelope)))
-            return withTimeout(commandTimeoutMillis(request.tool)) { command.deferred.await() }
-        } finally {
-            pending.remove(pendingKey, command)
+        val payload = CommandRequestPayload(
+            tool = request.tool,
+            requestId = requestId,
+            arguments = request.arguments,
+        )
+        val envelope = BridgeProtocol.envelope(
+            type = MessageType.COMMAND_REQUEST,
+            deviceId = deviceId,
+            payload = BridgeProtocol.payload(payload),
+        )
+        commandScope.launch {
+            try {
+                withTimeout(commandTimeoutMillis(request.tool)) {
+                    session.send(Frame.Text(BridgeProtocol.encode(envelope)))
+                    command.deferred.await()
+                }
+            } catch (_: TimeoutCancellationException) {
+                val timeoutResult = CommandResultPayload(
+                    requestId = requestId,
+                    ok = false,
+                    error = ProtocolError(
+                        "command_timeout",
+                        "Device did not return a result in time.",
+                    ),
+                )
+                if (command.deferred.complete(timeoutResult)) {
+                    pending.remove(pendingKey, command)
+                }
+            } catch (error: Throwable) {
+                if (command.deferred.completeExceptionally(error)) {
+                    pending.remove(pendingKey, command)
+                }
+            }
         }
+        return command.deferred.await()
     }
 
     fun complete(deviceId: String, result: CommandResultPayload) {
-        pending[pendingKey(deviceId, result.requestId)]?.deferred?.complete(result)
+        val key = pendingKey(deviceId, result.requestId)
+        val command = pending[key] ?: return
+        if (command.deferred.complete(result)) {
+            pending.remove(key, command)
+        }
     }
 
     private fun pendingKey(deviceId: String, requestId: String): String = "$deviceId\n$requestId"
