@@ -27,6 +27,7 @@ import io.ktor.websocket.send
 import java.io.IOException
 import kotlin.math.min
 import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -111,10 +112,15 @@ class RelayAgentTransport(
         return startConnection(null)
     }
 
-    override suspend fun disconnect(): Result<Unit> = runCatching {
+    override suspend fun disconnect(): Result<Unit> = try {
         connectionJob?.cancelAndJoin()
         connectionJob = null
         mutableConnectionState.value = ConnectionState.DISCONNECTED
+        Result.success(Unit)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        Result.failure(error)
     }
 
     suspend fun revokePairing(): Result<Unit> {
@@ -145,6 +151,8 @@ class RelayAgentTransport(
             )
             withTimeout(REVOKE_TIMEOUT_MILLIS) { ack.await().getOrThrow() }
             Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Throwable) {
             Result.failure(error)
         } finally {
@@ -173,10 +181,14 @@ class RelayAgentTransport(
             connectionLoop(pairingCode, ready)
         }
 
-        return runCatching {
+        return try {
             withTimeout(20_000L) { ready.await().getOrThrow() }
-        }.onFailure {
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
             mutableConnectionState.value = ConnectionState.ERROR
+            Result.failure(error)
         }
     }
 
@@ -191,6 +203,8 @@ class RelayAgentTransport(
             var sessionFailure: Throwable? = null
             val authenticated = try {
                 runSession(pairingCode, ready)
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Throwable) {
                 if (
                     error is DeviceIdentityUnavailableException &&
