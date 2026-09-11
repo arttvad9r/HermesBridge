@@ -2,12 +2,25 @@ package io.github.arttvad9r.hermesbridge
 
 import io.github.arttvad9r.hermesbridge.protocol.CommandResultPayload
 import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AuditLogTest {
+    @Test
+    fun auditLogEntriesRoundTripThroughSerialization() {
+        val original = listOf(entry(7))
+
+        val encoded = Json.encodeToString(original)
+        val decoded = Json.decodeFromString<List<AuditLogEntry>>(encoded)
+
+        assertEquals(original, decoded)
+    }
+
     @Test
     fun boundedHistoryKeepsNewestTwoHundredEntries() {
         var entries = emptyList<AuditLogEntry>()
