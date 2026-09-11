@@ -13,6 +13,7 @@ class BridgeApprovalRuntimeTest {
     @After
     fun tearDown() {
         BridgeApprovalRuntime.clear()
+        BridgeAuditRuntime.clear()
     }
 
     @Test
@@ -98,6 +99,27 @@ class BridgeApprovalRuntimeTest {
         BridgeApprovalRuntime.deny(denied.id)
 
         assertNull(BridgeApprovalRuntime.takeRemoteNotification())
+    }
+
+    @Test
+    fun `repeated local decision is rejected and not audited twice`() {
+        BridgeAuditRuntime.clear()
+        val ticket = BridgeApprovalRuntime.request(
+            tool = "apps.forceStop",
+            risk = ToolRisk.PRIVILEGED,
+            arguments = buildJsonObject { put("packageName", "com.example.once") },
+            displaySummary = "Force-stop once",
+        )
+
+        assertEquals(ticket.id, BridgeApprovalRuntime.approve(ticket.id)?.id)
+        assertNull(BridgeApprovalRuntime.approve(ticket.id))
+        assertNull(BridgeApprovalRuntime.deny(ticket.id))
+
+        val decisionEntries = BridgeAuditRuntime.entries.value.filter {
+            it.type == AuditEventType.APPROVAL && it.tool == "apps.forceStop"
+        }
+        assertEquals(1, decisionEntries.size)
+        assertEquals(BridgeAuditRuntime.APPROVAL_APPROVED, decisionEntries.single().outcome)
     }
 
     @Test
