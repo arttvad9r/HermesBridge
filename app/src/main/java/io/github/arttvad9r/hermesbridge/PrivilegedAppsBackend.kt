@@ -142,15 +142,13 @@ class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {
         }
 }
 
-internal fun buildPmInstallCommand(sizeBytes: Long, replace: Boolean): Array<String> {
-    require(sizeBytes in 1..MAX_APK_ARTIFACT_BYTES) { "Invalid APK size." }
+internal fun buildPmInstallCommand(stagedApkPath: String, replace: Boolean): Array<String> {
+    require(isShizukuApkStagingPath(stagedApkPath)) { "Invalid staged APK path." }
     return buildList {
         add("pm")
         add("install")
         if (replace) add("-r")
-        add("-S")
-        add(sizeBytes.toString())
-        add("-")
+        add(stagedApkPath)
     }.toTypedArray()
 }
 
