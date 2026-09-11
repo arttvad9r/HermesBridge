@@ -39,7 +39,7 @@ object BridgeApprovalRuntime {
         val result = manager.approve(id)
         if (result != null) {
             dropRemoteNotification(result.id)
-            BridgeAuditRuntime.recordApproval(result, BridgeAuditRuntime.APPROVAL_APPROVED)
+            recordApprovalBestEffort(result, BridgeAuditRuntime.APPROVAL_APPROVED)
         }
         publish()
         return result
@@ -49,7 +49,7 @@ object BridgeApprovalRuntime {
         val result = manager.deny(id)
         if (result != null) {
             dropRemoteNotification(result.id)
-            BridgeAuditRuntime.recordApproval(result, BridgeAuditRuntime.APPROVAL_DENIED)
+            recordApprovalBestEffort(result, BridgeAuditRuntime.APPROVAL_DENIED)
         }
         publish()
         return result
@@ -74,6 +74,15 @@ object BridgeApprovalRuntime {
         manager.clear()
         synchronized(remoteNotificationLock) { remoteNotifications.clear() }
         publish()
+    }
+
+    private fun recordApprovalBestEffort(ticket: ApprovalTicket, outcome: String) {
+        try {
+            BridgeAuditRuntime.recordApproval(ticket, outcome)
+        } catch (_: Exception) {
+            // The local decision has already been committed to ApprovalManager. Audit persistence
+            // must never make the UI report a failed decision or re-open an already resolved ticket.
+        }
     }
 
     private fun enqueueRemoteNotification(ticket: ApprovalTicket) {
