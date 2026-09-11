@@ -20,8 +20,9 @@ import kotlin.coroutines.resumeWithException
 /**
  * App-side binding for the internal P2 UI-control prototype.
  *
- * Nothing in BridgeCommandRouter or the Hermes MCP adapter calls this object. A future explicit
- * UI-control session owns the lifecycle and must call [release] when local consent is revoked.
+ * Nothing in BridgeCommandRouter or the Hermes MCP adapter calls this object. Every typed action is
+ * fail-closed behind a short-lived generation-bound [UiControlSessionRuntime] lease, and local
+ * session revocation destroys the dedicated Shizuku UserService binding.
  */
 internal object ShizukuUiControlPrototype {
     private val bindMutex = Mutex()
@@ -80,7 +81,9 @@ internal object ShizukuUiControlPrototype {
                 message = "UI tap coordinates are outside the supported primary-display range.",
             )
         }
-        return invokeOnce { service ->
+        val sessionLease = UiControlSessionRuntime.acquireLease()
+            ?: return inactiveSessionResult()
+        return invokeOnce(sessionLease) { service ->
             service.tapPrimaryDisplay(x, y).toOperationResult()
         }
     }
@@ -111,7 +114,9 @@ internal object ShizukuUiControlPrototype {
                 message = "UI swipe duration is outside the supported range.",
             )
         }
-        return invokeOnce { service ->
+        val sessionLease = UiControlSessionRuntime.acquireLease()
+            ?: return inactiveSessionResult()
+        return invokeOnce(sessionLease) { service ->
             service.swipePrimaryDisplay(
                 startX,
                 startY,
@@ -137,8 +142,13 @@ internal object ShizukuUiControlPrototype {
     }
 
     private suspend fun invokeOnce(
+        sessionLease: UiControlSessionLease,
         block: (IUiControlPrototypeService) -> PrivilegedOperationResult,
     ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
+        if (!UiControlSessionRuntime.isLeaseActive(sessionLease)) {
+            return@withContext inactiveSessionResult()
+        }
+
         val ready = readiness()
         if (!ready.ready) {
             return@withContext PrivilegedOperationResult(
@@ -149,13 +159,23 @@ internal object ShizukuUiControlPrototype {
         }
 
         try {
-            block(service())
+            val resolvedService = service()
+            // Binding can take seconds. Re-check the exact session generation immediately before
+            // dispatch so a local Stop/expiry during bind cannot authorize a late UI action.
+            if (!UiControlSessionRuntime.isLeaseActive(sessionLease)) {
+                release()
+                return@withContext inactiveSessionResult()
+            }
+            block(resolvedService)
         } catch (error: CancellationException) {
-            // A canceled future UI-control session must not leave its privileged UserService alive.
+            // A canceled UI-control operation must not leave its privileged UserService alive.
             release()
             throw error
         } catch (error: Throwable) {
             release()
+            if (!UiControlSessionRuntime.isLeaseActive(sessionLease)) {
+                return@withContext inactiveSessionResult()
+            }
             PrivilegedOperationResult(
                 ok = false,
                 code = "shizuku_ui_control_failed",
@@ -244,6 +264,12 @@ internal object ShizukuUiControlPrototype {
             }
         }
     }
+
+    private fun inactiveSessionResult(): PrivilegedOperationResult = PrivilegedOperationResult(
+        ok = false,
+        code = UI_CONTROL_SESSION_REQUIRED_CODE,
+        message = "A short-lived local UI-control session is required for this action.",
+    )
 
     private fun Bundle.toOperationResult(): PrivilegedOperationResult =
         PrivilegedOperationResult(
