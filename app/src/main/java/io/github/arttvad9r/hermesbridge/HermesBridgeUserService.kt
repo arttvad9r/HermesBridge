@@ -18,6 +18,12 @@ import kotlin.system.exitProcess
  * point exists across the process boundary.
  */
 class HermesBridgeUserService() : IPrivilegedBridgeService.Stub() {
+    init {
+        // Normal install attempts remove their staged APK in `finally`. A process kill cannot run
+        // that cleanup, so a fresh UserService best-effort removes only our generated leftovers.
+        runCatching { cleanupOrphanedShizukuApkStagingFiles() }
+    }
+
     override fun destroy() {
         exitProcess(0)
     }
