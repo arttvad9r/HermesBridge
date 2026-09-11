@@ -19,6 +19,7 @@ PERMISSION_NAME_RE = PACKAGE_NAME_RE
 ARTIFACT_ID_RE = re.compile(r"^apk_[0-9a-fA-F-]{36}$")
 ARTIFACT_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 DEFAULT_RELAY_URL = "http://127.0.0.1:8080"
 DEFAULT_APK_DIR = "/opt/HermesBridge/apks"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
@@ -121,19 +122,38 @@ def _device_command(
     arguments: dict[str, Any] | None = None,
     *,
     timeout: int = 15,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     if not DEVICE_ID_RE.fullmatch(device_id):
         raise ValueError("device_id has an invalid format.")
 
+    payload: dict[str, Any] = {"tool": tool, "arguments": arguments or {}}
+    if idempotency_key is not None:
+        payload["idempotencyKey"] = _validate_idempotency_key(idempotency_key)
+
     result = _request_json(
         "POST",
         f"/api/v1/devices/{quote(device_id, safe='')}/commands",
-        {"tool": tool, "arguments": arguments or {}},
+        payload,
         timeout=timeout,
     )
     if not isinstance(result, dict):
         raise RuntimeError("Relay returned an invalid command response.")
     return result
+
+
+def _validate_idempotency_key(idempotency_key: str) -> str:
+    if not isinstance(idempotency_key, str):
+        raise ValueError("idempotency_key must be a string.")
+    if not IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
+        raise ValueError("idempotency_key has an invalid format.")
+    return idempotency_key
+
+
+def _idempotency_kwargs(idempotency_key: str | None) -> dict[str, str]:
+    if idempotency_key is None:
+        return {}
+    return {"idempotency_key": idempotency_key}
 
 
 def _validate_path_segments(path_segments: list[str]) -> None:
@@ -257,7 +277,7 @@ def list_devices() -> list[dict[str, Any]]:
 
 @mcp.tool()
 def pending_approvals(device_id: str) -> list[dict[str, Any]]:
-    """List short-lived approval notifications created by the phone. This never approves or executes an operation."""
+    """List short-lived approval notifications created by the phone. This never approves or denies anything."""
     if not DEVICE_ID_RE.fullmatch(device_id):
         raise ValueError("device_id has an invalid format.")
     result = _request_json(
@@ -332,8 +352,10 @@ def revoke_app_permission(
     device_id: str,
     package_name: str,
     permission_name: str,
+    *,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Request revocation of one currently granted Android dangerous runtime permission from one launcher-visible app. The phone requires exact local approval."""
+    """Request revocation of one granted dangerous permission. Supply and reuse idempotency_key for an exact approval retry or unknown response outcome."""
     package = _validate_package_name(package_name)
     permission = _validate_permission_name(permission_name)
     return _device_command(
@@ -344,6 +366,7 @@ def revoke_app_permission(
             "permissionName": permission,
         },
         timeout=75,
+        **_idempotency_kwargs(idempotency_key),
     )
 
 
@@ -379,8 +402,13 @@ def analyze_files(
 
 
 @mcp.tool()
-def delete_path(device_id: str, path_segments: list[str]) -> dict[str, Any]:
-    """Request deletion of one file or directory inside the granted SAF tree. The phone requires explicit local approval."""
+def delete_path(
+    device_id: str,
+    path_segments: list[str],
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Request deletion inside the granted SAF tree. Supply and reuse idempotency_key for an exact approval retry or unknown response outcome."""
     segments = list(path_segments)
     _validate_path_segments(segments)
     if not segments:
@@ -389,6 +417,7 @@ def delete_path(device_id: str, path_segments: list[str]) -> dict[str, Any]:
         device_id,
         "files.delete",
         {"pathSegments": segments},
+        **_idempotency_kwargs(idempotency_key),
     )
 
 
@@ -398,7 +427,7 @@ def install_apk(
     apk_name: str,
     replace: bool = True,
 ) -> dict[str, Any]:
-    """Stage one APK from HERMES_BRIDGE_APK_DIR and request installation. The phone verifies the APK and requires explicit local approval."""
+    """Stage one APK and request installation. This operation is not retry-safe after an unknown MCP/HTTP outcome because each invocation creates a new staged artifact."""
     if not isinstance(replace, bool):
         raise ValueError("replace must be a boolean.")
     staged = _stage_apk(apk_name)
@@ -422,8 +451,10 @@ def uninstall_app(
     device_id: str,
     package_name: str,
     keep_data: bool = False,
+    *,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Request uninstall of one Android package. The phone requires explicit local approval before execution."""
+    """Request uninstall of one package. Supply and reuse idempotency_key for an exact approval retry or unknown response outcome."""
     package = _validate_package_name(package_name)
     if not isinstance(keep_data, bool):
         raise ValueError("keep_data must be a boolean.")
@@ -434,17 +465,24 @@ def uninstall_app(
             "packageName": package,
             "keepData": keep_data,
         },
+        **_idempotency_kwargs(idempotency_key),
     )
 
 
 @mcp.tool()
-def force_stop_app(device_id: str, package_name: str) -> dict[str, Any]:
-    """Request a privileged force-stop of one Android package. The phone requires explicit local approval."""
+def force_stop_app(
+    device_id: str,
+    package_name: str,
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Request a privileged force-stop. Supply and reuse idempotency_key for an exact approval retry or unknown response outcome."""
     package = _validate_package_name(package_name)
     return _device_command(
         device_id,
         "apps.forceStop",
         {"packageName": package},
+        **_idempotency_kwargs(idempotency_key),
     )
 
 
