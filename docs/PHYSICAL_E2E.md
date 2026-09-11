@@ -6,11 +6,11 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
 
 ## Test rules
 
-- Prefer the repository-owned disposable `e2e-fixture` APK for install/uninstall/force-stop/revoke checks. Build/use instructions and its deliberately narrow permission surface are documented in `E2E_FIXTURE.md`.
-- Do not use a banking, authenticator, launcher, messaging or other important app as a mutation target.
+- Prefer the repository-owned disposable `e2e-fixture` APK for install/uninstall/force-stop/revoke and typed tap/swipe checks. Build/use instructions and its deliberately narrow permission/input surface are documented in `E2E_FIXTURE.md`.
+- Do not use a banking, authenticator, launcher, messaging or other important app as a mutation or UI-control target.
 - Use a disposable folder for SAF deletion checks.
 - Do not expose relay port `8080` publicly; Hermes/admin traffic stays loopback-only.
-- Do not disable the Android-side approval policy for the test.
+- Do not disable the Android-side approval or UI-control session policy for the test.
 - Record failures and exact Android/OxygenOS version before changing battery/background settings.
 
 ## 1. VPS and public TLS
@@ -108,19 +108,40 @@ Exercise:
 
 Do not use Hermes Bridge's own package as the target; self-protection should reject those attempts before mutation.
 
-## 6. Reboot behavior
+## 6. Typed UI-control physical smoke (debug only)
+
+This section validates the internal Shizuku tap/swipe prototype, local session gate and revocation behavior without exposing a remote UI-control tool.
+
+1. Install the current Hermes Bridge **debug** APK and the repository `e2e-fixture` APK.
+2. Pair Hermes Bridge normally and bring Shizuku to `READY`.
+3. Open the fixture, tap `Reset gesture targets`, and use Android Developer Options **Pointer location** or an ADB/UIAutomator hierarchy dump to determine coordinates inside `hermes_fixture_tap_target` and the left/right interior of `hermes_fixture_swipe_target`. Do not copy coordinates from another device.
+4. From the visible Hermes Bridge foreground notification, open the local UI-control session screen and select `Включить на 5 минут`.
+5. Open the debug-only `Hermes UI Smoke` launcher. It must show `Session: ACTIVE` and Shizuku `READY`; it must not offer a way to create a session itself.
+6. Enter the center coordinates of `TAP TARGET` and select `Send typed tap to fixture`. The harness must bring the fixed repository fixture to the foreground before dispatch. After the 1.5-second settle interval, verify `TAP count` increases by exactly one, then press Back to the smoke harness and verify the backend result is `OK`.
+7. Enter start/end coordinates inside the seek bar, using a left-to-right path and a duration such as `500` ms. Select `Send typed swipe to fixture`; verify `SWIPE progress` increases substantially, press Back, and verify the backend result is `OK`.
+8. Stop UI control from the local session screen. Return to the smoke harness and repeat the same valid tap attempt. The harness must still execute the attempt so this tests the production gate. Expected backend result: `ui_control_session_required`; the newly opened fixture must show no tap-state change.
+9. Re-enable the session, then make Shizuku unavailable. Verify the session becomes stopped. Repeat a valid smoke attempt and verify `ui_control_session_required` with no fixture state change.
+10. Restore Shizuku and notification visibility, re-enable the session, then block the Hermes Bridge notification channel (or notification permission where applicable). Within the watchdog interval, verify the session becomes stopped; a valid smoke attempt must be rejected with `ui_control_session_required`. Restore notification visibility before continuing.
+11. Re-enable the session and let the five-minute monotonic deadline expire. A valid smoke attempt must return `ui_control_session_required` and leave fixture state unchanged.
+12. Open `История Hermes` and verify UI-control lifecycle entries show only session `started/stopped` events; coordinates, swipe duration and stop-message details must be absent.
+13. Install/inspect the release-test APK separately and verify the `Hermes UI Smoke` launcher is absent; CI also rejects any release manifest that contains `UiControlSmokeActivity`.
+
+Do not use the smoke harness against any app other than the disposable repository fixture during this gate.
+
+## 7. Reboot behavior
 
 1. With the phone paired and Shizuku configured, reboot the phone.
 2. Do not open Hermes Bridge manually immediately.
 3. Verify the base foreground bridge restores and `device_health` becomes available again.
 4. Verify privileged tools remain unavailable until Shizuku is reactivated.
 5. Verify the one-time restoration notification appears only because Shizuku had previously reached READY.
-6. Open/reactivate Shizuku from the notification/setup card.
-7. Verify a privileged test action works again after authorization is restored.
+6. Verify no MediaProjection or UI-control session is silently restored after reboot.
+7. Open/reactivate Shizuku from the notification/setup card.
+8. Verify a privileged test action works again after authorization is restored.
 
 Expected: Shizuku loss after a stock non-root reboot must not destroy the Hermes pairing or base read-only connection.
 
-## 7. Process death and service recovery
+## 8. Process death and service recovery
 
 On the test device, exercise ordinary OS process recreation (do not use Hermes to force-stop Hermes Bridge itself):
 
@@ -129,20 +150,20 @@ On the test device, exercise ordinary OS process recreation (do not use Hermes t
 - leave the phone idle;
 - move between networks.
 
-Verify the foreground bridge remains or restores according to Android/OEM policy and that the UI reflects the actual connection state when reopened.
+Verify the foreground bridge remains or restores according to Android/OEM policy and that the UI reflects the actual connection state when reopened. Also verify a local UI-control session never survives process death or silently reappears after service recreation.
 
 If OxygenOS kills the service despite the foreground-service model, record the exact battery/background policy needed and add it to the guided setup rather than silently assuming it.
 
-## 8. Audit history
+## 9. Audit history
 
 After the previous checks:
 
 1. Open `История Hermes` from the app/foreground notification.
-2. Verify command outcomes and approval decisions are present.
-3. Verify APK tokens, pairing codes, raw command arguments, file contents and raw error messages are absent.
+2. Verify command outcomes, approval decisions and UI-control session lifecycle events are present.
+3. Verify APK tokens, pairing codes, raw command arguments, file contents, UI coordinates, swipe durations and raw error/stop messages are absent.
 4. Clear history and verify it stays cleared after reopening the screen.
 
-## 9. Pairing revocation
+## 10. Pairing revocation
 
 1. Use `Отвязать телефон` in Hermes Bridge.
 2. Verify the relay removes the public-key binding and the foreground connection stops.
@@ -171,7 +192,12 @@ For each physical run, record:
 | Approval deny/retry/exact-argument behavior | pass/fail |
 | Install/uninstall/force-stop | pass/fail |
 | SAF delete | pass/fail |
-| Audit redaction | pass/fail |
+| UI session visible + five-minute expiry | pass/fail |
+| Typed fixture tap | pass/fail |
+| Typed fixture swipe | pass/fail |
+| Stop/Shizuku-loss/notification-loss rejection | pass/fail |
+| Debug smoke launcher absent from release | pass/fail |
+| Audit redaction incl. UI session | pass/fail |
 | Pairing revoke/re-pair | pass/fail |
 | Battery impact notes | |
 | Open defects | |

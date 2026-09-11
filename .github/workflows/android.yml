@@ -71,6 +71,19 @@ jobs:
       - name: Build debug APKs
         run: ./gradlew --no-daemon :app:assembleDebug :e2e-fixture:assembleDebug
 
+      - name: Verify debug UI-control smoke surface
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+
+          apkanalyzer_bin="$(command -v apkanalyzer || true)"
+          if [ -z "$apkanalyzer_bin" ]; then
+            apkanalyzer_bin="$(find "${ANDROID_HOME:?}/cmdline-tools" -type f -name apkanalyzer -perm -u+x -print -quit)"
+          fi
+          test -x "$apkanalyzer_bin"
+
+          "$apkanalyzer_bin" manifest print "$apk" | grep -Fq 'UiControlSmokeActivity'
+
       - name: Verify physical E2E fixture APK policy
         run: |
           apk=e2e-fixture/build/outputs/apk/debug/e2e-fixture-debug.apk
@@ -153,6 +166,11 @@ jobs:
               "$apk" >/dev/null
             grep -Fqx "$user_service -> $user_service:" "$mapping"
           done
+
+          if "$apkanalyzer_bin" manifest print "$apk" | grep -Fq 'UiControlSmokeActivity'; then
+            echo "Debug-only UiControlSmokeActivity leaked into the release manifest." >&2
+            exit 1
+          fi
 
       - name: Build relay distribution
         run: |
