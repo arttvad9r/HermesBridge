@@ -3,6 +3,7 @@ package io.github.arttvad9r.hermesbridge
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.Executors
@@ -33,11 +34,17 @@ class HermesBridgeUserService() : IPrivilegedBridgeService.Stub() {
             )
         }
 
-        return ParcelFileDescriptor.AutoCloseInputStream(apk).use { input ->
+        val stagedFile = File(createShizukuApkStagingPath())
+        return try {
+            ParcelFileDescriptor.AutoCloseInputStream(apk).use { input ->
+                stagedFile.outputStream().buffered().use { output ->
+                    copyExactApkBytes(input, output, sizeBytes)
+                }
+            }
+
             val command = executeFixedCommand(
-                argv = buildPmInstallCommand(sizeBytes, replace),
+                argv = buildPmInstallCommand(stagedFile.absolutePath, replace),
                 timeoutMillis = INSTALL_TIMEOUT_MILLIS,
-                stdin = input,
             )
             when {
                 command.timedOut -> failure(
@@ -51,6 +58,18 @@ class HermesBridgeUserService() : IPrivilegedBridgeService.Stub() {
                     message = command.firstOutputLine() ?: "Package manager rejected the APK installation.",
                 )
             }
+        } catch (error: ApkStagingSizeException) {
+            failure(
+                code = "invalid_apk_artifact",
+                message = error.message ?: "APK stream size did not match the verified artifact.",
+            )
+        } catch (error: Throwable) {
+            failure(
+                code = "install_failed",
+                message = safeErrorMessage(error),
+            )
+        } finally {
+            runCatching { stagedFile.delete() }
         }
     }
 
