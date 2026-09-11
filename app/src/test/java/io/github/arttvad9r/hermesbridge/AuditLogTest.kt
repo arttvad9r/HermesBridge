@@ -59,6 +59,19 @@ class AuditLogTest {
         assertNull(entry.summary)
     }
 
+    @Test
+    fun uiControlSessionAuditStoresLifecycleOnlyWithoutActionArguments() {
+        BridgeAuditRuntime.clear()
+        BridgeAuditRuntime.recordUiControlSession(BridgeAuditRuntime.UI_CONTROL_SESSION_STARTED)
+
+        val entry = BridgeAuditRuntime.entries.value.single()
+        assertEquals(AuditEventType.SESSION, entry.type)
+        assertEquals(UI_CONTROL_SESSION_AUDIT_TOOL, entry.tool)
+        assertEquals(BridgeAuditRuntime.UI_CONTROL_SESSION_STARTED, entry.outcome)
+        assertNull(entry.errorCode)
+        assertNull(entry.summary)
+    }
+
     private fun entry(index: Int) = AuditLogEntry(
         id = index.toString(),
         timestampEpochMillis = index.toLong(),

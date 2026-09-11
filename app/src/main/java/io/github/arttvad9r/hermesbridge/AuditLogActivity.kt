@@ -135,9 +135,15 @@ private fun AuditEntryCard(entry: AuditLogEntry) {
             BridgeAuditRuntime.APPROVAL_DENIED -> "Действие отклонено"
             else -> "Решение по действию"
         }
+        AuditEventType.SESSION -> when (entry.outcome) {
+            BridgeAuditRuntime.UI_CONTROL_SESSION_STARTED -> "UI-контроль включён"
+            BridgeAuditRuntime.UI_CONTROL_SESSION_STOPPED -> "UI-контроль выключен"
+            else -> "Событие UI-контроля"
+        }
     }
     val status = when {
         entry.type == AuditEventType.APPROVAL -> entry.summary ?: auditToolLabel(entry.tool)
+        entry.type == AuditEventType.SESSION -> "Локальная короткоживущая сессия"
         entry.outcome == "success" -> "Выполнено"
         entry.errorCode == "approval_required" -> "Ожидает подтверждения"
         entry.errorCode != null -> "Ошибка: ${entry.errorCode}"
@@ -185,6 +191,7 @@ private fun auditToolLabel(tool: String): String = when (tool) {
     "apps.install" -> "Установка приложения"
     "apps.uninstall" -> "Удаление приложения"
     "apps.forceStop" -> "Остановка приложения"
+    UI_CONTROL_SESSION_AUDIT_TOOL -> "Сессия UI-контроля"
     else -> tool
 }
 

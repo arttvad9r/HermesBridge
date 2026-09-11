@@ -85,9 +85,9 @@ internal fun isUiControlSessionLeaseActive(
 /**
  * Process-local authorization gate for the internal typed UI-control prototype.
  *
- * No remote command can start this session. A later local UI layer will be the only caller of
- * [startLocalSession]. Every privileged UI action must acquire a generation-bound lease here and
- * re-check it immediately before dispatching the Binder call.
+ * No remote command can start this session. Local activation is short-lived, generation-bound and
+ * recorded in the phone-only audit history without coordinates or command parameters. Every
+ * privileged UI action must acquire a lease here and re-check it immediately before Binder dispatch.
  */
 internal object UiControlSessionRuntime {
     private val mutableState = MutableStateFlow(UiControlSessionState())
@@ -110,17 +110,17 @@ internal object UiControlSessionRuntime {
             nowElapsedRealtimeMillis = nowElapsedRealtimeMillis,
             generation = generation,
         )
+        runCatching {
+            BridgeAuditRuntime.recordUiControlSession(
+                BridgeAuditRuntime.UI_CONTROL_SESSION_STARTED,
+            )
+        }
         true
     }
 
     fun stopLocalSession(message: String? = null) {
         synchronized(this) {
-            val generation = generationCounter.incrementAndGet()
-            mutableState.value = UiControlSessionState(
-                generation = generation,
-                message = message?.take(MAX_UI_CONTROL_SESSION_MESSAGE_CHARS),
-            )
-            ShizukuUiControlPrototype.release()
+            stopLocked(message)
         }
     }
 
@@ -162,12 +162,24 @@ internal object UiControlSessionRuntime {
             ) {
                 return@synchronized
             }
-            val generation = generationCounter.incrementAndGet()
-            mutableState.value = UiControlSessionState(
-                generation = generation,
-                message = "UI-control session expired.",
-            )
-            ShizukuUiControlPrototype.release()
+            stopLocked("UI-control session expired.")
+        }
+    }
+
+    private fun stopLocked(message: String?) {
+        val wasActive = mutableState.value.status == UiControlSessionStatus.ACTIVE
+        val generation = generationCounter.incrementAndGet()
+        mutableState.value = UiControlSessionState(
+            generation = generation,
+            message = message?.take(MAX_UI_CONTROL_SESSION_MESSAGE_CHARS),
+        )
+        ShizukuUiControlPrototype.release()
+        if (wasActive) {
+            runCatching {
+                BridgeAuditRuntime.recordUiControlSession(
+                    BridgeAuditRuntime.UI_CONTROL_SESSION_STOPPED,
+                )
+            }
         }
     }
 }
