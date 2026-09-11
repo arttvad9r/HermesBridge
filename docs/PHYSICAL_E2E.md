@@ -13,7 +13,7 @@ Do not mark the physical E2E roadmap items complete until these steps have been 
 - Do not disable the Android-side approval or UI-control session policy for the test.
 - Record failures and exact Android/OxygenOS version before changing battery/background settings.
 - Keep USB ADB connected throughout the run when available. Wi-Fi/mobile handover is a bridge-network test; the ADB transport should stay on USB and must not be treated as evidence that the bridge itself reconnected.
-- For a release-gate rerun, pin one exact Git commit and use Android/fixture/relay artifacts produced by the same successful CI run for that commit. Record the run number and artifact digests in the result record.
+- For a release-gate rerun, pin one exact Git commit. Use the fixture and relay artifacts produced by the successful exact-head CI run for that commit. Build the Android APK from that same commit with the real relay WSS URL, because the generic CI debug artifact intentionally uses the default `wss://bridge.invalid/ws/device` endpoint unless the workflow is explicitly configured otherwise.
 
 ## 0. Release-gate preflight
 
@@ -21,12 +21,21 @@ Before changing the phone or VPS state:
 
 1. Record the exact commit to validate and confirm the physical-run branch still points to that commit.
 2. Confirm the exact-head Android CI run completed successfully.
-3. Use only the debug APK, E2E fixture APK and relay distribution produced by that same CI run. Do not mix artifacts from older runs or another branch.
-4. Record each downloaded artifact SHA-256 (or the GitHub artifact digest when available) before installation/deployment.
-5. Confirm `adb devices -l` shows the intended physical phone in `device` state over USB. Reject `offline`, `unauthorized` and emulator targets.
-6. Start a local logcat capture before installing/restarting Hermes Bridge. Do not persist pairing codes, APK download tokens or other secrets in the result record.
+3. Download the E2E fixture APK and relay distribution from that exact CI run. Do not mix artifacts from older runs or another branch.
+4. Build the Hermes Bridge debug APK locally from the exact same commit with the real relay endpoint:
 
-Expected: the physical result is attributable to one exact source commit and one exact CI artifact set.
+   ```bash
+   ./gradlew --no-daemon \
+     -PHERMES_BRIDGE_RELAY_WS_URL=wss://YOUR_HOST/ws/device \
+     :app:assembleDebug
+   ```
+
+   Do not install the generic Actions debug artifact for the live bridge test unless its embedded endpoint has been independently confirmed to be the intended real host.
+5. Record the locally built debug APK SHA-256, the exact WSS endpoint used for the build, and the downloaded fixture/relay artifact SHA-256 or GitHub artifact digests.
+6. Confirm `adb devices -l` shows the intended physical phone in `device` state over USB. Reject `offline`, `unauthorized` and emulator targets.
+7. Start a local logcat capture before installing/restarting Hermes Bridge. Do not persist pairing codes, APK download tokens or other secrets in the result record.
+
+Expected: the physical result is attributable to one exact source commit, one exact successful CI run, one host-specific Android build from that commit, and the fixture/relay artifacts from that run.
 
 ## 1. VPS and public TLS
 
@@ -51,7 +60,7 @@ Expected: the physical result is attributable to one exact source commit and one
    ```
 
 6. Verify that `https://YOUR_HOST/api/v1/devices` is **not** publicly proxied.
-7. Build/install the Android APK configured with exactly:
+7. Install the host-specific Android APK built in preflight with exactly:
 
    ```text
    wss://YOUR_HOST/ws/device
@@ -201,7 +210,8 @@ For each physical run, record:
 | Android/OxygenOS version | |
 | Hermes Bridge commit | |
 | Exact-head CI run | |
-| Debug artifact digest | |
+| Android debug APK SHA-256 | |
+| Embedded relay WSS endpoint | |
 | Fixture artifact digest | |
 | Relay artifact digest | |
 | APK type | debug / release-test |
