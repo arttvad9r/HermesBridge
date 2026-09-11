@@ -231,6 +231,7 @@ class RelayAgentTransport(
 
             if (!ready.isCompleted) {
                 val hasStoredPairing = pairingStore.deviceId() != null
+                val hasPendingPairing = pairingStore.hasPendingDeviceId()
                 if (!hasStoredPairing) {
                     BridgeApprovalRuntime.clear()
                     mutableConnectionState.value = ConnectionState.ERROR
@@ -243,7 +244,14 @@ class RelayAgentTransport(
                     return
                 }
 
-                if (!shouldRetryInitialAuthentication(hasStoredPairing, pairingCode, sessionFailure)) {
+                if (
+                    !shouldRetryInitialAuthentication(
+                        hasStoredPairing = hasStoredPairing,
+                        pairingCode = pairingCode,
+                        failure = sessionFailure,
+                        hasPendingPairing = hasPendingPairing,
+                    )
+                ) {
                     mutableConnectionState.value = ConnectionState.ERROR
                     ready.complete(
                         Result.failure(
@@ -322,9 +330,11 @@ class RelayAgentTransport(
                             if (envelope.deviceId != payload.deviceId) {
                                 error("Relay returned inconsistent device identity.")
                             }
-                            // Do not persist a relay-side registration before proof-of-possession
-                            // authentication succeeds. A process death or failed AUTH_RESPONSE must
-                            // leave the phone locally unpaired so the next attempt can use a fresh code.
+                            // Persist the relay-assigned identity before proof-of-possession is sent.
+                            // The record remains PENDING until AUTH_OK. If this process dies after the
+                            // relay commits trust but before the acknowledgement arrives, the next
+                            // service instance can resume with the same ID and promote it to ACTIVE.
+                            pairingStore.stageDeviceId(payload.deviceId)
                             pendingPairDeviceId = payload.deviceId
                         }
 
@@ -352,10 +362,10 @@ class RelayAgentTransport(
                             if (envelope.deviceId != expectedDeviceId) {
                                 error("Relay returned authentication success for another device.")
                             }
-                            pendingPairDeviceId?.let { newDeviceId ->
-                                pairingStore.saveDeviceId(newDeviceId)
-                                pendingPairDeviceId = null
+                            if (pendingPairDeviceId != null || pairingStore.hasPendingDeviceId()) {
+                                pairingStore.confirmDeviceId(expectedDeviceId)
                             }
+                            pendingPairDeviceId = null
                             authenticated = true
                             mutableConnectionState.value = ConnectionState.CONNECTED
                             if (!ready.isCompleted) ready.complete(Result.success(Unit))
@@ -466,9 +476,10 @@ internal fun shouldRetryInitialAuthentication(
     hasStoredPairing: Boolean,
     pairingCode: String?,
     failure: Throwable?,
+    hasPendingPairing: Boolean = false,
 ): Boolean =
     hasStoredPairing &&
-        pairingCode == null &&
+        (pairingCode == null || hasPendingPairing) &&
         (failure == null || failure is IOException)
 
 internal fun nextRelayReconnectBackoffMillis(currentMillis: Long): Long {

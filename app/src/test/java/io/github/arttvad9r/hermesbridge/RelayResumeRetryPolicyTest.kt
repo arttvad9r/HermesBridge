@@ -30,12 +30,45 @@ class RelayResumeRetryPolicyTest {
     }
 
     @Test
-    fun firstPairingDoesNotRetryConsumedPairingFlow() {
+    fun firstPairingDoesNotRetryConsumedPairingFlowWithoutDurablePendingIdentity() {
         assertFalse(
             shouldRetryInitialAuthentication(
                 hasStoredPairing = true,
                 pairingCode = "ABCD-EFGH",
                 failure = IOException("socket closed"),
+                hasPendingPairing = false,
+            )
+        )
+    }
+
+    @Test
+    fun firstPairingRetriesAsResumeAfterPendingIdentityWasDurablyStaged() {
+        assertTrue(
+            shouldRetryInitialAuthentication(
+                hasStoredPairing = true,
+                pairingCode = "ABCD-EFGH",
+                failure = IOException("socket closed after auth proof"),
+                hasPendingPairing = true,
+            )
+        )
+        assertTrue(
+            shouldRetryInitialAuthentication(
+                hasStoredPairing = true,
+                pairingCode = "ABCD-EFGH",
+                failure = null,
+                hasPendingPairing = true,
+            )
+        )
+    }
+
+    @Test
+    fun pendingPairingDoesNotRetryTerminalProtocolFailure() {
+        assertFalse(
+            shouldRetryInitialAuthentication(
+                hasStoredPairing = true,
+                pairingCode = "ABCD-EFGH",
+                failure = IllegalStateException("Authentication failed"),
+                hasPendingPairing = true,
             )
         )
     }
@@ -52,12 +85,13 @@ class RelayResumeRetryPolicyTest {
     }
 
     @Test
-    fun missingStoredPairingDoesNotRetry() {
+    fun missingStoredPairingDoesNotRetryEvenIfPendingFlagIsInconsistent() {
         assertFalse(
             shouldRetryInitialAuthentication(
                 hasStoredPairing = false,
                 pairingCode = null,
                 failure = IOException("network unavailable"),
+                hasPendingPairing = true,
             )
         )
     }
