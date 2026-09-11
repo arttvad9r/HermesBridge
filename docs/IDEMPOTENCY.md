@@ -50,7 +50,7 @@ Unkeyed staging deliberately remains fresh. Uploading the same APK again without
 
 A keyed staging identity is retained in bounded process memory. If its artifact expires, the old binding is kept long enough to make reuse fail explicitly with HTTP 409 `apk_staging_expired` rather than silently creating new raw command arguments under the old install identity. The caller must choose a new install idempotency key for a genuinely new attempt after that boundary. The relay also bounds retained staging identities; if all retained slots still refer to live artifacts, a new keyed stage fails closed with `apk_staging_busy` instead of evicting a live retry identity.
 
-A relay restart loses both staged-artifact metadata and staging bindings. The install retry contract therefore does not survive relay process loss. It also does not claim durable exactly-once semantics across Android process death.
+A relay restart loses both staged-artifact metadata and staging bindings. The install retry contract therefore does not survive relay process loss. On startup, the artifact store removes leftover `apk_<UUID>.apk` files and interrupted `.upload-*.tmp` uploads that it can no longer authorize, while leaving unrelated files and directories in the configured artifact root untouched. It also does not claim durable exactly-once semantics across Android process death.
 
 ## Request IDs and approvals are separate identities
 
@@ -67,7 +67,7 @@ Changing only the request ID still creates a distinct replay-guard entry, and it
 
 The Android replay table is deliberately in-memory and bounded to 200 request IDs. After Android process death the bridge cannot prove whether a previous mutation completed, and the replay table no longer contains its terminal result. Approval state is also process-local and is cleared with the process.
 
-Relay command in-flight correlation and keyed APK staging correlation are also process-local and bounded. Individual HTTP waiter cancellation does not erase an active relay command correlation, but relay process death still does. A relay restart loses those tables. A subsequent stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, but install cannot reconstruct the old artifact descriptor after relay restart and must surface that retry boundary rather than restage under the old identity.
+Relay command in-flight correlation and keyed APK staging correlation are also process-local and bounded. Individual HTTP waiter cancellation does not erase an active relay command correlation, but relay process death still does. A relay restart loses those tables and startup cleanup deletes artifact-store-owned bytes that no longer have recoverable authorization metadata. A subsequent stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, but install cannot reconstruct the old artifact descriptor after relay restart and must surface that retry boundary rather than restage under the old identity.
 
 Therefore the current idempotency key provides safe retry across lost MCP/HTTP responses only while the required replay identity and, for install, its exact keyed staged descriptor still exist. It does not provide durable exactly-once semantics across Android process death or relay restart. A persistent operation journal and persistent staging correlation would be required for that stronger guarantee.
 
