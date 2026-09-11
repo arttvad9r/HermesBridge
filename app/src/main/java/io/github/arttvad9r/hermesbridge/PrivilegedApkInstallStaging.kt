@@ -3,6 +3,8 @@ package io.github.arttvad9r.hermesbridge
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.UUID
 
 internal const val SHIZUKU_APK_STAGING_DIRECTORY = "/data/local/tmp"
@@ -24,7 +26,7 @@ internal fun isShizukuApkStagingFileName(name: String): Boolean =
  * Normal installs delete their staging file in `finally`, but the privileged UserService can be
  * killed between staging and cleanup. Those bytes have no recovery value after process death, so
  * a newly created service removes its own orphaned files before accepting Binder work. Unrelated
- * files and directories in `/data/local/tmp` are deliberately left untouched.
+ * files, directories and symbolic links in `/data/local/tmp` are deliberately left untouched.
  */
 internal fun cleanupOrphanedShizukuApkStagingFiles(
     directory: File = File(SHIZUKU_APK_STAGING_DIRECTORY),
@@ -33,8 +35,9 @@ internal fun cleanupOrphanedShizukuApkStagingFiles(
     var removed = 0
     children.forEach { candidate ->
         if (!isShizukuApkStagingFileName(candidate.name)) return@forEach
-        if (!candidate.isFile) return@forEach
-        if (runCatching { candidate.delete() }.getOrDefault(false)) {
+        val path = candidate.toPath()
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return@forEach
+        if (runCatching { Files.deleteIfExists(path) }.getOrDefault(false)) {
             removed += 1
         }
     }
