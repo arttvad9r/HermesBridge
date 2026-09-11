@@ -89,6 +89,32 @@ class ApprovalManagerTest {
     }
 
     @Test
+    fun resolvedTicketCannotBeDecidedAgain() {
+        val manager = ApprovalManager(ttlMillis = 60_000L)
+        val arguments = buildJsonObject { put("packageName", "com.example.app") }
+
+        val approved = manager.request(
+            tool = "apps.forceStop",
+            risk = ToolRisk.PRIVILEGED,
+            arguments = arguments,
+            displaySummary = "Force-stop Example",
+        )
+        assertEquals(ApprovalStatus.APPROVED, manager.approve(approved.id)?.status)
+        assertNull(manager.approve(approved.id))
+        assertNull(manager.deny(approved.id))
+
+        val denied = manager.request(
+            tool = "apps.forceStop",
+            risk = ToolRisk.PRIVILEGED,
+            arguments = buildJsonObject { put("packageName", "com.example.other") },
+            displaySummary = "Force-stop Other",
+        )
+        assertEquals(ApprovalStatus.DENIED, manager.deny(denied.id)?.status)
+        assertNull(manager.deny(denied.id))
+        assertNull(manager.approve(denied.id))
+    }
+
+    @Test
     fun duplicatePendingRequestReusesTicket() {
         val manager = ApprovalManager(ttlMillis = 60_000L)
         val arguments = buildJsonObject { put("packageName", "com.example.app") }
