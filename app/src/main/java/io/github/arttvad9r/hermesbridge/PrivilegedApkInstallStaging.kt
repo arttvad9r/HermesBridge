@@ -1,7 +1,10 @@
 package io.github.arttvad9r.hermesbridge
 
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.UUID
 
 internal const val SHIZUKU_APK_STAGING_DIRECTORY = "/data/local/tmp"
@@ -13,6 +16,33 @@ internal fun createShizukuApkStagingPath(id: String = UUID.randomUUID().toString
 
 internal fun isShizukuApkStagingPath(path: String): Boolean =
     SHIZUKU_APK_STAGING_PATH_REGEX.matches(path)
+
+internal fun isShizukuApkStagingFileName(name: String): Boolean =
+    SHIZUKU_APK_STAGING_FILE_NAME_REGEX.matches(name)
+
+/**
+ * Removes only regular files that match Hermes Bridge's generated APK staging-name contract.
+ *
+ * Normal installs delete their staging file in `finally`, but the privileged UserService can be
+ * killed between staging and cleanup. Those bytes have no recovery value after process death, so
+ * a newly created service removes its own orphaned files before accepting Binder work. Unrelated
+ * files, directories and symbolic links in `/data/local/tmp` are deliberately left untouched.
+ */
+internal fun cleanupOrphanedShizukuApkStagingFiles(
+    directory: File = File(SHIZUKU_APK_STAGING_DIRECTORY),
+): Int {
+    val children = directory.listFiles() ?: return 0
+    var removed = 0
+    children.forEach { candidate ->
+        if (!isShizukuApkStagingFileName(candidate.name)) return@forEach
+        val path = candidate.toPath()
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return@forEach
+        if (runCatching { Files.deleteIfExists(path) }.getOrDefault(false)) {
+            removed += 1
+        }
+    }
+    return removed
+}
 
 /**
  * Copies exactly [expectedSize] bytes across the typed Binder boundary before invoking package
@@ -50,6 +80,9 @@ internal class ApkStagingSizeException(message: String) : IllegalStateException(
 
 private val UUID_REGEX =
     Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+private val SHIZUKU_APK_STAGING_FILE_NAME_REGEX = Regex(
+    "^hermes-bridge-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.apk$"
+)
 private val SHIZUKU_APK_STAGING_PATH_REGEX = Regex(
     "^/data/local/tmp/hermes-bridge-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.apk$"
 )
