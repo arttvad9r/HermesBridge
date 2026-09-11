@@ -19,6 +19,7 @@ class AppsInstallApprovalBindingTest {
 
     @Test
     fun changingReplaceCannotConsumeApprovedInstall() = runBlocking {
+        BridgeApprovalRuntime.clear()
         val backend = RecordingBackend()
         val registry = BridgeToolRegistry(
             healthRepository = object : DeviceHealthRepository {
