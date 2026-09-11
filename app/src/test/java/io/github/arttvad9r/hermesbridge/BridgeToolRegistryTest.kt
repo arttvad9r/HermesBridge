@@ -279,14 +279,15 @@ class BridgeToolRegistryTest {
     }
 
     @Test
-    fun pmInstallCommandUsesOnlySizeAndStdin() {
+    fun pmInstallCommandUsesOnlyGeneratedStagingPath() {
+        val stagedPath = createShizukuApkStagingPath("12345678-1234-1234-1234-1234567890ab")
         assertArrayEquals(
-            arrayOf("pm", "install", "-r", "-S", "1234", "-"),
-            buildPmInstallCommand(1234L, replace = true),
+            arrayOf("pm", "install", "-r", stagedPath),
+            buildPmInstallCommand(stagedPath, replace = true),
         )
         assertArrayEquals(
-            arrayOf("pm", "install", "-S", "1234", "-"),
-            buildPmInstallCommand(1234L, replace = false),
+            arrayOf("pm", "install", stagedPath),
+            buildPmInstallCommand(stagedPath, replace = false),
         )
     }
 
