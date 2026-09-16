@@ -105,9 +105,9 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
 
-    implementation("io.ktor:ktor-client-core:3.1.2")
-    implementation("io.ktor:ktor-client-cio:3.1.2")
-    implementation("io.ktor:ktor-client-websockets:3.1.2")
+    implementation("io.ktor:ktor-client-core:3.5.2")
+    implementation("io.ktor:ktor-client-cio:3.5.2")
+    implementation("io.ktor:ktor-client-websockets:3.5.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
 
