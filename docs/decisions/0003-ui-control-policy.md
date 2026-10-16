@@ -1,6 +1,6 @@
 # ADR 0003: Keep autonomous UI control out of AccessibilityService
 
-Status: Accepted
+Status: Superseded by ADR 0005 for the full-control sideload product
 
 ## Context
 

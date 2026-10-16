@@ -1,6 +1,6 @@
 # ADR 0002: Do not expose a raw shell to agents
 
-Status: Accepted
+Status: Superseded by ADR 0005 for TRUSTED mode; retained for SAFE mode
 
 ## Context
 

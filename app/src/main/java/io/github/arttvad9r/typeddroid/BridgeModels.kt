@@ -1,5 +1,6 @@
 package io.github.arttvad9r.typeddroid
 
+import io.github.arttvad9r.typeddroid.security.AgentTrustMode
 import io.github.arttvad9r.typeddroid.security.ApprovalTicket
 
 enum class ConnectionState {
@@ -26,6 +27,7 @@ data class BridgeUiState(
     val fileAccessConfigured: Boolean = false,
     val usageAccessGranted: Boolean = false,
     val setupCompleted: Boolean = false,
+    val agentTrustMode: AgentTrustMode = AgentTrustMode.SAFE,
     val pendingApprovals: List<ApprovalTicket> = emptyList(),
     val shizuku: ShizukuAccessState = ShizukuAccessState(),
     val shizukuWasConfigured: Boolean = false,

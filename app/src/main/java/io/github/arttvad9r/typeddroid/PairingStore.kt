@@ -1,6 +1,7 @@
 package io.github.arttvad9r.typeddroid
 
 import android.content.Context
+import io.github.arttvad9r.typeddroid.security.AgentTrustMode
 
 enum class PairingRecordPhase {
     PENDING,
@@ -10,6 +11,7 @@ enum class PairingRecordPhase {
 data class PairingRecordSnapshot(
     val deviceId: String,
     val phase: PairingRecordPhase,
+    val trustMode: AgentTrustMode = AgentTrustMode.SAFE,
 )
 
 interface PairingRecordStore {
@@ -31,6 +33,10 @@ interface PairingRecordStore {
     }
 
     fun hasPendingDeviceId(): Boolean = false
+    fun trustMode(): AgentTrustMode = AgentTrustMode.SAFE
+    fun saveTrustMode(mode: AgentTrustMode) {
+        require(deviceId() != null) { "Cannot set agent trust before pairing." }
+    }
     fun clear()
 }
 
@@ -45,12 +51,22 @@ class PairingStore(context: Context) : PairingRecordStore {
     override fun hasPendingDeviceId(): Boolean =
         readRecord()?.phase == PairingRecordPhase.PENDING
 
+    override fun trustMode(): AgentTrustMode =
+        readRecord()?.trustMode ?: AgentTrustMode.SAFE
+
+    override fun saveTrustMode(mode: AgentTrustMode) {
+        val current = readRecord()
+            ?: error("Cannot set agent trust before pairing.")
+        persistRecord(current.copy(trustMode = mode))
+    }
+
     override fun saveDeviceId(deviceId: String) {
-        persistRecord(PairingRecordSnapshot(deviceId, PairingRecordPhase.ACTIVE))
+        val trustMode = readRecord()?.trustMode ?: AgentTrustMode.SAFE
+        persistRecord(PairingRecordSnapshot(deviceId, PairingRecordPhase.ACTIVE, trustMode))
     }
 
     override fun stageDeviceId(deviceId: String) {
-        persistRecord(PairingRecordSnapshot(deviceId, PairingRecordPhase.PENDING))
+        persistRecord(PairingRecordSnapshot(deviceId, PairingRecordPhase.PENDING, AgentTrustMode.SAFE))
     }
 
     override fun confirmDeviceId(deviceId: String) {
@@ -109,20 +125,49 @@ internal fun encodePairingRecord(record: PairingRecordSnapshot): String {
         PairingRecordPhase.PENDING -> "pending"
         PairingRecordPhase.ACTIVE -> "active"
     }
-    return "v1|$phase|${record.deviceId}"
+    val trustMode = when (record.trustMode) {
+        AgentTrustMode.SAFE -> "safe"
+        AgentTrustMode.TRUSTED -> "trusted"
+    }
+    return "v2|$phase|$trustMode|${record.deviceId}"
 }
 
 internal fun decodePairingRecord(raw: String): PairingRecordSnapshot? {
-    val parts = raw.split('|', limit = 3)
-    if (parts.size != 3 || parts[0] != "v1") return null
-    val phase = when (parts[1]) {
-        "pending" -> PairingRecordPhase.PENDING
-        "active" -> PairingRecordPhase.ACTIVE
-        else -> return null
+    val parts = raw.split('|')
+    return when {
+        parts.size == 3 && parts[0] == "v1" -> decodeV1PairingRecord(parts)
+        parts.size == 4 && parts[0] == "v2" -> decodeV2PairingRecord(parts)
+        else -> null
     }
+}
+
+private fun decodeV1PairingRecord(parts: List<String>): PairingRecordSnapshot? {
+    val phase = decodePairingPhase(parts[1]) ?: return null
     val deviceId = parts[2]
     if (!isValidPairingDeviceId(deviceId)) return null
-    return PairingRecordSnapshot(deviceId, phase)
+    return PairingRecordSnapshot(
+        deviceId = deviceId,
+        phase = phase,
+        trustMode = AgentTrustMode.SAFE,
+    )
+}
+
+private fun decodeV2PairingRecord(parts: List<String>): PairingRecordSnapshot? {
+    val phase = decodePairingPhase(parts[1]) ?: return null
+    val trustMode = when (parts[2]) {
+        "safe" -> AgentTrustMode.SAFE
+        "trusted" -> AgentTrustMode.TRUSTED
+        else -> return null
+    }
+    val deviceId = parts[3]
+    if (!isValidPairingDeviceId(deviceId)) return null
+    return PairingRecordSnapshot(deviceId, phase, trustMode)
+}
+
+private fun decodePairingPhase(value: String): PairingRecordPhase? = when (value) {
+    "pending" -> PairingRecordPhase.PENDING
+    "active" -> PairingRecordPhase.ACTIVE
+    else -> null
 }
 
 internal fun isValidPairingDeviceId(deviceId: String): Boolean =

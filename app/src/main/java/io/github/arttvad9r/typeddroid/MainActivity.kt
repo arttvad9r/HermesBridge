@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.arttvad9r.typeddroid.security.AgentTrustMode
 import io.github.arttvad9r.typeddroid.security.ApprovalTicket
 import io.github.arttvad9r.typeddroid.security.ToolRisk
 import java.util.Locale
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
                     onRefreshUsageAccess = vm::refreshUsageAccess,
                     onApprove = vm::approveAction,
                     onDeny = vm::denyAction,
+                    onSetAgentTrustMode = vm::setAgentTrustMode,
                     onRequestShizukuPermission = vm::requestShizukuPermission,
                     onRefreshShizuku = vm::refreshShizuku,
                     onOpenShizuku = {
@@ -156,6 +158,7 @@ private fun BridgeScreen(
     onRefreshUsageAccess: () -> Unit,
     onApprove: (String) -> Unit,
     onDeny: (String) -> Unit,
+    onSetAgentTrustMode: (AgentTrustMode) -> Unit,
     onRequestShizukuPermission: () -> Unit,
     onRefreshShizuku: () -> Unit,
     onOpenShizuku: () -> Unit,
@@ -258,6 +261,11 @@ private fun BridgeScreen(
                         onRefresh = onRefreshUsageAccess,
                     )
 
+                    TrustModeCard(
+                        mode = state.agentTrustMode,
+                        onChange = onSetAgentTrustMode,
+                    )
+
                     ShizukuCard(
                         state = state.shizuku,
                         wasConfigured = state.shizukuWasConfigured,
@@ -311,6 +319,11 @@ private fun BridgeScreen(
                     onRefresh = onRefreshUsageAccess,
                 )
 
+                TrustModeCard(
+                    mode = state.agentTrustMode,
+                    onChange = onSetAgentTrustMode,
+                )
+
                 ShizukuCard(
                     state = state.shizuku,
                     wasConfigured = state.shizukuWasConfigured,
@@ -329,6 +342,7 @@ private fun BridgeScreen(
                     fileAccessConfigured = state.fileAccessConfigured,
                     usageAccessGranted = state.usageAccessGranted,
                     shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
+                    agentTrustMode = state.agentTrustMode,
                 )
 
                 TextButton(
@@ -459,6 +473,7 @@ private fun ApprovalCard(
         ToolRisk.MUTATING -> "Изменение данных"
         ToolRisk.PRIVILEGED -> "Расширенный доступ"
         ToolRisk.UI_CONTROL -> "Управление интерфейсом"
+        ToolRisk.RAW_SHELL -> "Командная оболочка"
     }
 
     Card(
@@ -718,6 +733,80 @@ private fun UsageAccessCard(
 }
 
 @Composable
+private fun TrustModeCard(
+    mode: AgentTrustMode,
+    onChange: (AgentTrustMode) -> Unit,
+) {
+    var confirmTrusted by remember { mutableStateOf(false) }
+
+    if (confirmTrusted) {
+        AlertDialog(
+            onDismissRequest = { confirmTrusted = false },
+            title = { Text("Разрешить полный доступ агенту?") },
+            text = {
+                Text(
+                    "В режиме полного доступа Trusted-агент сможет использовать будущие системные команды, shell и управление интерфейсом, когда соответствующие возможности будут включены. Действия останутся в журнале, но этот режим следует выдавать только агенту, которому вы доверяете."
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmTrusted = false }) {
+                    Text("Отмена")
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmTrusted = false
+                        onChange(AgentTrustMode.TRUSTED)
+                    }
+                ) {
+                    Text("Разрешить полный доступ")
+                }
+            },
+        )
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Доверие агенту",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                if (mode == AgentTrustMode.TRUSTED) "Полный доступ" else "Безопасный режим",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                if (mode == AgentTrustMode.TRUSTED) {
+                    "Trusted-режим разрешает подключённому агенту запрашивать полный набор возможностей TypedDroid. Конкретные возможности появятся по мере внедрения встроенного ADB и UI-control."
+                } else {
+                    "Safe-режим сохраняет текущую модель: только ограниченные типизированные операции. Raw shell и другие универсальные интерфейсы запрещены."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (mode == AgentTrustMode.SAFE) {
+                Button(
+                    onClick = { confirmTrusted = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Включить полный доступ")
+                }
+            } else {
+                Button(
+                    onClick = { onChange(AgentTrustMode.SAFE) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Вернуться в безопасный режим")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ShizukuCard(
     state: ShizukuAccessState,
     wasConfigured: Boolean,
@@ -864,6 +953,7 @@ private fun CapabilitiesCard(
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
     shizukuReady: Boolean,
+    agentTrustMode: AgentTrustMode,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -873,6 +963,10 @@ private fun CapabilitiesCard(
             CapabilityRow("Статистика использования", if (usageAccessGranted) "Доступно" else "Не настроено")
             CapabilityRow("Файлы", if (fileAccessConfigured) "Доступно" else "Не настроено")
             CapabilityRow("Подтверждение действий", "Готово")
+            CapabilityRow(
+                "Доверие агенту",
+                if (agentTrustMode == AgentTrustMode.TRUSTED) "Полный доступ" else "Безопасный режим",
+            )
             CapabilityRow("Расширенный доступ Shizuku", if (shizukuReady) "Готово" else "Не настроено")
             CapabilityRow("Управление интерфейсом", "Опционально")
         }

@@ -5,6 +5,19 @@ enum class ToolRisk {
     MUTATING,
     PRIVILEGED,
     UI_CONTROL,
+    RAW_SHELL,
+}
+
+/**
+ * SAFE keeps the original TypedDroid typed-capability boundary.
+ * TRUSTED is an explicit opt-in for the full-control product surface.
+ *
+ * Device privilege (standard Android, embedded ADB, root) is intentionally
+ * modeled separately from agent trust.
+ */
+enum class AgentTrustMode {
+    SAFE,
+    TRUSTED,
 }
 
 enum class ApprovalDecision {
@@ -19,21 +32,31 @@ data class BridgeTool(
 )
 
 object DefaultToolPolicy {
-    private val forbiddenNames = setOf(
-        "run_shell",
-        "arbitrary_intent",
-        "arbitrary_content_uri",
+    private val alwaysForbiddenNames = setOf(
         "unlock_with_pin",
     )
 
-    fun decision(tool: BridgeTool): ApprovalDecision {
-        if (tool.name in forbiddenNames) return ApprovalDecision.DENY
+    private val trustedOnlyNames = setOf(
+        "run_shell",
+        "arbitrary_intent",
+        "arbitrary_content_uri",
+    )
+
+    fun decision(
+        tool: BridgeTool,
+        trustMode: AgentTrustMode = AgentTrustMode.SAFE,
+    ): ApprovalDecision {
+        if (tool.name in alwaysForbiddenNames) return ApprovalDecision.DENY
+        if (tool.name in trustedOnlyNames && trustMode != AgentTrustMode.TRUSTED) {
+            return ApprovalDecision.DENY
+        }
 
         return when (tool.risk) {
             ToolRisk.READ_ONLY -> ApprovalDecision.ALLOW
             ToolRisk.MUTATING,
             ToolRisk.PRIVILEGED,
             ToolRisk.UI_CONTROL,
+            ToolRisk.RAW_SHELL,
             -> ApprovalDecision.REQUIRE_APPROVAL
         }
     }

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
+import io.github.arttvad9r.typeddroid.security.AgentTrustMode
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +31,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             fileAccessConfigured = treeStore.treeUri() != null,
             usageAccessGranted = appUsageRepository.hasAccess(),
             setupCompleted = setupStore.isCompleted(),
+            agentTrustMode = pairingStore.trustMode(),
             shizukuWasConfigured = advancedAccessStore.wasConfigured(),
         )
     )
@@ -55,6 +57,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
                             currentSetupCompleted = current.setupCompleted,
                             hasStoredPairing = hasStoredPairing,
                         ),
+                        agentTrustMode = pairingStore.trustMode(),
                     )
                 }
             }
@@ -124,6 +127,22 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun denyAction(approvalId: String) {
         BridgeApprovalRuntime.deny(approvalId)
+    }
+
+    fun setAgentTrustMode(mode: AgentTrustMode) {
+        if (pairingStore.deviceId() == null) {
+            _state.update { it.copy(message = "Сначала подключите Bridge Host.") }
+            return
+        }
+        runCatching { pairingStore.saveTrustMode(mode) }
+            .onSuccess {
+                _state.update { it.copy(agentTrustMode = mode, message = null) }
+            }
+            .onFailure { error ->
+                _state.update {
+                    it.copy(message = error.message ?: "Не удалось сохранить уровень доверия агенту.")
+                }
+            }
     }
 
     fun requestShizukuPermission() {

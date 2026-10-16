@@ -72,6 +72,7 @@ class RelayAgentTransport(
         apkPackageInspector = apkPackageInspector,
         batteryDiagnosticsBackend = batteryDiagnosticsBackend,
         appUsageRepository = appUsageRepository,
+        agentTrustMode = pairingRecordStore::trustMode,
     )
     private val commandRouter = BridgeCommandRouter(
         coreRegistry = coreToolRegistry,

@@ -23,14 +23,43 @@ class DefaultToolPolicyTest {
     }
 
     @Test
-    fun dangerousGenericToolsAreDeniedEvenIfMisclassified() {
+    fun genericToolsStayDeniedInSafeMode() {
         assertEquals(
             ApprovalDecision.DENY,
-            DefaultToolPolicy.decision(BridgeTool("run_shell", ToolRisk.READ_ONLY)),
+            DefaultToolPolicy.decision(BridgeTool("run_shell", ToolRisk.RAW_SHELL)),
         )
         assertEquals(
             ApprovalDecision.DENY,
-            DefaultToolPolicy.decision(BridgeTool("arbitrary_intent", ToolRisk.READ_ONLY)),
+            DefaultToolPolicy.decision(BridgeTool("arbitrary_intent", ToolRisk.PRIVILEGED)),
+        )
+    }
+
+    @Test
+    fun trustedModeCanRequestFullControlTools() {
+        assertEquals(
+            ApprovalDecision.REQUIRE_APPROVAL,
+            DefaultToolPolicy.decision(
+                BridgeTool("run_shell", ToolRisk.RAW_SHELL),
+                AgentTrustMode.TRUSTED,
+            ),
+        )
+        assertEquals(
+            ApprovalDecision.REQUIRE_APPROVAL,
+            DefaultToolPolicy.decision(
+                BridgeTool("arbitrary_intent", ToolRisk.PRIVILEGED),
+                AgentTrustMode.TRUSTED,
+            ),
+        )
+    }
+
+    @Test
+    fun pinUnlockRemainsForbiddenEvenForTrustedAgents() {
+        assertEquals(
+            ApprovalDecision.DENY,
+            DefaultToolPolicy.decision(
+                BridgeTool("unlock_with_pin", ToolRisk.PRIVILEGED),
+                AgentTrustMode.TRUSTED,
+            ),
         )
     }
 }

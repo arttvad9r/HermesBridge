@@ -3,6 +3,7 @@ package io.github.arttvad9r.typeddroid
 import io.github.arttvad9r.typeddroid.protocol.CommandRequestPayload
 import io.github.arttvad9r.typeddroid.protocol.CommandResultPayload
 import io.github.arttvad9r.typeddroid.protocol.ProtocolError
+import io.github.arttvad9r.typeddroid.security.AgentTrustMode
 import io.github.arttvad9r.typeddroid.security.ApprovalDecision
 import io.github.arttvad9r.typeddroid.security.BridgeTool
 import io.github.arttvad9r.typeddroid.security.DefaultToolPolicy
@@ -27,6 +28,7 @@ class BridgeToolRegistry(
     private val apkPackageInspector: ApkPackageInspector? = null,
     private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
     private val appUsageRepository: AppUsageRepository? = null,
+    private val agentTrustMode: () -> AgentTrustMode = { AgentTrustMode.SAFE },
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         return when (request.tool) {
@@ -760,7 +762,7 @@ class BridgeToolRegistry(
         normalizedArguments: JsonObject,
         summary: String,
     ): CommandResultPayload? {
-        if (DefaultToolPolicy.decision(BridgeTool(tool, risk)) != ApprovalDecision.REQUIRE_APPROVAL) {
+        if (DefaultToolPolicy.decision(BridgeTool(tool, risk), agentTrustMode()) != ApprovalDecision.REQUIRE_APPROVAL) {
             return failure(
                 request.requestId,
                 "policy_denied",
@@ -783,7 +785,7 @@ class BridgeToolRegistry(
     }
 
     private fun isReadOnlyAllowed(toolName: String): Boolean =
-        DefaultToolPolicy.decision(BridgeTool(toolName, ToolRisk.READ_ONLY)) == ApprovalDecision.ALLOW
+        DefaultToolPolicy.decision(BridgeTool(toolName, ToolRisk.READ_ONLY), agentTrustMode()) == ApprovalDecision.ALLOW
 
     private fun isValidPackageName(value: String): Boolean =
         value.length in 3..255 && PACKAGE_NAME_REGEX.matches(value)
