@@ -193,7 +193,7 @@ The flow is:
 4. Android verifies exact size and SHA-256, then parses package/version/signing certificates.
 5. Approval is bound to verified content/package/signing metadata plus `replace`.
 6. After approval Hermes retries the same logical install.
-7. Shizuku receives only an internally constructed `pm install [-r] -S <size> -`; verified bytes are streamed on stdin.
+7. The typed Shizuku UserService copies exactly the verified byte count into a service-generated staging path, then receives only an internally constructed `pm install [-r] <staging-path>` command. The staging path is not agent-controlled and is deleted after the attempt.
 
 Hermes Bridge refuses to replace itself through this tool.
 

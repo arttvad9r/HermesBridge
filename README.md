@@ -1,6 +1,8 @@
 # Hermes Bridge
 
-Android companion for giving a Hermes agent controlled, remote access to a phone.
+Security-first remote Android tools for AI agents — no root and no unrestricted shell.
+
+The current reference integration is Hermes through a local MCP adapter; the Android/relay trust boundary is intentionally independent of agent-side shell access.
 
 The intended UX is deliberately simple:
 
@@ -83,7 +85,6 @@ Hermes on VPS
                    +-- approval policy
                    +-- local bounded audit history
                    +-- Shizuku (optional typed privileged/read-only commands)
-                   +-- Accessibility (planned, optional)
 ```
 
 The relay admin API is intended to remain on localhost beside Hermes. The public TLS surface is limited to health, the device WebSocket, and short-lived token-authenticated artifact downloads used for APK installation.

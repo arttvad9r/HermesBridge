@@ -100,7 +100,7 @@
 ## P1 — privileged actions
 
 - [x] Shizuku API/provider dependency and typed privileged backend.
-- [x] Install APK through verified staged bytes streamed to `pm install` stdin.
+- [x] Install APK through a service-generated staging path passed only to fixed `pm install [-r] <path>`.
 - [x] Uninstall app.
 - [x] Force-stop app.
 - [x] Revoke one already-granted Android `dangerous` runtime permission from a launcher-visible app after exact local approval.
