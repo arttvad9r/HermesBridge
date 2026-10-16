@@ -1,5 +1,7 @@
 package io.github.arttvad9r.typeddroid
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Process
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -89,6 +91,13 @@ object EmbeddedPrivilegedMain {
             EmbeddedPrivilegedProtocol.OP_FORCE_STOP_APP -> forceStopApp(request)
             EmbeddedPrivilegedProtocol.OP_REVOKE_PERMISSION -> revokePermission(request)
             EmbeddedPrivilegedProtocol.OP_BATTERY_STATS -> batteryStats(request)
+            EmbeddedPrivilegedProtocol.OP_UI_HIERARCHY -> uiHierarchy(request)
+            EmbeddedPrivilegedProtocol.OP_UI_SCREENSHOT -> uiScreenshot(request)
+            EmbeddedPrivilegedProtocol.OP_UI_TAP -> uiTap(request)
+            EmbeddedPrivilegedProtocol.OP_UI_SWIPE -> uiSwipe(request)
+            EmbeddedPrivilegedProtocol.OP_UI_TEXT -> uiText(request)
+            EmbeddedPrivilegedProtocol.OP_UI_KEY -> uiKey(request)
+            EmbeddedPrivilegedProtocol.OP_OPEN_APP -> openApp(request)
 
             EmbeddedPrivilegedProtocol.OP_SHUTDOWN -> EmbeddedPrivilegedResponse(
                 id = request.id,
@@ -223,6 +232,141 @@ object EmbeddedPrivilegedMain {
             TYPED_COMMAND_OUTPUT_BYTES,
         )
 
+    private fun uiHierarchy(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val target = File("/data/local/tmp/typed-droid-ui-${UUID.randomUUID()}.xml")
+        return try {
+            val dump = executeProcess(
+                request.id,
+                arrayOf("/system/bin/uiautomator", "dump", target.absolutePath),
+                UI_COMMAND_TIMEOUT_MILLIS,
+                TYPED_COMMAND_OUTPUT_BYTES,
+                TYPED_COMMAND_OUTPUT_BYTES,
+            )
+            if (!dump.ok || dump.exitCode != 0) return dump
+            val captured = target.inputStream().use { readBounded(it, MAX_UI_HIERARCHY_BYTES) }
+            EmbeddedPrivilegedResponse(
+                id = request.id,
+                ok = true,
+                exitCode = 0,
+                stdoutBase64 = Base64.getEncoder().encodeToString(captured.bytes),
+                stdoutTruncated = captured.truncated,
+            )
+        } catch (error: Throwable) {
+            EmbeddedPrivilegedResponse(request.id, false, error = safeError(error))
+        } finally {
+            runCatching { target.delete() }
+        }
+    }
+
+    private fun uiTap(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val x = request.x?.takeIf(::isValidUiCoordinate)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Invalid tap x coordinate.")
+        val y = request.y?.takeIf(::isValidUiCoordinate)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Invalid tap y coordinate.")
+        return executeProcess(request.id, arrayOf("/system/bin/input", "tap", x.toString(), y.toString()), UI_COMMAND_TIMEOUT_MILLIS, TYPED_COMMAND_OUTPUT_BYTES, TYPED_COMMAND_OUTPUT_BYTES)
+    }
+
+    private fun uiSwipe(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val values = listOf(request.startX, request.startY, request.endX, request.endY)
+        if (values.any { it == null || !isValidUiCoordinate(it) }) {
+            return EmbeddedPrivilegedResponse(request.id, false, error = "Invalid swipe coordinates.")
+        }
+        val duration = request.durationMillis?.takeIf { it in 1..MAX_UI_SWIPE_DURATION_MILLIS }
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Invalid swipe duration.")
+        return executeProcess(
+            request.id,
+            arrayOf("/system/bin/input", "swipe", request.startX.toString(), request.startY.toString(), request.endX.toString(), request.endY.toString(), duration.toString()),
+            UI_COMMAND_TIMEOUT_MILLIS, TYPED_COMMAND_OUTPUT_BYTES, TYPED_COMMAND_OUTPUT_BYTES,
+        )
+    }
+
+    private fun uiText(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val text = request.text?.takeIf { value ->
+            value.isNotEmpty() && value.encodeToByteArray().size <= MAX_UI_TEXT_BYTES && '\u0000' !in value
+        } ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Invalid UI text.")
+        return executeProcess(request.id, arrayOf("/system/bin/input", "text", text), UI_COMMAND_TIMEOUT_MILLIS, TYPED_COMMAND_OUTPUT_BYTES, TYPED_COMMAND_OUTPUT_BYTES)
+    }
+
+    private fun uiKey(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val keyCode = request.keyCode?.takeIf { it in 0..MAX_UI_KEY_CODE }
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Invalid key code.")
+        return executeProcess(request.id, arrayOf("/system/bin/input", "keyevent", keyCode.toString()), UI_COMMAND_TIMEOUT_MILLIS, TYPED_COMMAND_OUTPUT_BYTES, TYPED_COMMAND_OUTPUT_BYTES)
+    }
+
+    private fun openApp(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val packageName = request.packageName?.takeIf(::isValidAndroidQualifiedName)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Package name is invalid.")
+        return executeProcess(
+            request.id,
+            arrayOf("/system/bin/monkey", "-p", packageName, "-c", "android.intent.category.LAUNCHER", "1"),
+            UI_COMMAND_TIMEOUT_MILLIS, TYPED_COMMAND_OUTPUT_BYTES, TYPED_COMMAND_OUTPUT_BYTES,
+        )
+    }
+
+    private fun uiScreenshot(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val target = File("/data/local/tmp/typed-droid-screen-${UUID.randomUUID()}.png")
+        return try {
+            val capture = executeProcess(
+                request.id,
+                arrayOf("/system/bin/screencap", "-p", target.absolutePath),
+                UI_COMMAND_TIMEOUT_MILLIS, TYPED_COMMAND_OUTPUT_BYTES, TYPED_COMMAND_OUTPUT_BYTES,
+            )
+            if (!capture.ok) return capture
+            if (capture.exitCode != 0) {
+                return EmbeddedPrivilegedResponse(
+                    id = request.id,
+                    ok = false,
+                    error = "Android screenshot command failed.",
+                )
+            }
+            val source = BitmapFactory.decodeFile(target.absolutePath)
+                ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Android screenshot could not be decoded.")
+            try {
+                val encoded = encodeBoundedScreenshot(source)
+                EmbeddedPrivilegedResponse(
+                    id = request.id,
+                    ok = true,
+                    exitCode = 0,
+                    stdoutBase64 = Base64.getEncoder().encodeToString(encoded.bytes),
+                    imageWidth = encoded.width,
+                    imageHeight = encoded.height,
+                    mimeType = "image/jpeg",
+                )
+            } finally {
+                source.recycle()
+            }
+        } catch (error: Throwable) {
+            EmbeddedPrivilegedResponse(request.id, false, error = safeError(error))
+        } finally {
+            runCatching { target.delete() }
+        }
+    }
+
+    private fun encodeBoundedScreenshot(source: Bitmap): EncodedScreenshot {
+        for (maxDimension in intArrayOf(960, 800, 640, 512)) {
+            val scale = minOf(1.0, maxDimension.toDouble() / maxOf(source.width, source.height).toDouble())
+            val width = maxOf(1, (source.width * scale).toInt())
+            val height = maxOf(1, (source.height * scale).toInt())
+            val bitmap = if (width == source.width && height == source.height) source else
+                Bitmap.createScaledBitmap(source, width, height, true)
+            try {
+                for (quality in intArrayOf(80, 70, 60, 50, 40, 30)) {
+                    val output = ByteArrayOutputStream(MAX_UI_SCREENSHOT_BYTES)
+                    check(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)) { "JPEG compression failed." }
+                    val bytes = output.toByteArray()
+                    if (bytes.size <= MAX_UI_SCREENSHOT_BYTES) return EncodedScreenshot(bytes, width, height)
+                }
+            } finally {
+                if (bitmap !== source) bitmap.recycle()
+            }
+        }
+        error("Screenshot could not be compressed below the remote safety limit.")
+    }
+
+    private data class EncodedScreenshot(val bytes: ByteArray, val width: Int, val height: Int)
+
+    private fun isValidUiCoordinate(value: Int): Boolean = value in 0..MAX_UI_COORDINATE
+
     private fun executeProcess(
         requestId: String,
         argv: Array<String>,
@@ -322,6 +466,13 @@ object EmbeddedPrivilegedMain {
     private const val TYPED_COMMAND_TIMEOUT_MILLIS = 30_000L
     private const val APK_INSTALL_TIMEOUT_MILLIS = 5 * 60 * 1000L
     private const val BATTERY_STATS_TIMEOUT_MILLIS = 30_000L
+    private const val UI_COMMAND_TIMEOUT_MILLIS = 10_000L
+    private const val MAX_UI_HIERARCHY_BYTES = 96 * 1024
+    private const val MAX_UI_SCREENSHOT_BYTES = 128 * 1024
+    private const val MAX_UI_TEXT_BYTES = 2 * 1024
+    private const val MAX_UI_COORDINATE = 32_767
+    private const val MAX_UI_SWIPE_DURATION_MILLIS = 10_000
+    private const val MAX_UI_KEY_CODE = 1_000
     private val SHA256_REGEX = Regex("^[0-9a-f]{64}$")
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 

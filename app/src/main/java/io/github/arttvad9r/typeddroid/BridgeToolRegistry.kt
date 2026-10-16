@@ -16,7 +16,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
+import java.util.Base64
 import kotlinx.serialization.json.put
 
 class BridgeToolRegistry(
@@ -29,6 +31,7 @@ class BridgeToolRegistry(
     private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = DisabledBatteryDiagnosticsBackend,
     private val appUsageRepository: AppUsageRepository? = null,
     private val rawShellBackend: RawShellBackend = DisabledRawShellBackend,
+    private val uiControlBackend: UiControlBackend = DisabledUiControlBackend,
     private val agentTrustMode: () -> AgentTrustMode = { AgentTrustMode.SAFE },
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
@@ -43,6 +46,13 @@ class BridgeToolRegistry(
             APPS_INSTALL -> executeAppsInstall(request)
             APPS_UNINSTALL -> executeAppsUninstall(request)
             APPS_FORCE_STOP -> executeAppsForceStop(request)
+            APPS_OPEN -> executeAppsOpen(request)
+            UI_HIERARCHY -> executeUiHierarchy(request)
+            UI_SCREENSHOT -> executeUiScreenshot(request)
+            UI_TAP -> executeUiTap(request)
+            UI_SWIPE -> executeUiSwipe(request)
+            UI_TEXT -> executeUiText(request)
+            UI_KEY -> executeUiKey(request)
             SHELL_RUN -> executeShellRun(request)
             else -> failure(
                 request.requestId,
@@ -644,6 +654,129 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeAppsOpen(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys.any { it != PACKAGE_NAME }) {
+            return failure(request.requestId, "invalid_arguments", "apps.open accepts only packageName.")
+        }
+        val packageName = parsePackageName(request) ?: return packageNameFailure(request)
+        requireUiControl(request)?.let { return it }
+        val result = uiControlBackend.openApp(packageName)
+        return actionResult(request, result, "open_app_failed") {
+            put(PACKAGE_NAME, packageName)
+            put("opened", true)
+        }
+    }
+
+    private suspend fun executeUiHierarchy(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.isNotEmpty()) {
+            return failure(request.requestId, "invalid_arguments", "ui.hierarchy does not accept arguments.")
+        }
+        requireUiControl(request)?.let { return it }
+        val result = uiControlBackend.hierarchy()
+        if (!result.ok) return failure(request.requestId, result.code ?: "ui_hierarchy_failed", result.message ?: "UI hierarchy failed.")
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject { put("xml", checkNotNull(result.xml)) },
+        )
+    }
+
+    private suspend fun executeUiScreenshot(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.isNotEmpty()) {
+            return failure(request.requestId, "invalid_arguments", "ui.screenshot does not accept arguments.")
+        }
+        requireUiControl(request)?.let { return it }
+        val result = uiControlBackend.screenshot()
+        if (!result.ok) return failure(request.requestId, result.code ?: "ui_screenshot_failed", result.message ?: "Screenshot failed.")
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("mimeType", checkNotNull(result.mimeType))
+                put("width", checkNotNull(result.width))
+                put("height", checkNotNull(result.height))
+                put("base64", Base64.getEncoder().encodeToString(result.bytes))
+            },
+        )
+    }
+
+    private suspend fun executeUiTap(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(X, Y)) {
+            return failure(request.requestId, "invalid_arguments", "ui.tap requires x and y.")
+        }
+        val x = parseUiInt(request, X, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val y = parseUiInt(request, Y, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        requireUiControl(request)?.let { return it }
+        return actionResult(request, uiControlBackend.tap(x, y), "ui_tap_failed") {
+            put(X, x); put(Y, y); put("tapped", true)
+        }
+    }
+
+    private suspend fun executeUiSwipe(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(START_X, START_Y, END_X, END_Y, DURATION_MILLIS)
+        if (request.arguments.keys.any { it !in allowed } || !request.arguments.keys.containsAll(setOf(START_X, START_Y, END_X, END_Y))) {
+            return failure(request.requestId, "invalid_arguments", "ui.swipe requires startX, startY, endX, endY and optional durationMillis.")
+        }
+        val sx = parseUiInt(request, START_X, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val sy = parseUiInt(request, START_Y, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val ex = parseUiInt(request, END_X, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val ey = parseUiInt(request, END_Y, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val duration = if (DURATION_MILLIS in request.arguments) {
+            parseUiInt(request, DURATION_MILLIS, 1..MAX_UI_SWIPE_DURATION_MILLIS) ?: return uiArgumentFailure(request)
+        } else DEFAULT_UI_SWIPE_DURATION_MILLIS
+        requireUiControl(request)?.let { return it }
+        return actionResult(request, uiControlBackend.swipe(sx, sy, ex, ey, duration), "ui_swipe_failed") {
+            put("swiped", true)
+        }
+    }
+
+    private suspend fun executeUiText(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(TEXT)) return failure(request.requestId, "invalid_arguments", "ui.text requires text.")
+        val primitive = request.arguments[TEXT] as? JsonPrimitive
+        val text = primitive?.takeIf { it.isString }?.content
+            ?.takeIf { it.isNotEmpty() && '\u0000' !in it && it.encodeToByteArray().size <= MAX_UI_TEXT_BYTES }
+            ?: return uiArgumentFailure(request)
+        requireUiControl(request)?.let { return it }
+        return actionResult(request, uiControlBackend.text(text), "ui_text_failed") { put("typed", true) }
+    }
+
+    private suspend fun executeUiKey(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(KEY_CODE)) return failure(request.requestId, "invalid_arguments", "ui.key requires keyCode.")
+        val keyCode = parseUiInt(request, KEY_CODE, 0..MAX_UI_KEY_CODE) ?: return uiArgumentFailure(request)
+        requireUiControl(request)?.let { return it }
+        return actionResult(request, uiControlBackend.key(keyCode), "ui_key_failed") {
+            put(KEY_CODE, keyCode); put("sent", true)
+        }
+    }
+
+    private fun requireUiControl(request: CommandRequestPayload): CommandResultPayload? {
+        if (DefaultToolPolicy.decision(BridgeTool(request.tool, ToolRisk.UI_CONTROL), agentTrustMode()) != ApprovalDecision.ALLOW) {
+            return failure(request.requestId, "policy_denied", "UI control is available only to an agent explicitly placed in Trusted mode on the phone.")
+        }
+        val readiness = uiControlBackend.readiness()
+        return if (readiness.ready) null else failure(
+            request.requestId,
+            readiness.code ?: "embedded_privileged_unavailable",
+            readiness.message ?: "Embedded privileged helper is not running.",
+        )
+    }
+
+    private fun parseUiInt(request: CommandRequestPayload, key: String, range: IntRange): Int? =
+        (request.arguments[key] as? JsonPrimitive)?.intOrNull?.takeIf { it in range }
+
+    private fun uiArgumentFailure(request: CommandRequestPayload) =
+        failure(request.requestId, "invalid_arguments", "UI control arguments are invalid or outside supported bounds.")
+
+    private fun actionResult(
+        request: CommandRequestPayload,
+        result: PrivilegedOperationResult,
+        fallbackCode: String,
+        content: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit,
+    ): CommandResultPayload {
+        if (!result.ok) return failure(request.requestId, result.code ?: fallbackCode, result.message ?: "Android UI command failed.")
+        return CommandResultPayload(requestId = request.requestId, ok = true, result = buildJsonObject(content))
+    }
+
     private suspend fun executeShellRun(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys.any { it != SHELL_COMMAND && it != TIMEOUT_MILLIS }) {
             return failure(
@@ -877,6 +1010,13 @@ class BridgeToolRegistry(
         const val APPS_INSTALL = "apps.install"
         const val APPS_UNINSTALL = "apps.uninstall"
         const val APPS_FORCE_STOP = "apps.forceStop"
+        const val APPS_OPEN = "apps.open"
+        const val UI_HIERARCHY = "ui.hierarchy"
+        const val UI_SCREENSHOT = "ui.screenshot"
+        const val UI_TAP = "ui.tap"
+        const val UI_SWIPE = "ui.swipe"
+        const val UI_TEXT = "ui.text"
+        const val UI_KEY = "ui.key"
         const val SHELL_RUN = "shell.run"
 
         private const val SHELL_COMMAND = "command"
@@ -884,6 +1024,20 @@ class BridgeToolRegistry(
         private const val DEFAULT_SHELL_TIMEOUT_MILLIS = 30_000L
         private const val MAX_SHELL_TIMEOUT_MILLIS = 300_000L
         private const val MAX_SHELL_COMMAND_BYTES = 64 * 1024
+        private const val MAX_UI_COORDINATE = 32_767
+        private const val MAX_UI_SWIPE_DURATION_MILLIS = 10_000
+        private const val DEFAULT_UI_SWIPE_DURATION_MILLIS = 300
+        private const val MAX_UI_TEXT_BYTES = 2 * 1024
+        private const val MAX_UI_KEY_CODE = 1_000
+        private const val X = "x"
+        private const val Y = "y"
+        private const val START_X = "startX"
+        private const val START_Y = "startY"
+        private const val END_X = "endX"
+        private const val END_Y = "endY"
+        private const val DURATION_MILLIS = "durationMillis"
+        private const val TEXT = "text"
+        private const val KEY_CODE = "keyCode"
         private const val PATH_SEGMENTS = "pathSegments"
         private const val PACKAGE_NAME = "packageName"
         private const val KEEP_DATA = "keepData"

@@ -32,6 +32,11 @@ MAX_APK_BYTES = 200 * 1024 * 1024
 MAX_PENDING_APPROVALS = 200
 MAX_SHELL_COMMAND_BYTES = 64 * 1024
 MAX_SHELL_TIMEOUT_SECONDS = 300
+MAX_UI_COORDINATE = 32_767
+MAX_UI_SWIPE_DURATION_MILLIS = 10_000
+DEFAULT_UI_SWIPE_DURATION_MILLIS = 300
+MAX_UI_TEXT_BYTES = 2 * 1024
+MAX_UI_KEY_CODE = 1_000
 TYPED_DROID_PACKAGE = "io.github.arttvad9r.typeddroid"
 APK_NAME_HEADER = "X-TypedDroid-Apk-Name"
 APK_STAGING_KEY_HEADER = "X-TypedDroid-Apk-Staging-Key"
@@ -539,6 +544,82 @@ def force_stop_app(
         {"packageName": package},
         **_idempotency_kwargs(idempotency_key),
     )
+
+
+@mcp.tool()
+def ui_hierarchy(device_id: str) -> dict[str, Any]:
+    """Read the current Android UI hierarchy. Available only when the phone pairing is explicitly Trusted."""
+    return _device_command(device_id, "ui.hierarchy", timeout=30)
+
+
+@mcp.tool()
+def ui_screenshot(device_id: str) -> dict[str, Any]:
+    """Capture a bounded JPEG screenshot from a Trusted Android phone."""
+    return _device_command(device_id, "ui.screenshot", timeout=30)
+
+
+def _ui_int(name: str, value: int, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"{name} must be an integer from {minimum} to {maximum}.")
+    return value
+
+
+@mcp.tool()
+def ui_tap(device_id: str, x: int, y: int) -> dict[str, Any]:
+    """Tap one screen coordinate on a Trusted Android phone."""
+    return _device_command(
+        device_id,
+        "ui.tap",
+        {"x": _ui_int("x", x, 0, MAX_UI_COORDINATE), "y": _ui_int("y", y, 0, MAX_UI_COORDINATE)},
+    )
+
+
+@mcp.tool()
+def ui_swipe(
+    device_id: str,
+    start_x: int,
+    start_y: int,
+    end_x: int,
+    end_y: int,
+    duration_millis: int = DEFAULT_UI_SWIPE_DURATION_MILLIS,
+) -> dict[str, Any]:
+    """Swipe between two screen coordinates on a Trusted Android phone."""
+    return _device_command(
+        device_id,
+        "ui.swipe",
+        {
+            "startX": _ui_int("start_x", start_x, 0, MAX_UI_COORDINATE),
+            "startY": _ui_int("start_y", start_y, 0, MAX_UI_COORDINATE),
+            "endX": _ui_int("end_x", end_x, 0, MAX_UI_COORDINATE),
+            "endY": _ui_int("end_y", end_y, 0, MAX_UI_COORDINATE),
+            "durationMillis": _ui_int("duration_millis", duration_millis, 1, MAX_UI_SWIPE_DURATION_MILLIS),
+        },
+    )
+
+
+@mcp.tool()
+def ui_text(device_id: str, text: str) -> dict[str, Any]:
+    """Type bounded text into the currently focused Android input field on a Trusted phone."""
+    if not isinstance(text, str) or not text or "\x00" in text or len(text.encode("utf-8")) > MAX_UI_TEXT_BYTES:
+        raise ValueError("text is empty, too large, or contains NUL.")
+    return _device_command(device_id, "ui.text", {"text": text})
+
+
+@mcp.tool()
+def ui_key(device_id: str, key_code: int) -> dict[str, Any]:
+    """Send one Android key event to a Trusted phone."""
+    return _device_command(
+        device_id,
+        "ui.key",
+        {"keyCode": _ui_int("key_code", key_code, 0, MAX_UI_KEY_CODE)},
+    )
+
+
+@mcp.tool()
+def open_app(device_id: str, package_name: str) -> dict[str, Any]:
+    """Open the launcher activity of one Android package on a Trusted phone."""
+    package = _validate_package_name(package_name, protect_bridge=False)
+    return _device_command(device_id, "apps.open", {"packageName": package})
 
 
 @mcp.tool()

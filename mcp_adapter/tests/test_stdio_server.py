@@ -23,6 +23,13 @@ EXPECTED_TOOLS = {
     "install_apk",
     "uninstall_app",
     "force_stop_app",
+    "open_app",
+    "ui_hierarchy",
+    "ui_screenshot",
+    "ui_tap",
+    "ui_swipe",
+    "ui_text",
+    "ui_key",
     "run_shell",
 }
 

@@ -54,14 +54,15 @@ object DefaultToolPolicy {
 
         return when (tool.risk) {
             ToolRisk.READ_ONLY -> ApprovalDecision.ALLOW
-            ToolRisk.RAW_SHELL -> if (trustMode == AgentTrustMode.TRUSTED) {
+            ToolRisk.RAW_SHELL,
+            ToolRisk.UI_CONTROL,
+            -> if (trustMode == AgentTrustMode.TRUSTED) {
                 ApprovalDecision.ALLOW
             } else {
                 ApprovalDecision.DENY
             }
             ToolRisk.MUTATING,
             ToolRisk.PRIVILEGED,
-            ToolRisk.UI_CONTROL,
             -> ApprovalDecision.REQUIRE_APPROVAL
         }
     }

@@ -32,6 +32,28 @@ object EmbeddedPrivilegedProbe {
                 printResult(client.exec(args.drop(4).joinToString(" "), args[3].toLong()))
             }
             "battery" -> printResult(client.batteryStats())
+            "ui-hierarchy" -> printResult(client.uiHierarchy())
+            "ui-screenshot" -> printScreenshot(client.uiScreenshot())
+            "ui-tap" -> {
+                require(args.size == 5)
+                printResult(client.uiTap(args[3].toInt(), args[4].toInt()))
+            }
+            "ui-swipe" -> {
+                require(args.size == 8)
+                printResult(client.uiSwipe(args[3].toInt(), args[4].toInt(), args[5].toInt(), args[6].toInt(), args[7].toInt()))
+            }
+            "ui-text" -> {
+                require(args.size >= 4)
+                printResult(client.uiText(args.drop(3).joinToString(" ")))
+            }
+            "ui-key" -> {
+                require(args.size == 4)
+                printResult(client.uiKey(args[3].toInt()))
+            }
+            "open-app" -> {
+                require(args.size == 4)
+                printResult(client.openApp(args[3]))
+            }
             "force-stop" -> {
                 require(args.size == 4)
                 printResult(client.forceStop(args[3]))
@@ -62,6 +84,14 @@ object EmbeddedPrivilegedProbe {
             "shutdown" -> println("shutdown=${client.shutdown()}")
             else -> error("Unknown operation: ${args[2]}")
         }
+    }
+
+    private fun printScreenshot(result: EmbeddedPrivilegedScreenshotResult) {
+        println("mimeType=${result.mimeType}")
+        println("width=${result.width}")
+        println("height=${result.height}")
+        println("bytes=${result.bytes.size}")
+        println("base64=${Base64.getEncoder().encodeToString(result.bytes)}")
     }
 
     private fun printResult(result: EmbeddedPrivilegedExecResult) {

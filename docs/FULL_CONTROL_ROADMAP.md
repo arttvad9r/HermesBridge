@@ -77,15 +77,16 @@ Structured tools remain preferred for common tasks, but they no longer artificia
 
 ## Phase 3 — UI perception and control
 
-- [ ] persistent, explicitly enabled UI-control capability.
-- [ ] screenshot/frame acquisition for the agent.
-- [ ] UI hierarchy where available.
-- [ ] tap, long-press, swipe, text input and key events.
-- [ ] open app/activity and wait-for-UI primitives.
-- [ ] foreground indicator, kill switch and audit trail.
+- [x] UI-control is part of the pairing-scoped `TRUSTED` capability and remains denied in `SAFE`.
+- [x] bounded JPEG screenshot acquisition through the owned shell-UID helper.
+- [x] bounded UI hierarchy through Android `uiautomator` where available.
+- [x] tap, swipe, text input and key events; long-press remains a follow-up convenience primitive.
+- [x] typed launcher-app open operation.
+- [ ] arbitrary activity and wait-for-UI primitives.
+- [ ] dedicated UI-control foreground indicator/kill switch; command audit already covers remote UI actions.
 - [ ] investigate OEM behavior and protected/secure surfaces; do not claim bypasses Android does not provide.
 
-The full-control GitHub build may use AccessibilityService when the user explicitly enables it. Play distribution is a separate product/release-policy decision.
+The current full-control path uses the owned shell-UID helper for perception and input, so AccessibilityService is not a runtime requirement. It remains an optional future backend only if it adds capabilities that Android shell cannot provide. Play distribution is a separate product/release-policy decision.
 
 ## Phase 4 — notifications, clipboard, media and files
 

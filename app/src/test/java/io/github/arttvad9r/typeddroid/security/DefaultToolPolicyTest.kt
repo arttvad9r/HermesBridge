@@ -69,4 +69,16 @@ class DefaultToolPolicyTest {
             ),
         )
     }
+    @Test
+    fun uiControlRequiresTrustedMode() {
+        assertEquals(
+            ApprovalDecision.DENY,
+            DefaultToolPolicy.decision(BridgeTool("ui.tap", ToolRisk.UI_CONTROL), AgentTrustMode.SAFE),
+        )
+        assertEquals(
+            ApprovalDecision.ALLOW,
+            DefaultToolPolicy.decision(BridgeTool("ui.tap", ToolRisk.UI_CONTROL), AgentTrustMode.TRUSTED),
+        )
+    }
+
 }

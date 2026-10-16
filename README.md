@@ -6,7 +6,7 @@ TypedDroid lets an MCP-capable agent use an Android phone through a local, user-
 
 Hermes Agent is only an optional adapter; the protocol and privilege model are agent-neutral.
 
-> Status: active full-control development on the dedicated development branch. SAFE/TRUSTED policy, generic MCP, repository-owned Android 11+ ADB pairing/transport, shell-v2, a shell-UID `app_process` helper, TRUSTED `run_shell`, and the existing privileged typed tools are implemented on the owned backend. Wireless-Debugging onboarding and helper bootstrap are present in the Android UI. Physical-device interoperability/reboot/OEM tests are still required before stable release.
+> Status: active full-control development on the dedicated development branch. SAFE/TRUSTED policy, generic MCP, repository-owned Android 11+ ADB pairing/transport, shell-v2, a shell-UID `app_process` helper, TRUSTED `run_shell`, typed privileged app operations, and typed UI perception/control are implemented on the owned backend. Wireless-Debugging onboarding and helper bootstrap are present in the Android UI. Physical-device interoperability/reboot/OEM tests are still required before stable release.
 
 ## Why this exists
 
@@ -78,9 +78,14 @@ Mutating/privileged typed tools, currently using the existing approval model:
 - `uninstall_app`
 - `force_stop_app`
 
-Full-control:
+Full-control (all denied in SAFE and available only to a pairing explicitly switched to TRUSTED while the owned privileged helper is active):
 
-- `run_shell` — denied by the phone in SAFE mode; available only to a pairing explicitly switched to TRUSTED and only while the owned privileged helper is active.
+- `run_shell` — unrestricted Android shell UID command execution;
+- `open_app` — open a package's launcher activity;
+- `ui_hierarchy` — read a bounded Android UI hierarchy;
+- `ui_screenshot` — capture a bounded JPEG screenshot;
+- `ui_tap` / `ui_swipe` — coordinate input;
+- `ui_text` / `ui_key` — focused text and key-event input.
 
 Mutation retries can use explicit idempotency keys. Reusing a key for changed arguments fails closed.
 
@@ -90,7 +95,7 @@ Agent trust and Android privilege are separate axes. A TRUSTED agent does not cr
 
 Typed operations continue to protect the TypedDroid package and keep their existing validation/approval behavior. The TRUSTED raw-shell capability is intentionally broader: once granted, it has the authority Android gives the `shell` UID, so restrictions such as launcher-only package enumeration or SAF-only paths do not describe the maximum authority of that specific capability.
 
-The current full-control work does not claim root, lockscreen bypass, or access that Android's shell UID itself does not have. UI perception/control is a separate upcoming capability group.
+The current full-control work does not claim root, lockscreen bypass, or access that Android's shell UID itself does not have. UI perception/control now uses typed shell-UID helper operations; protected/secure Android surfaces may still hide content or reject input.
 
 ## Local setup
 

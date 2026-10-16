@@ -306,3 +306,14 @@ After Bridge Host and MCP are configured:
 12. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
 
 Physical-device end-to-end validation is still required before the owned helper and mutating actions should be treated as production-ready.
+## Trusted UI control
+
+When the paired agent is explicitly set to `TRUSTED` and the embedded privileged helper is active, TypedDroid exposes structured UI tools in addition to `shell.run`:
+
+- `ui.hierarchy` — bounded current hierarchy from Android `uiautomator`;
+- `ui.screenshot` — bounded JPEG screenshot (currently <= 128 KiB);
+- `ui.tap` / `ui.swipe` — bounded screen-coordinate input;
+- `ui.text` / `ui.key` — focused text and key-event input;
+- `apps.open` — launch a package's normal launcher activity.
+
+These operations are denied in `SAFE`. They are typed helper operations rather than agent-composed shell commands, and all remote command results still pass through the shared audit and response-size boundaries. Secure/protected Android surfaces may still hide or reject content; TypedDroid does not claim to bypass those platform controls.

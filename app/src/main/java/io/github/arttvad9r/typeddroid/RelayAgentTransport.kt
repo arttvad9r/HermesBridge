@@ -57,6 +57,7 @@ class RelayAgentTransport(
     appPermissionsRepository: AppPermissionsRepository = AndroidAppPermissionsRepository(context),
     batteryDiagnosticsBackend: BatteryDiagnosticsBackend = EmbeddedBatteryDiagnosticsBackend(context.applicationContext),
     rawShellBackend: RawShellBackend = EmbeddedRawShellBackend(context.applicationContext),
+    uiControlBackend: UiControlBackend = EmbeddedUiControlBackend(context.applicationContext),
     deviceIdentity: DeviceIdentity = AndroidKeystoreDeviceIdentity(),
     pairingRecordStore: PairingRecordStore = PairingStore(context.applicationContext),
 ) : AgentTransport {
@@ -74,6 +75,7 @@ class RelayAgentTransport(
         batteryDiagnosticsBackend = batteryDiagnosticsBackend,
         appUsageRepository = appUsageRepository,
         rawShellBackend = rawShellBackend,
+        uiControlBackend = uiControlBackend,
         agentTrustMode = pairingRecordStore::trustMode,
     )
     private val commandRouter = BridgeCommandRouter(

@@ -23,6 +23,15 @@ internal data class EmbeddedPrivilegedRequest(
     val artifactSizeBytes: Long? = null,
     val artifactSha256: String? = null,
     val replace: Boolean? = null,
+    val x: Int? = null,
+    val y: Int? = null,
+    val startX: Int? = null,
+    val startY: Int? = null,
+    val endX: Int? = null,
+    val endY: Int? = null,
+    val durationMillis: Int? = null,
+    val keyCode: Int? = null,
+    val text: String? = null,
 )
 
 @Serializable
@@ -36,6 +45,9 @@ internal data class EmbeddedPrivilegedResponse(
     val stderrTruncated: Boolean = false,
     val timedOut: Boolean = false,
     val error: String? = null,
+    val imageWidth: Int? = null,
+    val imageHeight: Int? = null,
+    val mimeType: String? = null,
 )
 
 internal object EmbeddedPrivilegedProtocol {
@@ -47,6 +59,13 @@ internal object EmbeddedPrivilegedProtocol {
     const val OP_FORCE_STOP_APP = "force_stop_app"
     const val OP_REVOKE_PERMISSION = "revoke_permission"
     const val OP_BATTERY_STATS = "battery_stats"
+    const val OP_UI_HIERARCHY = "ui_hierarchy"
+    const val OP_UI_SCREENSHOT = "ui_screenshot"
+    const val OP_UI_TAP = "ui_tap"
+    const val OP_UI_SWIPE = "ui_swipe"
+    const val OP_UI_TEXT = "ui_text"
+    const val OP_UI_KEY = "ui_key"
+    const val OP_OPEN_APP = "open_app"
     // Batterystats may retain up to 4 MiB before base64 encoding into the response frame.
     const val MAX_REQUEST_FRAME_BYTES = 128 * 1024
     const val MAX_RESPONSE_FRAME_BYTES = 8 * 1024 * 1024

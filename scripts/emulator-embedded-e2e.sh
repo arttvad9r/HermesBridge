@@ -30,7 +30,7 @@ probe() {
 cleanup() {
   probe shutdown >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" uninstall "$FIXTURE" >/dev/null 2>&1 || true
-  rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt
+  rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt
 }
 trap cleanup EXIT
 "$ADB" -s "$SERIAL" shell "pkill -f EmbeddedPrivilegedMain 2>/dev/null || true" >/dev/null 2>&1 || true
@@ -85,6 +85,62 @@ echo "PASS rejected APK hash cleans staging and keeps helper alive"
 probe install files/typeddroid-e2e-fixture.apk e2e-fixture-debug.apk "$fixture_size" "$fixture_sha" false | grep -q '^exitCode=0$'
 "$ADB" -s "$SERIAL" shell pm list packages "$FIXTURE" | grep -q "$FIXTURE"
 echo "PASS APK streaming install"
+
+probe open-app "$FIXTURE" | grep -q '^exitCode=0$'
+sleep .5
+[[ -n $("$ADB" -s "$SERIAL" shell pidof "$FIXTURE" || true) ]]
+echo "PASS typed open-app"
+
+probe ui-hierarchy > /tmp/typeddroid-e2e-ui.xml.b64
+python3 - <<'PYUI'
+import base64, re
+values={}
+for line in open('/tmp/typeddroid-e2e-ui.xml.b64'):
+    k, _, v=line.rstrip('\n').partition('='); values[k]=v
+assert values['exitCode']=='0'
+assert values['stdoutTruncated']=='false'
+xml=base64.b64decode(values['stdoutBase64']).decode()
+assert 'TypedDroid E2E Fixture' in xml
+m=re.search(r'class="android.widget.EditText"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml)
+assert m, xml[:1000]
+x1,y1,x2,y2=map(int,m.groups())
+open('/tmp/typeddroid-e2e-edit-center','w').write(f'{(x1+x2)//2} {(y1+y2)//2}\n')
+PYUI
+read -r edit_x edit_y < /tmp/typeddroid-e2e-edit-center
+probe ui-tap "$edit_x" "$edit_y" | grep -q '^exitCode=0$'
+probe ui-text TypedDroidTest | grep -q '^exitCode=0$'
+sleep .2
+probe ui-hierarchy > /tmp/typeddroid-e2e-ui-after.txt
+python3 - <<'PYUI'
+import base64
+v={}
+for line in open('/tmp/typeddroid-e2e-ui-after.txt'):
+    k, _, x=line.rstrip('\n').partition('='); v[k]=x
+xml=base64.b64decode(v['stdoutBase64']).decode()
+assert 'TypedDroidTest' in xml, xml[-1500:]
+PYUI
+echo "PASS hierarchy + tap + text input"
+
+probe ui-swipe 600 1800 600 900 250 | grep -q '^exitCode=0$'
+probe ui-key 4 | grep -q '^exitCode=0$'
+echo "PASS swipe + key event"
+
+probe open-app "$FIXTURE" >/dev/null
+sleep .3
+probe ui-screenshot > /tmp/typeddroid-e2e-screen.txt
+python3 - <<'PYSHOT'
+import base64
+v={}
+for line in open('/tmp/typeddroid-e2e-screen.txt'):
+    k, _, x=line.rstrip('\n').partition('='); v[k]=x
+raw=base64.b64decode(v['base64'])
+assert v['mimeType']=='image/jpeg'
+assert 0 < int(v['bytes']) <= 128 * 1024
+assert int(v['width']) > 0 and int(v['height']) > 0
+assert raw[:2] == b'\xff\xd8' and raw[-2:] == b'\xff\xd9'
+PYSHOT
+echo "PASS bounded JPEG screenshot"
+
 "$ADB" -s "$SERIAL" shell monkey -p "$FIXTURE" 1 >/dev/null 2>&1
 sleep .3
 [[ -n $("$ADB" -s "$SERIAL" shell pidof "$FIXTURE" || true) ]]

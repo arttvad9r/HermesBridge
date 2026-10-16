@@ -19,6 +19,13 @@ internal data class EmbeddedPrivilegedExecResult(
     val stderrTruncated: Boolean,
 )
 
+internal data class EmbeddedPrivilegedScreenshotResult(
+    val bytes: ByteArray,
+    val width: Int,
+    val height: Int,
+    val mimeType: String,
+)
+
 internal class EmbeddedPrivilegedClient(
     private val endpoint: EmbeddedPrivilegedEndpoint,
 ) {
@@ -114,6 +121,86 @@ internal class EmbeddedPrivilegedClient(
             timeoutMillis = BATTERY_RPC_TIMEOUT_MILLIS,
         )
 
+    fun uiHierarchy(): EmbeddedPrivilegedExecResult = typedRequest(
+        EmbeddedPrivilegedRequest(
+            id = UUID.randomUUID().toString(),
+            operation = EmbeddedPrivilegedProtocol.OP_UI_HIERARCHY,
+            authToken = endpoint.authToken,
+        ),
+        timeoutMillis = UI_RPC_TIMEOUT_MILLIS,
+    )
+
+    fun uiTap(x: Int, y: Int): EmbeddedPrivilegedExecResult = typedRequest(
+        EmbeddedPrivilegedRequest(
+            id = UUID.randomUUID().toString(),
+            operation = EmbeddedPrivilegedProtocol.OP_UI_TAP,
+            authToken = endpoint.authToken,
+            x = x,
+            y = y,
+        )
+    )
+
+    fun uiSwipe(startX: Int, startY: Int, endX: Int, endY: Int, durationMillis: Int): EmbeddedPrivilegedExecResult =
+        typedRequest(
+            EmbeddedPrivilegedRequest(
+                id = UUID.randomUUID().toString(),
+                operation = EmbeddedPrivilegedProtocol.OP_UI_SWIPE,
+                authToken = endpoint.authToken,
+                startX = startX,
+                startY = startY,
+                endX = endX,
+                endY = endY,
+                durationMillis = durationMillis,
+            )
+        )
+
+    fun uiText(text: String): EmbeddedPrivilegedExecResult = typedRequest(
+        EmbeddedPrivilegedRequest(
+            id = UUID.randomUUID().toString(),
+            operation = EmbeddedPrivilegedProtocol.OP_UI_TEXT,
+            authToken = endpoint.authToken,
+            text = text,
+        )
+    )
+
+    fun uiKey(keyCode: Int): EmbeddedPrivilegedExecResult = typedRequest(
+        EmbeddedPrivilegedRequest(
+            id = UUID.randomUUID().toString(),
+            operation = EmbeddedPrivilegedProtocol.OP_UI_KEY,
+            authToken = endpoint.authToken,
+            keyCode = keyCode,
+        )
+    )
+
+    fun openApp(packageName: String): EmbeddedPrivilegedExecResult = typedRequest(
+        EmbeddedPrivilegedRequest(
+            id = UUID.randomUUID().toString(),
+            operation = EmbeddedPrivilegedProtocol.OP_OPEN_APP,
+            authToken = endpoint.authToken,
+            packageName = packageName,
+        )
+    )
+
+    fun uiScreenshot(): EmbeddedPrivilegedScreenshotResult {
+        val request = EmbeddedPrivilegedRequest(
+            id = UUID.randomUUID().toString(),
+            operation = EmbeddedPrivilegedProtocol.OP_UI_SCREENSHOT,
+            authToken = endpoint.authToken,
+        )
+        openSocket(UI_RPC_TIMEOUT_MILLIS).use { socket ->
+            EmbeddedPrivilegedProtocol.writeRequest(socket.outputStream, request)
+            val response = EmbeddedPrivilegedProtocol.readResponse(socket.inputStream)
+            check(response.id == request.id) { "Mismatched privileged RPC response ID." }
+            response.requireRemoteSuccess("Screen capture failed.")
+            return EmbeddedPrivilegedScreenshotResult(
+                bytes = Base64.getDecoder().decode(response.stdoutBase64 ?: ""),
+                width = checkNotNull(response.imageWidth),
+                height = checkNotNull(response.imageHeight),
+                mimeType = response.mimeType ?: "image/jpeg",
+            )
+        }
+    }
+
     fun shutdown(): Boolean = runCatching {
         request(EmbeddedPrivilegedProtocol.OP_SHUTDOWN).ok
     }.getOrDefault(false)
@@ -196,6 +283,7 @@ internal class EmbeddedPrivilegedClient(
         const val RPC_TIMEOUT_GRACE_MILLIS = 5_000L
         const val TYPED_RPC_TIMEOUT_MILLIS = 45_000L
         const val BATTERY_RPC_TIMEOUT_MILLIS = 45_000L
+        const val UI_RPC_TIMEOUT_MILLIS = 15_000L
         const val APK_RPC_TIMEOUT_MILLIS = 6 * 60 * 1000L
     }
 }
