@@ -142,7 +142,7 @@ More detail: [docs/SECURITY.md](docs/SECURITY.md).
 - Jetpack Compose + Material 3
 - Java/Kotlin target 17
 - Ktor WebSockets 3.1.2
-- kotlinx.serialization 1.8.1
+- kotlinx.serialization 1.11.0
 - AndroidX DocumentFile 1.1.0 for SAF tree traversal
 - Shizuku API/provider 13.1.5
 - Python MCP SDK v2 adapter for Hermes
@@ -170,4 +170,4 @@ Weekly Dependabot monitoring covers Gradle/Maven, Python and GitHub Actions depe
 
 ## Repository policy
 
-No project-wide license has been selected yet. Third-party adapted code retains its upstream attribution/license notice. Until a project license is added, normal copyright rules apply to Hermes Bridge's own code.
+Hermes Bridge is licensed under the Apache License 2.0. Third-party adapted code retains its upstream attribution and license notices; see `THIRD_PARTY_NOTICES.md`.

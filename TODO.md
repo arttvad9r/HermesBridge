@@ -149,6 +149,6 @@
 - [ ] Audit-log persistence, clear-history and notification-entry E2E on physical device.
 - [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through the deployed VPS relay.
 - [ ] Battery impact measurements.
-- [ ] R8/release build and reflection keep-rule verification.
+- [x] R8/release build and reflection keep-rule verification.
 - [x] Signed release process with external signing secrets, `apksigner` verification, and byte-for-byte reproducible unsigned APK gate.
-- [ ] Decide project license.
+- [x] Decide project license: Apache-2.0.

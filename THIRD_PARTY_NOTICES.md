@@ -11,7 +11,7 @@ Hermes Bridge contains a narrow adaptation of Shizuku process-execution and type
 
 The adapted Hermes Bridge process-execution pattern is kept private and is used only by fixed typed operations required by the product:
 
-- `pm install [-r] -S <verified-size> -`, with verified APK bytes supplied through stdin;
+- `pm install [-r] <service-generated-staging-path>`, after the APK has been bounded and verified by size, SHA-256, package name and signing metadata;
 - `pm uninstall [-k] <package>`;
 - `am force-stop <package>`;
 - `dumpsys batterystats --charged --checkin` for bounded read-only battery diagnostics.
