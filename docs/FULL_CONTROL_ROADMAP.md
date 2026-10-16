@@ -90,7 +90,7 @@ The current full-control path uses the owned shell-UID helper for perception and
 
 ## Phase 4 — notifications, clipboard, media and files
 
-- [ ] notification listener: list/open/dismiss/action/reply.
+- [x] notification listener: list/open/dismiss/action/reply, including free-form RemoteInput replies and emulator E2E.
 - [ ] clipboard read/write with Android-version-aware limits.
 - [ ] media/photo/document discovery through Android APIs.
 - [ ] file copy/move/read/write/search in user-granted storage plus shell-accessible areas.

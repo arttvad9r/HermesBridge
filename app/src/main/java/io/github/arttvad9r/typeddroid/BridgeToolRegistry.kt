@@ -35,6 +35,7 @@ class BridgeToolRegistry(
     private val appUsageRepository: AppUsageRepository? = null,
     private val rawShellBackend: RawShellBackend = DisabledRawShellBackend,
     private val uiControlBackend: UiControlBackend = DisabledUiControlBackend,
+    private val notificationControlBackend: NotificationControlBackend = DisabledNotificationControlBackend,
     private val agentTrustMode: () -> AgentTrustMode = { AgentTrustMode.SAFE },
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
@@ -58,6 +59,11 @@ class BridgeToolRegistry(
             APPOPS_SET -> executeAppOpsSet(request)
             PROCESS_LIST -> executeProcessList(request)
             LOGCAT_READ -> executeLogcatRead(request)
+            NOTIFICATIONS_LIST -> executeNotificationsList(request)
+            NOTIFICATIONS_DISMISS -> executeNotificationDismiss(request)
+            NOTIFICATIONS_OPEN -> executeNotificationOpen(request)
+            NOTIFICATIONS_ACTION -> executeNotificationAction(request)
+            NOTIFICATIONS_REPLY -> executeNotificationReply(request)
             FS_STAT -> executeFsStat(request)
             FS_LIST -> executeFsList(request)
             FS_READ -> executeFsRead(request)
@@ -130,6 +136,7 @@ class BridgeToolRegistry(
                 put("rawShell", trust == AgentTrustMode.TRUSTED && shellReady)
                 put("trustedSystemControl", trust == AgentTrustMode.TRUSTED && shellReady)
                 put("uiControl", trust == AgentTrustMode.TRUSTED && uiReady)
+                put("notificationControl", trust == AgentTrustMode.TRUSTED && notificationControlBackend.readiness().ready)
                 put("structuredAppManagement", privilegedAppsBackend.readiness().ready)
                 put("batteryDiagnostics", batteryDiagnosticsBackend.readiness().ready)
                 put(
@@ -137,7 +144,8 @@ class BridgeToolRegistry(
                     buildJsonArray {
                         listOf(
                             APPS_OPEN, ACTIVITY_START, SETTINGS_GET, SETTINGS_PUT, APPOPS_GET, APPOPS_SET,
-                            PROCESS_LIST, LOGCAT_READ, FS_STAT, FS_LIST, FS_READ, FS_WRITE, FS_MKDIR,
+                            PROCESS_LIST, LOGCAT_READ, NOTIFICATIONS_LIST, NOTIFICATIONS_DISMISS, NOTIFICATIONS_OPEN,
+                            NOTIFICATIONS_ACTION, NOTIFICATIONS_REPLY, FS_STAT, FS_LIST, FS_READ, FS_WRITE, FS_MKDIR,
                             FS_COPY, FS_MOVE, FS_DELETE, FS_SEARCH, UI_HIERARCHY, UI_SCREENSHOT, UI_TAP, UI_SWIPE,
                             UI_LONG_PRESS, UI_WAIT_FOR_TEXT, UI_TEXT, UI_KEY, SHELL_RUN,
                         ).forEach { add(JsonPrimitive(it)) }
@@ -908,6 +916,115 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeNotificationsList(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(LIMIT)
+        if (request.arguments.keys.any { it !in allowed }) {
+            return failure(request.requestId, "invalid_arguments", "notifications.list accepts optional limit.")
+        }
+        val limit = if (LIMIT in request.arguments) {
+            (request.arguments[LIMIT] as? JsonPrimitive)?.intOrNull?.takeIf { it in 1..MAX_NOTIFICATION_RESULTS }
+                ?: return trustedArgumentFailure(request)
+        } else MAX_NOTIFICATION_RESULTS
+        requireNotificationControl(request)?.let { return it }
+        val result = notificationControlBackend.list(limit)
+        if (!result.ok) return failure(request.requestId, result.code ?: "notification_list_failed", result.message ?: "Notification list failed.")
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("untrustedContent", true)
+                put("notifications", buildJsonArray {
+                    result.notifications.forEach { item ->
+                        add(buildJsonObject {
+                            put(NOTIFICATION_KEY, item.key)
+                            put(PACKAGE_NAME, item.packageName)
+                            put("postTimeEpochMillis", item.postTimeEpochMillis)
+                            if (item.title == null) put("title", JsonNull) else put("title", item.title)
+                            if (item.text == null) put("text", JsonNull) else put("text", item.text)
+                            if (item.subText == null) put("subText", JsonNull) else put("subText", item.subText)
+                            if (item.category == null) put("category", JsonNull) else put("category", item.category)
+                            if (item.channelId == null) put("channelId", JsonNull) else put("channelId", item.channelId)
+                            if (item.groupKey == null) put("groupKey", JsonNull) else put("groupKey", item.groupKey)
+                            put("ongoing", item.ongoing)
+                            put("clearable", item.clearable)
+                            put("contentIntentAvailable", item.contentIntentAvailable)
+                            put("actions", buildJsonArray {
+                                item.actions.forEach { action -> add(buildJsonObject {
+                                    put(ACTION_INDEX, action.index)
+                                    put("title", action.title)
+                                    put("hasRemoteInput", action.hasRemoteInput)
+                                    put("semanticAction", action.semanticAction)
+                                    put("authenticationRequired", action.authenticationRequired)
+                                }) }
+                            })
+                        })
+                    }
+                })
+            },
+        )
+    }
+
+    private suspend fun executeNotificationDismiss(request: CommandRequestPayload): CommandResultPayload =
+        notificationAction(request, NOTIFICATIONS_DISMISS, setOf(NOTIFICATION_KEY)) { key, _ -> notificationControlBackend.dismiss(key) }
+
+    private suspend fun executeNotificationOpen(request: CommandRequestPayload): CommandResultPayload =
+        notificationAction(request, NOTIFICATIONS_OPEN, setOf(NOTIFICATION_KEY)) { key, _ -> notificationControlBackend.open(key) }
+
+    private suspend fun executeNotificationAction(request: CommandRequestPayload): CommandResultPayload =
+        notificationAction(request, NOTIFICATIONS_ACTION, setOf(NOTIFICATION_KEY, ACTION_INDEX)) { key, index ->
+            notificationControlBackend.action(key, checkNotNull(index))
+        }
+
+    private suspend fun executeNotificationReply(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(NOTIFICATION_KEY, ACTION_INDEX, TEXT)) {
+            return failure(request.requestId, "invalid_arguments", "notifications.reply requires notificationKey, actionIndex and text.")
+        }
+        val key = notificationKey(request) ?: return trustedArgumentFailure(request)
+        val index = (request.arguments[ACTION_INDEX] as? JsonPrimitive)?.intOrNull?.takeIf { it in 0..MAX_NOTIFICATION_ACTION_INDEX }
+            ?: return trustedArgumentFailure(request)
+        val text = stringArgument(request, TEXT, MAX_NOTIFICATION_REPLY_BYTES) ?: return trustedArgumentFailure(request)
+        requireNotificationControl(request)?.let { return it }
+        val result = notificationControlBackend.reply(key, index, text)
+        if (!result.ok) return failure(request.requestId, result.code ?: "notification_reply_failed", result.message ?: "Notification reply failed.")
+        return CommandResultPayload(request.requestId, true, buildJsonObject { put("replied", true) })
+    }
+
+    private suspend fun notificationAction(
+        request: CommandRequestPayload,
+        tool: String,
+        expectedKeys: Set<String>,
+        block: suspend (String, Int?) -> PrivilegedOperationResult,
+    ): CommandResultPayload {
+        if (request.arguments.keys != expectedKeys) return failure(request.requestId, "invalid_arguments", "$tool arguments are invalid.")
+        val key = notificationKey(request) ?: return trustedArgumentFailure(request)
+        val index = if (ACTION_INDEX in expectedKeys) {
+            (request.arguments[ACTION_INDEX] as? JsonPrimitive)?.intOrNull?.takeIf { it in 0..MAX_NOTIFICATION_ACTION_INDEX }
+                ?: return trustedArgumentFailure(request)
+        } else null
+        requireNotificationControl(request)?.let { return it }
+        val result = block(key, index)
+        if (!result.ok) return failure(request.requestId, result.code ?: "notification_action_failed", result.message ?: "Notification action failed.")
+        return CommandResultPayload(request.requestId, true, buildJsonObject {
+            put("completed", true)
+            put(NOTIFICATION_KEY, key)
+        })
+    }
+
+    private fun notificationKey(request: CommandRequestPayload): String? =
+        stringArgument(request, NOTIFICATION_KEY, MAX_NOTIFICATION_KEY_BYTES)
+
+    private fun requireNotificationControl(request: CommandRequestPayload): CommandResultPayload? {
+        if (DefaultToolPolicy.decision(BridgeTool(request.tool, ToolRisk.TRUSTED_CONTROL), agentTrustMode()) != ApprovalDecision.ALLOW) {
+            return failure(request.requestId, "policy_denied", "Notification control is available only to an agent explicitly placed in Trusted mode on the phone.")
+        }
+        val readiness = notificationControlBackend.readiness()
+        return if (readiness.ready) null else failure(
+            request.requestId,
+            readiness.code ?: "notification_access_unavailable",
+            readiness.message ?: "Notification access is unavailable.",
+        )
+    }
+
     private suspend fun executeFsStat(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys != setOf(PATH)) {
             return failure(request.requestId, "invalid_arguments", "fs.stat requires path.")
@@ -1657,6 +1774,11 @@ class BridgeToolRegistry(
         const val APPOPS_SET = "appops.set"
         const val PROCESS_LIST = "process.list"
         const val LOGCAT_READ = "logcat.read"
+        const val NOTIFICATIONS_LIST = "notifications.list"
+        const val NOTIFICATIONS_DISMISS = "notifications.dismiss"
+        const val NOTIFICATIONS_OPEN = "notifications.open"
+        const val NOTIFICATIONS_ACTION = "notifications.action"
+        const val NOTIFICATIONS_REPLY = "notifications.reply"
         const val FS_STAT = "fs.stat"
         const val FS_LIST = "fs.list"
         const val FS_READ = "fs.read"
@@ -1676,6 +1798,10 @@ class BridgeToolRegistry(
         const val UI_KEY = "ui.key"
         const val SHELL_RUN = "shell.run"
 
+        private const val NOTIFICATION_KEY = "notificationKey"
+        private const val ACTION_INDEX = "actionIndex"
+        private const val LIMIT = "limit"
+        private const val MAX_NOTIFICATION_ACTION_INDEX = 15
         private const val SHELL_COMMAND = "command"
         private const val TIMEOUT_MILLIS = "timeoutMillis"
         private const val DEFAULT_SHELL_TIMEOUT_MILLIS = 30_000L

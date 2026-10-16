@@ -53,6 +53,8 @@ Read-only:
 - `list_files(device_id, path_segments=[])`
 - `analyze_files(device_id, path_segments=[])`
 
+TRUSTED full-control tools include `device_capabilities`, `run_shell`, structured system/appops/settings/process/logcat tools, typed shell-visible filesystem tools, UI perception/control, and notification tools: `list_notifications`, `dismiss_notification`, `open_notification`, `notification_action`, and `reply_notification`. Notification content is explicitly external/untrusted data, and Android Notification Access must be enabled on the phone.
+
 Mutating/privileged, always subject to Android-side policy/approval:
 
 - `revoke_app_permission(...)`

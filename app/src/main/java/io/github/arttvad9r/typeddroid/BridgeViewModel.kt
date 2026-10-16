@@ -32,6 +32,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
         BridgeUiState(
             health = healthRepository.snapshot(),
             notificationsGranted = BridgeNotificationPermission.isGranted(application),
+            notificationListenerGranted = NotificationListenerAccess.isGranted(application),
             fileAccessConfigured = treeStore.treeUri() != null,
             usageAccessGranted = appUsageRepository.hasAccess(),
             setupCompleted = setupStore.isCompleted(),
@@ -103,6 +104,10 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
         _state.update {
             it.copy(notificationsGranted = BridgeNotificationPermission.isGranted(app))
         }
+    }
+
+    fun refreshNotificationListenerAccess() {
+        _state.update { it.copy(notificationListenerGranted = NotificationListenerAccess.isGranted(app)) }
     }
 
     fun refreshUsageAccess() {

@@ -194,6 +194,9 @@ The same TRUSTED boundary also exposes structured convenience tools so agents do
 - `appops_get(...)` / `appops_set(...)` → `appops.get` / `appops.set`;
 - `process_list(device_id)` → `process.list`;
 - `logcat_read(device_id, lines=100, buffer="main")` → `logcat.read`;
+- `list_notifications(device_id, limit=50)` → `notifications.list`;
+- `dismiss_notification(...)` / `open_notification(...)` → `notifications.dismiss` / `notifications.open`;
+- `notification_action(...)` / `reply_notification(...)` → `notifications.action` / `notifications.reply`;
 - `fs_stat` / `fs_list` / `fs_read` / `fs_search` for shell-visible absolute paths;
 - `fs_write` / `fs_mkdir` / `fs_copy` / `fs_move` / `fs_delete` for trusted mutable roots (`/sdcard`, `/storage/emulated/0`, `/data/local/tmp`);
 - `open_app(...)` → `apps.open`;
@@ -202,9 +205,11 @@ The same TRUSTED boundary also exposes structured convenience tools so agents do
 - `ui_wait_for_text(...)`;
 - `ui_text(...)` / `ui_key(...)`.
 
+Notification tools require Android Notification Access in addition to TRUSTED pairing state. `notifications.list` returns only bounded structured fields and marks the entire payload with `untrustedContent=true`: notification title/text/action labels originate from external apps and must be treated as data, never instructions. The exposed `notificationKey` is an opaque SHA-256 token, not the app-controlled raw Android notification key. Open/action/reply/dismiss are separate explicit calls and use replay protection so retrying the same idempotency key does not execute the PendingIntent twice. TypedDroid does not bypass lockscreen/authentication requirements declared by Android notification actions.
+
 Filesystem reads are bounded to 128 KiB per call and writes to 32 KiB per call, with explicit offsets so larger files can be transferred in chunks without exceeding the 256 KiB control-channel frame ceiling. Typed destructive file operations refuse to delete or move the mutable roots themselves.
 
-These tools validate names, paths, bounds and enums on both MCP/Android boundaries and then use the same owned shell-UID helper. They are convenience and audit surfaces, not a reduction of the authority already granted by `run_shell`. `appops_set` also protects the TypedDroid package itself.
+These tools validate names, paths, bounds and enums on both MCP/Android boundaries and then use the same owned shell-UID helper where applicable. Notification controls use Android's `NotificationListenerService`/`PendingIntent`/`RemoteInput` APIs rather than shell parsing. They are convenience and audit surfaces, not a reduction of the authority already granted by `run_shell`. `appops_set` also protects the TypedDroid package itself.
 
 ## Mutating / privileged MCP tools
 

@@ -52,6 +52,7 @@ data class BridgeUiState(
     val pairingCode: String = "",
     val health: DeviceHealthSnapshot? = null,
     val notificationsGranted: Boolean = true,
+    val notificationListenerGranted: Boolean = false,
     val fileAccessConfigured: Boolean = false,
     val usageAccessGranted: Boolean = false,
     val setupCompleted: Boolean = false,

@@ -18,6 +18,7 @@ app_apk=app/build/outputs/apk/debug/app-debug.apk
 fixture_apk=e2e-fixture/build/outputs/apk/debug/e2e-fixture-debug.apk
 echo "STEP install TypedDroid"
 timeout 20s "$ADB" -s "$SERIAL" install -r "$app_apk" >/dev/null
+timeout 10s "$ADB" -s "$SERIAL" shell cmd notification allow_listener "$APP/.TypedDroidNotificationListenerService" >/dev/null
 base_apk=$("$ADB" -s "$SERIAL" shell pm path "$APP" | sed -n 's/^package://p' | head -1)
 [[ -n "$base_apk" ]]
 read -r port token < <(python3 - <<'PY'
@@ -31,6 +32,7 @@ probe() {
 }
 cleanup() {
   probe shutdown >/dev/null 2>&1 || true
+  "$ADB" -s "$SERIAL" shell cmd notification disallow_listener "$APP/.TypedDroidNotificationListenerService" >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" uninstall "$FIXTURE" >/dev/null 2>&1 || true
   rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt /tmp/typeddroid-e2e-setting.txt /tmp/typeddroid-e2e-appops.txt /tmp/typeddroid-e2e-processes.txt /tmp/typeddroid-e2e-logcat.txt /tmp/typeddroid-e2e-fs-stat.txt /tmp/typeddroid-e2e-fs-list.txt /tmp/typeddroid-e2e-fs-read.txt
 }
@@ -88,6 +90,8 @@ echo "PASS rejected APK hash cleans staging and keeps helper alive"
 probe install files/typeddroid-e2e-fixture.apk e2e-fixture-debug.apk "$fixture_size" "$fixture_sha" false | grep -q '^exitCode=0$'
 "$ADB" -s "$SERIAL" shell pm list packages "$FIXTURE" | grep -q "$FIXTURE"
 echo "PASS APK streaming install"
+"$ADB" -s "$SERIAL" shell pm grant "$FIXTURE" android.permission.POST_NOTIFICATIONS
+"$ADB" -s "$SERIAL" shell run-as "$FIXTURE" rm -f shared_prefs/notification_e2e.xml >/dev/null 2>&1 || true
 
 # Trusted structured system-control commands are built on the same bounded shell helper.
 probe exec 5000 settings put global typed_droid_e2e 1 | grep -q '^exitCode=0$'
@@ -135,6 +139,29 @@ probe exec 10000 am start -W -n "$FIXTURE/.MainActivity" | grep -q '^exitCode=0$
 sleep .3
 [[ -n $("$ADB" -s "$SERIAL" shell pidof "$FIXTURE" || true) ]]
 echo "PASS structured activity start command"
+
+# Real NotificationListenerService / PendingIntent / RemoteInput flow.
+notification_probe() {
+  timeout 10s "$ADB" -s "$SERIAL" shell am broadcast --receiver-foreground \
+    -n "$APP/.NotificationE2eReceiver" "$@" | sed -n 's/.*data="\(.*\)".*/\1/p'
+}
+notification_find=$(notification_probe --es operation find --es packageName "$FIXTURE")
+notification_key=$(printf '%s\n' "$notification_find" | sed -n 's/^key=\([^;]*\);.*/\1/p')
+notification_reply_index=$(printf '%s\n' "$notification_find" | sed -n 's/.*;replyIndex=\([-0-9]*\);.*/\1/p')
+[[ -n "$notification_key" && "$notification_reply_index" == "1" ]]
+[[ $(notification_probe --es operation action --es keyBase64 "$notification_key" --ei actionIndex 0) == "ok" ]]
+sleep .2
+"$ADB" -s "$SERIAL" shell run-as "$FIXTURE" cat shared_prefs/notification_e2e.xml | grep -q 'name="marked" value="true"'
+[[ $(notification_probe --es operation reply --es keyBase64 "$notification_key" --ei actionIndex "$notification_reply_index" --es text TypedDroidReply) == "ok" ]]
+sleep .2
+"$ADB" -s "$SERIAL" shell run-as "$FIXTURE" cat shared_prefs/notification_e2e.xml | grep -q '<string name="reply">TypedDroidReply</string>'
+[[ $(notification_probe --es operation open --es keyBase64 "$notification_key") == "ok" ]]
+sleep .2
+"$ADB" -s "$SERIAL" shell run-as "$FIXTURE" cat shared_prefs/notification_e2e.xml | grep -q 'name="opened" value="true"'
+[[ $(notification_probe --es operation dismiss --es keyBase64 "$notification_key") == "ok" ]]
+sleep .2
+[[ $(notification_probe --es operation find --es packageName "$FIXTURE") == "not-found" ]]
+echo "PASS notification list/action/reply/open/dismiss"
 
 # Toybox primitives used by the TRUSTED typed fs.* layer.
 probe exec 5000 mkdir -p /data/local/tmp/typeddroid-fs-e2e/subdir | grep -q '^exitCode=0$'

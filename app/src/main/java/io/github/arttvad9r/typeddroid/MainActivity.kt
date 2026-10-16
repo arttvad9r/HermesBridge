@@ -71,6 +71,10 @@ class MainActivity : ComponentActivity() {
                     contract = ActivityResultContracts.RequestPermission(),
                     onResult = { vm.refreshNotificationPermission() },
                 )
+                val notificationListenerSettingsLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult(),
+                    onResult = { vm.refreshNotificationListenerAccess() },
+                )
 
                 BridgeScreen(
                     state = state,
@@ -94,6 +98,11 @@ class MainActivity : ComponentActivity() {
                                 Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                                     .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
                             )
+                        }
+                    },
+                    onOpenNotificationListenerSettings = {
+                        runCatching {
+                            notificationListenerSettingsLauncher.launch(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                         }
                     },
                     onChooseFileTree = { fileTreeLauncher.launch(null) },
@@ -155,6 +164,7 @@ private fun BridgeScreen(
     onRefreshHealth: () -> Unit,
     onRequestNotifications: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
+    onOpenNotificationListenerSettings: () -> Unit,
     onChooseFileTree: () -> Unit,
     onRevokeFileAccess: () -> Unit,
     onOpenUsageAccessSettings: () -> Unit,
@@ -254,6 +264,11 @@ private fun BridgeScreen(
                         )
                     }
 
+                    AgentNotificationAccessCard(
+                        granted = state.notificationListenerGranted,
+                        onOpenSettings = onOpenNotificationListenerSettings,
+                    )
+
                     FileAccessCard(
                         configured = state.fileAccessConfigured,
                         onChoose = onChooseFileTree,
@@ -273,6 +288,7 @@ private fun BridgeScreen(
 
                     FinishSetupCard(
                         notificationsGranted = state.notificationsGranted,
+                        notificationListenerGranted = state.notificationListenerGranted,
                         fileAccessConfigured = state.fileAccessConfigured,
                         usageAccessGranted = state.usageAccessGranted,
                         embeddedAdbReady = state.embeddedAdb.ready,
@@ -303,6 +319,11 @@ private fun BridgeScreen(
                         onOpenSettings = onOpenNotificationSettings,
                     )
                 }
+
+                AgentNotificationAccessCard(
+                    granted = state.notificationListenerGranted,
+                    onOpenSettings = onOpenNotificationListenerSettings,
+                )
 
                 FileAccessCard(
                     configured = state.fileAccessConfigured,
@@ -340,6 +361,7 @@ private fun BridgeScreen(
                     fileAccessConfigured = state.fileAccessConfigured,
                     usageAccessGranted = state.usageAccessGranted,
                     embeddedAdbReady = state.embeddedAdb.ready,
+                    notificationListenerGranted = state.notificationListenerGranted,
                     agentTrustMode = state.agentTrustMode,
                 )
 
@@ -391,6 +413,7 @@ private fun SetupHeaderCard(connected: Boolean) {
 @Composable
 private fun FinishSetupCard(
     notificationsGranted: Boolean,
+    notificationListenerGranted: Boolean,
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
     embeddedAdbReady: Boolean,
@@ -405,8 +428,9 @@ private fun FinishSetupCard(
             )
             CapabilityRow("Базовая диагностика", "Доступно")
             if (requiresRuntimePermission(Build.VERSION.SDK_INT)) {
-                CapabilityRow("Уведомления", if (notificationsGranted) "Настроено" else "Рекомендуется")
+                CapabilityRow("Системные уведомления TypedDroid", if (notificationsGranted) "Настроено" else "Рекомендуется")
             }
+            CapabilityRow("Доступ агента к уведомлениям", if (notificationListenerGranted) "Настроено" else "Можно позже")
             CapabilityRow("Файлы", if (fileAccessConfigured) "Настроено" else "Можно позже")
             CapabilityRow("Статистика приложений", if (usageAccessGranted) "Настроено" else "Можно позже")
             CapabilityRow("Встроенный ADB", if (embeddedAdbReady) "Готово" else "Можно позже")
@@ -643,6 +667,30 @@ private fun NotificationAccessCard(
                 ) {
                     Text("Настройки уведомлений")
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgentNotificationAccessCard(
+    granted: Boolean,
+    onOpenSettings: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Доступ агента к уведомлениям", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (granted) {
+                    "Android разрешил TypedDroid читать активные уведомления и выполнять их действия. Эти инструменты доступны агенту только в режиме полного доверия."
+                } else {
+                    "Разрешите Notification Access, если хотите, чтобы доверенный агент мог читать, открывать, закрывать уведомления и отвечать через поддерживаемые действия."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                Text(if (granted) "Настройки доступа к уведомлениям" else "Разрешить доступ к уведомлениям")
             }
         }
     }
@@ -977,6 +1025,7 @@ private fun CapabilitiesCard(
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
     embeddedAdbReady: Boolean,
+    notificationListenerGranted: Boolean,
     agentTrustMode: AgentTrustMode,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -988,6 +1037,7 @@ private fun CapabilitiesCard(
             CapabilityRow("Файлы", if (fileAccessConfigured) "Доступно" else "Не настроено")
             CapabilityRow("Подтверждение действий", "Готово")
             CapabilityRow("Встроенный ADB", if (embeddedAdbReady) "Готово" else "Не настроено")
+            CapabilityRow("Доступ к уведомлениям", if (notificationListenerGranted) "Готово" else "Не настроено")
             CapabilityRow(
                 "Доверие агенту",
                 if (agentTrustMode == AgentTrustMode.TRUSTED) "Полный доступ" else "Безопасный режим",
