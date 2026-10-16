@@ -12,10 +12,12 @@ HELPER=io.github.arttvad9r.typeddroid.EmbeddedPrivilegedMain
 [[ -x "$ADB" ]] || { echo "adb not found: $ADB" >&2; exit 1; }
 "$ADB" -s "$SERIAL" get-state >/dev/null
 export ANDROID_HOME="$ANDROID_SDK_ROOT" ANDROID_SDK_ROOT
-./gradlew --no-daemon :app:assembleDebug :e2e-fixture:assembleDebug >/dev/null
+echo "STEP build debug APKs"
+timeout 120s ./gradlew --no-daemon :app:assembleDebug :e2e-fixture:assembleDebug >/dev/null
 app_apk=app/build/outputs/apk/debug/app-debug.apk
 fixture_apk=e2e-fixture/build/outputs/apk/debug/e2e-fixture-debug.apk
-"$ADB" -s "$SERIAL" install -r "$app_apk" >/dev/null
+echo "STEP install TypedDroid"
+timeout 20s "$ADB" -s "$SERIAL" install -r "$app_apk" >/dev/null
 base_apk=$("$ADB" -s "$SERIAL" shell pm path "$APP" | sed -n 's/^package://p' | head -1)
 [[ -n "$base_apk" ]]
 read -r port token < <(python3 - <<'PY'
@@ -24,7 +26,7 @@ print(secrets.randbelow(20000) + 35000, secrets.token_hex(32))
 PY
 )
 probe() {
-  "$ADB" -s "$SERIAL" exec-out run-as "$APP" env "CLASSPATH=$base_apk" \
+  timeout 15s "$ADB" -s "$SERIAL" exec-out run-as "$APP" env "CLASSPATH=$base_apk" \
     /system/bin/app_process /system/bin "$PROBE" "$port" "$token" "$@"
 }
 cleanup() {
@@ -73,7 +75,8 @@ echo "PASS command timeout keeps helper alive"
 fixture_size=$(stat -c %s "$fixture_apk")
 fixture_sha=$(sha256sum "$fixture_apk" | awk '{print $1}')
 "$ADB" -s "$SERIAL" uninstall "$FIXTURE" >/dev/null 2>&1 || true
-"$ADB" -s "$SERIAL" push "$fixture_apk" /data/local/tmp/typeddroid-e2e-fixture.apk >/dev/null
+echo "STEP privileged + UI E2E"
+timeout 20s "$ADB" -s "$SERIAL" push "$fixture_apk" /data/local/tmp/typeddroid-e2e-fixture.apk >/dev/null
 "$ADB" -s "$SERIAL" shell run-as "$APP" mkdir -p files
 "$ADB" -s "$SERIAL" shell run-as "$APP" cp /data/local/tmp/typeddroid-e2e-fixture.apk files/typeddroid-e2e-fixture.apk
 wrong_sha=$(printf '0%.0s' {1..64})
