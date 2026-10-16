@@ -7,7 +7,7 @@ For every row, first obtain and approve the original local approval, then send t
 | Tool | Original approved semantics | Safe changed-argument probe | Expected result |
 | --- | --- | --- | --- |
 | `files.delete` | disposable target path + current target metadata | another disposable existing target, or change the approved target metadata before retry | old approval is not consumed; changed target requires a distinct approval |
-| `apps.forceStop` | fixture package name | another syntactically valid non-Hermes package name | old approval is not consumed; no force-stop occurs without a new approval |
+| `apps.forceStop` | fixture package name | another syntactically valid non-TypedDroid package name | old approval is not consumed; no force-stop occurs without a new approval |
 | `apps.revokePermission` | fixture package + `android.permission.CAMERA` + resolved Android user | another permission/package value that fails validation or would require a different normalized action | original approval remains unconsumed and no changed revoke occurs |
 | `apps.uninstall` | fixture package + `keepData` | toggle `keepData` | old approval is not consumed; changed uninstall requires a distinct approval |
 | `apps.install` | verified APK SHA-256, size, package/version/signers + `replace` | toggle `replace`, or use different verified APK content | old approval is not consumed; changed install requires a distinct approval |

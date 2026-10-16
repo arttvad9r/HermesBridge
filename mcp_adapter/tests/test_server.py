@@ -4,13 +4,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from android_bridge_mcp import server
+from typeddroid_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
 
 
-class AndroidBridgeMcpTest(unittest.TestCase):
+class TypedDroidMcpTest(unittest.TestCase):
     def test_relay_defaults_to_loopback(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(server._host_url(), "http://127.0.0.1:8080")
@@ -18,7 +18,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
     def test_legacy_relay_url_env_remains_compatible(self) -> None:
         with patch.dict(
             os.environ,
-            {"HERMES_BRIDGE_RELAY_URL": "https://bridge.example.com"},
+            {"TYPED_DROID_RELAY_URL": "https://bridge.example.com"},
             clear=True,
         ):
             self.assertEqual(server._host_url(), "https://bridge.example.com")
@@ -26,7 +26,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
     def test_plaintext_remote_relay_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"HERMES_BRIDGE_HOST_URL": "http://example.com:8080"},
+            {"TYPED_DROID_HOST_URL": "http://example.com:8080"},
             clear=True,
         ):
             with self.assertRaises(RuntimeError):
@@ -39,7 +39,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
         ):
             with self.subTest(url=url), patch.dict(
                 os.environ,
-                {"HERMES_BRIDGE_HOST_URL": url},
+                {"TYPED_DROID_HOST_URL": url},
                 clear=True,
             ):
                 with self.assertRaises(RuntimeError):
@@ -148,7 +148,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
             (root / "not-apk.txt").write_bytes(b"text")
             with patch.dict(
                 os.environ,
-                {"HERMES_BRIDGE_APK_DIR": directory},
+                {"TYPED_DROID_APK_DIR": directory},
                 clear=False,
             ):
                 self.assertEqual(server._resolve_apk_file("ok.apk"), root / "ok.apk")
@@ -219,9 +219,9 @@ class AndroidBridgeMcpTest(unittest.TestCase):
     def test_package_mutations_reject_bridge_package(self) -> None:
         with patch.object(server, "_request_json") as request:
             with self.assertRaises(ValueError):
-                server.uninstall_app(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
+                server.uninstall_app(DEVICE_ID, server.TYPED_DROID_PACKAGE)
             with self.assertRaises(ValueError):
-                server.force_stop_app(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
+                server.force_stop_app(DEVICE_ID, server.TYPED_DROID_PACKAGE)
             request.assert_not_called()
 
     def test_invalid_device_id_is_rejected_before_request(self) -> None:
@@ -233,7 +233,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
     def test_short_admin_token_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"HERMES_BRIDGE_ADMIN_TOKEN": "too-short"},
+            {"TYPED_DROID_ADMIN_TOKEN": "too-short"},
             clear=True,
         ):
             with self.assertRaises(RuntimeError):
@@ -242,7 +242,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
     def test_admin_token_defaults_to_local_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config_home = Path(directory)
-            token_dir = config_home / "hermesbridge"
+            token_dir = config_home / "typeddroid"
             token_dir.mkdir()
             (token_dir / "admin-token").write_text("a" * 64, encoding="utf-8")
 
@@ -261,7 +261,7 @@ class AndroidBridgeMcpTest(unittest.TestCase):
             ):
                 self.assertEqual(
                     server._apk_directory(),
-                    Path(directory).resolve() / "hermesbridge" / "apks",
+                    Path(directory).resolve() / "typeddroid" / "apks",
                 )
 
 

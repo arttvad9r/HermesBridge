@@ -58,7 +58,7 @@
 
 ## P0 — tool boundary
 
-- [x] Explicit Hermes Bridge Android tool allowlist/router.
+- [x] Explicit TypedDroid Android tool allowlist/router.
 - [x] `device.health`.
 - [x] `battery.usage` through fixed read-only `dumpsys batterystats -c --charged`, parsed locally.
 - [x] Bounded top partial-wakelock diagnostics from the same Batterystats snapshot.

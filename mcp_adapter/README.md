@@ -1,23 +1,23 @@
 # Generic MCP adapter
 
-`mcp_adapter/` is the canonical AI-agent boundary for Hermes Bridge. It is a local MCP stdio server and is not tied to Hermes Agent or a particular model provider.
+`mcp_adapter/` is the canonical AI-agent boundary for TypedDroid. It is a local MCP stdio server and is not tied to Hermes Agent or a particular model provider.
 
 The adapter exposes only fixed typed tools. There is no generic command selector, raw shell, arbitrary HTTP request, arbitrary Android intent, or arbitrary APK URL.
 
 ## Install
 
 ```bash
-python3 -m venv ~/.local/share/hermesbridge/mcp-venv
-~/.local/share/hermesbridge/mcp-venv/bin/pip install ./mcp_adapter
+python3 -m venv ~/.local/share/typeddroid/mcp-venv
+~/.local/share/typeddroid/mcp-venv/bin/pip install ./mcp_adapter
 ```
 
 Primary command:
 
 ```text
-android-bridge-mcp
+typeddroid-mcp
 ```
 
-`hermes-bridge-mcp` remains as a compatibility alias for older local configurations.
+`typed-droid-mcp` remains as a compatibility alias for older local configurations.
 
 ## Local configuration
 
@@ -30,12 +30,12 @@ Start the local Bridge Host first:
 Defaults:
 
 ```text
-HERMES_BRIDGE_HOST_URL=http://127.0.0.1:8080
-admin token file: ~/.config/hermesbridge/admin-token
-APK directory:    ~/.local/share/hermesbridge/apks
+TYPED_DROID_HOST_URL=http://127.0.0.1:8080
+admin token file: ~/.config/typeddroid/admin-token
+APK directory:    ~/.local/share/typeddroid/apks
 ```
 
-Normally no token is copied into the agent configuration. The MCP process reads the same local token file created by Bridge Host. Environment overrides remain available through `HERMES_BRIDGE_ADMIN_TOKEN`, `HERMES_BRIDGE_ADMIN_TOKEN_FILE`, `HERMES_BRIDGE_HOST_URL`, and `HERMES_BRIDGE_APK_DIR`.
+Normally no token is copied into the agent configuration. The MCP process reads the same local token file created by Bridge Host. Environment overrides remain available through `TYPED_DROID_ADMIN_TOKEN`, `TYPED_DROID_ADMIN_TOKEN_FILE`, `TYPED_DROID_HOST_URL`, and `TYPED_DROID_APK_DIR`.
 
 ## Tools
 

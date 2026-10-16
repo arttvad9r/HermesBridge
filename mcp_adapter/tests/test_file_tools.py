@@ -1,13 +1,13 @@
 import unittest
 from unittest.mock import patch
 
-from android_bridge_mcp import server
+from typeddroid_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
 
 
-class AndroidBridgeFileToolsTest(unittest.TestCase):
+class TypedDroidFileToolsTest(unittest.TestCase):
     def test_analyze_files_maps_only_to_bounded_typed_tool(self) -> None:
         calls = []
 

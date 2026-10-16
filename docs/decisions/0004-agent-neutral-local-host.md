@@ -10,7 +10,7 @@ MCP is now broadly supported by local AI coding/agent hosts through stdio. Keepi
 
 ## Decision
 
-Hermes Bridge uses three independent layers:
+TypedDroid uses three independent layers:
 
 1. Android Bridge Core and typed Android operations.
 2. A local Bridge Host that owns device pairing/routing and binds its admin API to loopback.

@@ -31,14 +31,14 @@ class StdioMcpCompatibilityTest(unittest.TestCase):
         async def run() -> None:
             parameters = StdioServerParameters(
                 command=sys.executable,
-                args=["-m", "android_bridge_mcp.server"],
+                args=["-m", "typeddroid_mcp.server"],
             )
             async with stdio_client(parameters) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:
                     initialized = await session.initialize()
                     tools = await session.list_tools()
 
-                    self.assertEqual(initialized.server_info.name, "Android Bridge")
+                    self.assertEqual(initialized.server_info.name, "TypedDroid")
                     self.assertEqual({tool.name for tool in tools.tools}, EXPECTED_TOOLS)
                     self.assertNotIn("run_shell", EXPECTED_TOOLS)
 

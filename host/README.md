@@ -13,12 +13,12 @@ From a source checkout, install the local runtime and generic MCP adapter withou
 This creates:
 
 ```text
-~/.local/bin/hermesbridge-host
-~/.local/share/hermesbridge/host-runtime/
-~/.local/bin/android-bridge-mcp
+~/.local/bin/typeddroid-host
+~/.local/share/typeddroid/host-runtime/
+~/.local/bin/typeddroid-mcp
 ```
 
-The installer does not edit Codex, Claude, OpenCode, Cursor, Hermes, or any other agent configuration. Point the chosen MCP host at the installed `android-bridge-mcp` executable.
+The installer does not edit Codex, Claude, OpenCode, Cursor, Hermes, or any other agent configuration. Point the chosen MCP host at the installed `typeddroid-mcp` executable.
 
 ## Start from the source checkout
 
@@ -39,9 +39,9 @@ On first start the script:
 Default paths:
 
 ```text
-~/.config/hermesbridge/admin-token
-~/.local/state/hermesbridge/
-~/.local/share/hermesbridge/apks/
+~/.config/typeddroid/admin-token
+~/.local/state/typeddroid/
+~/.local/share/typeddroid/apks/
 ```
 
 The generic MCP adapter reads the same token file automatically, so local MCP hosts normally need no secret in their configuration.

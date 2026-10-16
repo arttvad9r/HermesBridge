@@ -4,7 +4,7 @@ Status: Accepted
 
 ## Context
 
-Hermes Bridge is an AI-agent companion, not an accessibility tool whose core purpose is assisting people with disabilities.
+TypedDroid is an AI-agent companion, not an accessibility tool whose core purpose is assisting people with disabilities.
 
 Android documents `AccessibilityService` as a service for assisting users with disabilities. Current Google Play policy also prohibits non-accessibility-tool apps from using the Accessibility API to autonomously initiate, plan and execute actions or decisions. agent-driven screen navigation would fall directly into that risk area.
 
@@ -14,7 +14,7 @@ MediaProjection has a different boundary: on current target SDKs the user must c
 
 ## Decision
 
-The standard Hermes Bridge build will not ship an `AccessibilityService` for autonomous agent UI automation.
+The standard TypedDroid build will not ship an `AccessibilityService` for autonomous agent UI automation.
 
 UI-control remains a future optional capability, but its architecture is constrained as follows:
 
@@ -38,7 +38,7 @@ A future non-Play experimental UI-control flavor may be considered only after it
 - The planned P1 "Accessibility setup" placeholder is removed from the standard setup roadmap.
 - P2 UI automation starts with a narrow backend/session design, not an Accessibility service.
 - Screen capture cannot be a hidden always-on feed; user consent is part of each MediaProjection session lifecycle.
-- UI actions will take more engineering than a generic Accessibility or shell bridge, but the authority granted to Hermes remains explicit and reviewable.
+- UI actions will take more engineering than a generic Accessibility or shell bridge, but the authority granted to an agent remains explicit and reviewable.
 - Existing base, SAF, Usage Access and Shizuku capabilities are unaffected.
 
 ## Primary references

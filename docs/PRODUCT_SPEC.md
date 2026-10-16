@@ -2,7 +2,7 @@
 
 ## Product statement
 
-Hermes Bridge is an Android companion that lets a user securely delegate typed phone tasks to any compatible AI agent through a local agent-neutral bridge.
+TypedDroid is an Android companion that lets a user securely delegate typed phone tasks to any compatible AI agent through a local agent-neutral bridge.
 
 The product is successful when daily use feels like:
 
@@ -14,7 +14,7 @@ Technical concepts such as ADB, MCP servers, ports, addresses and Termux must no
 
 ### First setup
 
-1. Install Hermes Bridge APK.
+1. Install TypedDroid APK.
 2. Open the app.
 3. Tap **Connect Bridge**.
 4. Scan a QR code or enter a one-time pairing code produced by the local Bridge Host.

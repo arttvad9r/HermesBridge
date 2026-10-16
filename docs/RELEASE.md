@@ -1,13 +1,13 @@
 # Signed release process
 
-Hermes Bridge keeps release signing keys outside the repository. Android requires installable/updateable APKs to be signed, and the same signing identity must be preserved for future updates.
+TypedDroid keeps release signing keys outside the repository. Android requires installable/updateable APKs to be signed, and the same signing identity must be preserved for future updates.
 
 This release process separates two properties that must not be conflated:
 
 1. **build reproducibility** — two clean unsigned minified APK builds from the same source/toolchain must be byte-for-byte identical;
 2. **release authenticity** — the production APK is signed once with the external release key and the resulting signature is verified with the Android SDK `apksigner`.
 
-Hermes Bridge does not claim that repeated Gradle signing invocations produce byte-identical signed APKs. The signed artifact's recorded SHA-256 is the release artifact identity.
+TypedDroid does not claim that repeated Gradle signing invocations produce byte-identical signed APKs. The signed artifact's recorded SHA-256 is the release artifact identity.
 
 ## Prerequisites
 
@@ -17,18 +17,18 @@ Create and back up the production signing keystore outside the repository. The A
 
 ```bash
 keytool -genkeypair -v \
-  -keystore /secure/path/hermes-bridge-release.jks \
+  -keystore /secure/path/typed-droid-release.jks \
   -keyalg RSA \
   -keysize 2048 \
   -validity 10000 \
-  -alias hermes-bridge
+  -alias typed-droid
 ```
 
-Use strong, separate passwords. Do not commit the keystore or passwords. If Hermes Bridge is distributed outside Play App Signing, losing the app-signing key means existing installations cannot receive normally signed updates.
+Use strong, separate passwords. Do not commit the keystore or passwords. If TypedDroid is distributed outside Play App Signing, losing the app-signing key means existing installations cannot receive normally signed updates.
 
 ## 1. Verify the reproducible build
 
-Start with all `HERMES_BRIDGE_SIGNING_*` variables unset and run:
+Start with all `TYPED_DROID_SIGNING_*` variables unset and run:
 
 ```bash
 release/verify-reproducible-unsigned-apk.sh
@@ -48,11 +48,11 @@ If the APKs differ, do not publish a release. Treat the build as non-reproducibl
 Export all four signing values. The keystore path must be absolute and outside the repository checkout. Partial configuration fails during Gradle configuration instead of silently producing an unsigned artifact.
 
 ```bash
-export HERMES_BRIDGE_SIGNING_STORE_FILE=/secure/path/hermes-bridge-release.jks
-export HERMES_BRIDGE_SIGNING_STORE_PASSWORD='...'
-export HERMES_BRIDGE_SIGNING_KEY_ALIAS=hermes-bridge
-export HERMES_BRIDGE_SIGNING_KEY_PASSWORD='...'
-export HERMES_BRIDGE_APKSIGNER="$ANDROID_SDK_ROOT/build-tools/<exact-version>/apksigner"
+export TYPED_DROID_SIGNING_STORE_FILE=/secure/path/typed-droid-release.jks
+export TYPED_DROID_SIGNING_STORE_PASSWORD='...'
+export TYPED_DROID_SIGNING_KEY_ALIAS=typed-droid
+export TYPED_DROID_SIGNING_KEY_PASSWORD='...'
+export TYPED_DROID_APKSIGNER="$ANDROID_SDK_ROOT/build-tools/<exact-version>/apksigner"
 ```
 
 Passwords are consumed from environment variables and are never stored in Gradle files or passed as command-line password arguments.

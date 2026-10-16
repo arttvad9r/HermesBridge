@@ -1,8 +1,8 @@
-# Hermes Bridge
+# TypedDroid
 
 Security-first Android tools for AI agents — no root, no unrestricted shell, no agent lock-in.
 
-Hermes Bridge lets an AI agent work with an Android phone through a deliberately small typed tool surface. The canonical agent interface is **local MCP over stdio**, so the same bridge can be used by Codex, Claude Code, OpenCode, Cursor, Hermes Agent, or another MCP-capable host.
+TypedDroid lets an AI agent work with an Android phone through a deliberately small typed tool surface. The canonical agent interface is **local MCP over stdio**, so the same bridge can be used by Codex, Claude Code, OpenCode, Cursor, Hermes Agent, or another MCP-capable host.
 
 Hermes Agent is only an optional adapter; the runtime architecture is local and agent-neutral.
 
@@ -10,7 +10,7 @@ Hermes Agent is only an optional adapter; the runtime architecture is local and 
 
 ## Why this exists
 
-Most Android agent bridges become powerful by exposing shell, arbitrary commands, Accessibility automation, or broad package access. Hermes Bridge takes the opposite approach:
+Most Android agent bridges become powerful by exposing shell, arbitrary commands, Accessibility automation, or broad package access. TypedDroid takes the opposite approach:
 
 - no agent-facing `run_shell` or arbitrary argv;
 - no arbitrary Android intents/content URIs;
@@ -79,7 +79,7 @@ Mutation retries can use explicit idempotency keys. Reusing a key for changed ar
 
 ## Android security boundary
 
-Hermes Bridge protects its own package from agent-driven replacement, uninstall, force-stop, and permission mutation.
+TypedDroid protects its own package from agent-driven replacement, uninstall, force-stop, and permission mutation.
 
 Package enumeration is launcher-scoped. File access is restricted to the Storage Access Framework tree selected by the user. Usage data requires Android Usage Access. Privileged operations require Shizuku and use fixed typed operations only.
 
@@ -95,7 +95,7 @@ For regular use:
 
 ```bash
 ./host/install-local.sh
-hermesbridge-host
+typeddroid-host
 ```
 
 For development directly from the checkout, use `./host/run-local-host.sh`.
@@ -103,9 +103,9 @@ For development directly from the checkout, use `./host/run-local-host.sh`.
 This creates user-local state and a random admin token:
 
 ```text
-~/.config/hermesbridge/admin-token
-~/.local/state/hermesbridge/
-~/.local/share/hermesbridge/apks/
+~/.config/typeddroid/admin-token
+~/.local/state/typeddroid/
+~/.local/share/typeddroid/apks/
 ```
 
 No root, systemd, or machine-wide installation is required.
@@ -115,7 +115,7 @@ No root, systemd, or machine-wide installation is required.
 `install-local.sh` installs the adapter automatically. Primary executable:
 
 ```text
-~/.local/bin/android-bridge-mcp
+~/.local/bin/typeddroid-mcp
 ```
 
 The adapter reads the Bridge Host token file automatically. Agent-specific examples are in [docs/MCP.md](docs/MCP.md). Hermes-specific configuration lives under [adapters/hermes](adapters/hermes/README.md).

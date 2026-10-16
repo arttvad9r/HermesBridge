@@ -5,10 +5,10 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$repo_root"
 
 required_variables=(
-  HERMES_BRIDGE_SIGNING_STORE_FILE
-  HERMES_BRIDGE_SIGNING_STORE_PASSWORD
-  HERMES_BRIDGE_SIGNING_KEY_ALIAS
-  HERMES_BRIDGE_SIGNING_KEY_PASSWORD
+  TYPED_DROID_SIGNING_STORE_FILE
+  TYPED_DROID_SIGNING_STORE_PASSWORD
+  TYPED_DROID_SIGNING_KEY_ALIAS
+  TYPED_DROID_SIGNING_KEY_PASSWORD
 )
 
 missing=()
@@ -27,30 +27,30 @@ if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   exit 2
 fi
 
-if [[ ! -f "$HERMES_BRIDGE_SIGNING_STORE_FILE" ]]; then
-  echo "Signing keystore does not exist: $HERMES_BRIDGE_SIGNING_STORE_FILE" >&2
+if [[ ! -f "$TYPED_DROID_SIGNING_STORE_FILE" ]]; then
+  echo "Signing keystore does not exist: $TYPED_DROID_SIGNING_STORE_FILE" >&2
   exit 2
 fi
-if [[ "$HERMES_BRIDGE_SIGNING_STORE_FILE" != /* ]]; then
+if [[ "$TYPED_DROID_SIGNING_STORE_FILE" != /* ]]; then
   echo "Signing keystore path must be absolute and outside the repository." >&2
   exit 2
 fi
-keystore_dir=$(cd "$(dirname "$HERMES_BRIDGE_SIGNING_STORE_FILE")" && pwd -P)
-keystore_path="$keystore_dir/$(basename "$HERMES_BRIDGE_SIGNING_STORE_FILE")"
+keystore_dir=$(cd "$(dirname "$TYPED_DROID_SIGNING_STORE_FILE")" && pwd -P)
+keystore_path="$keystore_dir/$(basename "$TYPED_DROID_SIGNING_STORE_FILE")"
 case "$keystore_path" in
   "$repo_root"/*)
     echo "Signing keystore must be stored outside the repository checkout." >&2
     exit 2
     ;;
 esac
-export HERMES_BRIDGE_SIGNING_STORE_FILE="$keystore_path"
+export TYPED_DROID_SIGNING_STORE_FILE="$keystore_path"
 
-if [[ -n "${HERMES_BRIDGE_APKSIGNER:-}" ]]; then
-  apksigner="$HERMES_BRIDGE_APKSIGNER"
+if [[ -n "${TYPED_DROID_APKSIGNER:-}" ]]; then
+  apksigner="$TYPED_DROID_APKSIGNER"
 elif command -v apksigner >/dev/null 2>&1; then
   apksigner=$(command -v apksigner)
 else
-  echo "Set HERMES_BRIDGE_APKSIGNER to the exact Android SDK apksigner executable used for the release." >&2
+  echo "Set TYPED_DROID_APKSIGNER to the exact Android SDK apksigner executable used for the release." >&2
   exit 2
 fi
 if [[ ! -x "$apksigner" ]]; then

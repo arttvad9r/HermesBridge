@@ -8,7 +8,7 @@ Shizuku and ADB make it easy to offer a generic shell command. That maximizes ca
 
 ## Decision
 
-Hermes Bridge will expose typed tools only. A generic `run_shell` tool is forbidden from the agent-facing registry in V1.
+TypedDroid will expose typed tools only. A generic `run_shell` tool is forbidden from the agent-facing registry in V1.
 
 If an implementation internally needs a shell command, it must be encapsulated by a dedicated operation with:
 

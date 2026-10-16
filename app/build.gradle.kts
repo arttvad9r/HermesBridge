@@ -8,10 +8,10 @@ plugins {
 val kotlinxSerializationVersion = providers.gradleProperty("kotlinxSerializationVersion").get()
 
 val releaseSigningVariableNames = listOf(
-    "HERMES_BRIDGE_SIGNING_STORE_FILE",
-    "HERMES_BRIDGE_SIGNING_STORE_PASSWORD",
-    "HERMES_BRIDGE_SIGNING_KEY_ALIAS",
-    "HERMES_BRIDGE_SIGNING_KEY_PASSWORD",
+    "TYPED_DROID_SIGNING_STORE_FILE",
+    "TYPED_DROID_SIGNING_STORE_PASSWORD",
+    "TYPED_DROID_SIGNING_KEY_ALIAS",
+    "TYPED_DROID_SIGNING_KEY_PASSWORD",
 )
 val releaseSigningValues = releaseSigningVariableNames.associateWith { name ->
     System.getenv(name)?.takeIf { it.isNotBlank() }
@@ -23,18 +23,18 @@ check(configuredReleaseSigningValues == 0 || configuredReleaseSigningValues == r
 val releaseSigningEnabled = configuredReleaseSigningValues == releaseSigningVariableNames.size
 
 android {
-    namespace = "io.github.arttvad9r.hermesbridge"
+    namespace = "io.github.arttvad9r.typeddroid"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.github.arttvad9r.hermesbridge"
+        applicationId = "io.github.arttvad9r.typeddroid"
         minSdk = 30
         targetSdk = 35
         versionCode = 1
         versionName = "0.2.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        val relayWsUrl = providers.gradleProperty("HERMES_BRIDGE_RELAY_WS_URL")
+        val relayWsUrl = providers.gradleProperty("TYPED_DROID_RELAY_WS_URL")
             .orElse("wss://bridge.invalid/ws/device")
             .get()
         buildConfigField("String", "RELAY_WS_URL", "\"$relayWsUrl\"")
@@ -43,10 +43,10 @@ android {
     signingConfigs {
         if (releaseSigningEnabled) {
             create("release") {
-                storeFile = file(checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_STORE_FILE"]))
-                storePassword = checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_STORE_PASSWORD"])
-                keyAlias = checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_KEY_ALIAS"])
-                keyPassword = checkNotNull(releaseSigningValues["HERMES_BRIDGE_SIGNING_KEY_PASSWORD"])
+                storeFile = file(checkNotNull(releaseSigningValues["TYPED_DROID_SIGNING_STORE_FILE"]))
+                storePassword = checkNotNull(releaseSigningValues["TYPED_DROID_SIGNING_STORE_PASSWORD"])
+                keyAlias = checkNotNull(releaseSigningValues["TYPED_DROID_SIGNING_KEY_ALIAS"])
+                keyPassword = checkNotNull(releaseSigningValues["TYPED_DROID_SIGNING_KEY_PASSWORD"])
             }
         }
     }

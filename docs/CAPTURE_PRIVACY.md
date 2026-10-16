@@ -1,6 +1,6 @@
 # Local screen-capture privacy boundary
 
-Hermes Bridge currently treats Android `MediaProjection` as a local, user-consented capability. It is not a remote screenshot tool and no screenshot pixels are exposed through the relay, MCP, Telegram, audit history, intents, logs, or app-private files.
+TypedDroid currently treats Android `MediaProjection` as a local, user-consented capability. It is not a remote screenshot tool and no screenshot pixels are exposed through the relay, MCP, Telegram, audit history, intents, logs, or app-private files.
 
 ## Current frame lifecycle
 
@@ -10,7 +10,7 @@ Exactly one frame is acquired. The copied pixel buffer is redacted in place, ove
 
 ## Feasible redaction implemented today
 
-Hermes Bridge masks locally derivable system-edge content before the temporary frame is erased:
+TypedDroid masks locally derivable system-edge content before the temporary frame is erased:
 
 - system bars;
 - display cutout regions;
@@ -24,13 +24,13 @@ Independent edge masks are unioned by taking the maximum inset on each edge rath
 
 ## Sensitive app content
 
-The standard build does not use `AccessibilityService` for autonomous Hermes UI control and does not run OCR or semantic password-field detection on screenshots. Therefore Hermes Bridge does not claim to identify or redact arbitrary sensitive fields inside application content.
+The standard build does not use `AccessibilityService` for autonomous agent UI control and does not run OCR or semantic password-field detection on screenshots. Therefore TypedDroid does not claim to identify or redact arbitrary sensitive fields inside application content.
 
 This limitation is intentional. Adding Accessibility, OCR, semantic field detection, retained images, serialization, a remote screenshot trigger, or any pixel transport would create a new privacy/security boundary and requires separate review before implementation.
 
 ## Secure windows
 
-The capture display is deliberately non-secure. Android remains responsible for blanking `FLAG_SECURE` and other protected-window content. Hermes Bridge must never create a secure virtual display or otherwise attempt to bypass platform secure-window protections.
+The capture display is deliberately non-secure. Android remains responsible for blanking `FLAG_SECURE` and other protected-window content. TypedDroid must never create a secure virtual display or otherwise attempt to bypass platform secure-window protections.
 
 ## Remote boundary
 

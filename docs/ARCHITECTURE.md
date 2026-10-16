@@ -40,7 +40,7 @@
                     | authenticated Android channel
                     |
 +-------------------+------------------+
-| Android Hermes Bridge                |
+| Android TypedDroid                |
 | - Keystore identity                  |
 | - typed tool router                  |
 | - local approval policy              |
@@ -54,7 +54,7 @@ Hermes Agent is one optional adapter/configuration on top of the generic MCP bou
 
 ## Agent boundary
 
-The canonical public integration is `mcp_adapter/android_bridge_mcp` over MCP stdio. Agent-specific integrations may configure or package that server, but must not add tools that bypass the generic allowlist.
+The canonical public integration is `mcp_adapter/typeddroid_mcp` over MCP stdio. Agent-specific integrations may configure or package that server, but must not add tools that bypass the generic allowlist.
 
 MCP is deliberately local because stdio is broadly supported and keeps Bridge Host credentials off remote agent configuration. Streamable HTTP may be added later for clients that genuinely require a remote MCP endpoint, but it is not required by the core design.
 
