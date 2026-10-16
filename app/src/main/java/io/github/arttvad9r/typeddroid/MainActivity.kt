@@ -471,6 +471,7 @@ private fun ApprovalCard(
         ToolRisk.MUTATING -> "Изменение данных"
         ToolRisk.PRIVILEGED -> "Расширенный доступ"
         ToolRisk.UI_CONTROL -> "Управление интерфейсом"
+        ToolRisk.TRUSTED_CONTROL -> "Полный системный доступ"
         ToolRisk.RAW_SHELL -> "Командная оболочка"
     }
 

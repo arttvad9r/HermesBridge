@@ -186,6 +186,22 @@ Maps only to Android `shell.run`. The adapter validates the command size, NUL ex
 
 The helper is bootstrapped through Android Wireless Debugging but is reached afterward through authenticated loopback-only RPC. Output is bounded and returned as `exitCode`, `stdout`, `stderr`, `stdoutTruncated`, and `stderrTruncated`. This is intentionally a broad capability: a user who enables TRUSTED is granting the agent the authority available to Android's shell UID.
 
+The same TRUSTED boundary also exposes structured convenience tools so agents do not need to construct shell strings for common work:
+
+- `device_capabilities(device_id)` → `device.capabilities`;
+- `activity_start(device_id, component=None, action=None, data_uri=None)` → `activity.start`;
+- `settings_get(...)` / `settings_put(...)` → `settings.get` / `settings.put`;
+- `appops_get(...)` / `appops_set(...)` → `appops.get` / `appops.set`;
+- `process_list(device_id)` → `process.list`;
+- `logcat_read(device_id, lines=100, buffer="main")` → `logcat.read`;
+- `open_app(...)` → `apps.open`;
+- `ui_hierarchy(...)` / `ui_screenshot(...)`;
+- `ui_tap(...)` / `ui_swipe(...)` / `ui_long_press(...)`;
+- `ui_wait_for_text(...)`;
+- `ui_text(...)` / `ui_key(...)`.
+
+These tools validate names, bounds and enums on both MCP/Android boundaries and then use the same owned shell-UID helper. They are convenience and audit surfaces, not a reduction of the authority already granted by `run_shell`. `appops_set` also protects the TypedDroid package itself.
+
 ## Mutating / privileged MCP tools
 
 ### `revoke_app_permission(device_id, package_name, permission_name)`

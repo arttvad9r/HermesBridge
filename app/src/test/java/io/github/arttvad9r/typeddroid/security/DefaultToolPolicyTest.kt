@@ -81,4 +81,16 @@ class DefaultToolPolicyTest {
         )
     }
 
+    @Test
+    fun trustedSystemControlRequiresTrustedMode() {
+        assertEquals(
+            ApprovalDecision.DENY,
+            DefaultToolPolicy.decision(BridgeTool("settings.put", ToolRisk.TRUSTED_CONTROL), AgentTrustMode.SAFE),
+        )
+        assertEquals(
+            ApprovalDecision.ALLOW,
+            DefaultToolPolicy.decision(BridgeTool("settings.put", ToolRisk.TRUSTED_CONTROL), AgentTrustMode.TRUSTED),
+        )
+    }
+
 }

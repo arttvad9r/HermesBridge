@@ -37,6 +37,26 @@ MAX_UI_SWIPE_DURATION_MILLIS = 10_000
 DEFAULT_UI_SWIPE_DURATION_MILLIS = 300
 MAX_UI_TEXT_BYTES = 2 * 1024
 MAX_UI_KEY_CODE = 1_000
+MIN_UI_LONG_PRESS_DURATION_MILLIS = 250
+MAX_UI_LONG_PRESS_DURATION_MILLIS = 5_000
+DEFAULT_UI_LONG_PRESS_DURATION_MILLIS = 700
+MAX_UI_WAIT_TIMEOUT_MILLIS = 30_000
+DEFAULT_UI_WAIT_TIMEOUT_MILLIS = 10_000
+MAX_SETTINGS_KEY_BYTES = 128
+MAX_SETTING_VALUE_BYTES = 4 * 1024
+MAX_COMPONENT_BYTES = 512
+MAX_ACTION_BYTES = 256
+MAX_DATA_URI_BYTES = 2 * 1024
+MAX_APP_OP_NAME_BYTES = 80
+MAX_LOGCAT_LINES = 500
+DEFAULT_LOGCAT_LINES = 100
+SETTINGS_NAMESPACES = {"system", "secure", "global"}
+APP_OP_MODES = {"allow", "ignore", "deny", "default", "foreground"}
+LOGCAT_BUFFERS = {"main", "system", "events", "crash", "radio", "all"}
+SETTINGS_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+APP_OP_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,80}$")
+COMPONENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*/\.?[A-Za-z_][A-Za-z0-9_.$]*$")
+ACTION_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{1,255}$")
 TYPED_DROID_PACKAGE = "io.github.arttvad9r.typeddroid"
 APK_NAME_HEADER = "X-TypedDroid-Apk-Name"
 APK_STAGING_KEY_HEADER = "X-TypedDroid-Apk-Staging-Key"
@@ -547,6 +567,137 @@ def force_stop_app(
 
 
 @mcp.tool()
+def device_capabilities(device_id: str) -> dict[str, Any]:
+    """Report the phone's current TypedDroid trust mode and available privileged/UI capabilities."""
+    return _device_command(device_id, "device.capabilities")
+
+
+def _bounded_string(name: str, value: str, max_bytes: int, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string.")
+    if (not allow_empty and not value) or "\x00" in value or len(value.encode("utf-8")) > max_bytes:
+        raise ValueError(f"{name} is empty, too large, or contains NUL.")
+    return value
+
+
+def _settings_namespace(namespace: str) -> str:
+    value = _bounded_string("namespace", namespace, 16).lower()
+    if value not in SETTINGS_NAMESPACES:
+        raise ValueError("namespace must be system, secure, or global.")
+    return value
+
+
+def _settings_key(key: str) -> str:
+    value = _bounded_string("key", key, MAX_SETTINGS_KEY_BYTES)
+    if not SETTINGS_KEY_RE.fullmatch(value):
+        raise ValueError("key has an invalid Android settings format.")
+    return value
+
+
+def _app_op_name(op_name: str) -> str:
+    value = _bounded_string("op_name", op_name, MAX_APP_OP_NAME_BYTES)
+    if not APP_OP_NAME_RE.fullmatch(value):
+        raise ValueError("op_name has an invalid app-op format.")
+    return value
+
+
+@mcp.tool()
+def activity_start(
+    device_id: str,
+    component: str | None = None,
+    action: str | None = None,
+    data_uri: str | None = None,
+) -> dict[str, Any]:
+    """Start an Android activity/intent on a Trusted phone using bounded structured arguments."""
+    arguments: dict[str, Any] = {}
+    if component is not None:
+        value = _bounded_string("component", component, MAX_COMPONENT_BYTES)
+        if not COMPONENT_RE.fullmatch(value):
+            raise ValueError("component is not a valid Android component name.")
+        arguments["component"] = value
+    if action is not None:
+        value = _bounded_string("action", action, MAX_ACTION_BYTES)
+        if not ACTION_RE.fullmatch(value):
+            raise ValueError("action is not a valid Android action name.")
+        arguments["action"] = value
+    if data_uri is not None:
+        value = _bounded_string("data_uri", data_uri, MAX_DATA_URI_BYTES)
+        if "\n" in value or "\r" in value:
+            raise ValueError("data_uri contains forbidden control characters.")
+        arguments["dataUri"] = value
+    if "component" not in arguments and "action" not in arguments:
+        raise ValueError("activity_start requires component or action.")
+    return _device_command(device_id, "activity.start", arguments, timeout=45)
+
+
+@mcp.tool()
+def settings_get(device_id: str, namespace: str, key: str) -> dict[str, Any]:
+    """Read one Android system/secure/global setting from a Trusted phone."""
+    return _device_command(
+        device_id,
+        "settings.get",
+        {"namespace": _settings_namespace(namespace), "key": _settings_key(key)},
+    )
+
+
+@mcp.tool()
+def settings_put(device_id: str, namespace: str, key: str, value: str) -> dict[str, Any]:
+    """Write one Android system/secure/global setting on a Trusted phone."""
+    return _device_command(
+        device_id,
+        "settings.put",
+        {
+            "namespace": _settings_namespace(namespace),
+            "key": _settings_key(key),
+            "value": _bounded_string("value", value, MAX_SETTING_VALUE_BYTES, allow_empty=True),
+        },
+    )
+
+
+@mcp.tool()
+def appops_get(device_id: str, package_name: str, op_name: str | None = None) -> dict[str, Any]:
+    """Read Android AppOps state for one package on a Trusted phone."""
+    arguments: dict[str, Any] = {"packageName": _validate_package_name(package_name, protect_bridge=False)}
+    if op_name is not None:
+        arguments["opName"] = _app_op_name(op_name)
+    return _device_command(device_id, "appops.get", arguments)
+
+
+@mcp.tool()
+def appops_set(device_id: str, package_name: str, op_name: str, mode: str) -> dict[str, Any]:
+    """Set one Android AppOps mode for a package on a Trusted phone. TypedDroid itself is protected."""
+    package = _validate_package_name(package_name)
+    op = _app_op_name(op_name)
+    if not isinstance(mode, str) or mode.lower() not in APP_OP_MODES:
+        raise ValueError("mode must be allow, ignore, deny, default, or foreground.")
+    return _device_command(
+        device_id,
+        "appops.set",
+        {"packageName": package, "opName": op, "mode": mode.lower()},
+    )
+
+
+@mcp.tool()
+def process_list(device_id: str) -> dict[str, Any]:
+    """List bounded Android process metadata visible to the shell UID on a Trusted phone."""
+    return _device_command(device_id, "process.list", timeout=30)
+
+
+@mcp.tool()
+def logcat_read(device_id: str, lines: int = DEFAULT_LOGCAT_LINES, buffer: str = "main") -> dict[str, Any]:
+    """Read a bounded tail of Android logcat from a Trusted phone."""
+    line_count = _ui_int("lines", lines, 1, MAX_LOGCAT_LINES)
+    if not isinstance(buffer, str) or buffer.lower() not in LOGCAT_BUFFERS:
+        raise ValueError("buffer must be main, system, events, crash, radio, or all.")
+    return _device_command(
+        device_id,
+        "logcat.read",
+        {"lines": line_count, "buffer": buffer.lower()},
+        timeout=45,
+    )
+
+
+@mcp.tool()
 def ui_hierarchy(device_id: str) -> dict[str, Any]:
     """Read the current Android UI hierarchy. Available only when the phone pairing is explicitly Trusted."""
     return _device_command(device_id, "ui.hierarchy", timeout=30)
@@ -594,6 +745,50 @@ def ui_swipe(
             "endY": _ui_int("end_y", end_y, 0, MAX_UI_COORDINATE),
             "durationMillis": _ui_int("duration_millis", duration_millis, 1, MAX_UI_SWIPE_DURATION_MILLIS),
         },
+    )
+
+
+@mcp.tool()
+def ui_long_press(
+    device_id: str,
+    x: int,
+    y: int,
+    duration_millis: int = DEFAULT_UI_LONG_PRESS_DURATION_MILLIS,
+) -> dict[str, Any]:
+    """Long-press one screen coordinate on a Trusted Android phone."""
+    return _device_command(
+        device_id,
+        "ui.longPress",
+        {
+            "x": _ui_int("x", x, 0, MAX_UI_COORDINATE),
+            "y": _ui_int("y", y, 0, MAX_UI_COORDINATE),
+            "durationMillis": _ui_int(
+                "duration_millis",
+                duration_millis,
+                MIN_UI_LONG_PRESS_DURATION_MILLIS,
+                MAX_UI_LONG_PRESS_DURATION_MILLIS,
+            ),
+        },
+    )
+
+
+@mcp.tool()
+def ui_wait_for_text(
+    device_id: str,
+    text: str,
+    timeout_millis: int = DEFAULT_UI_WAIT_TIMEOUT_MILLIS,
+    case_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Wait until bounded text appears in the current UI hierarchy on a Trusted phone."""
+    value = _bounded_string("text", text, MAX_UI_TEXT_BYTES)
+    timeout = _ui_int("timeout_millis", timeout_millis, 1, MAX_UI_WAIT_TIMEOUT_MILLIS)
+    if not isinstance(case_sensitive, bool):
+        raise ValueError("case_sensitive must be a boolean.")
+    return _device_command(
+        device_id,
+        "ui.waitForText",
+        {"text": value, "timeoutMillis": timeout, "caseSensitive": case_sensitive},
+        timeout=(timeout // 1000) + 20,
     )
 
 

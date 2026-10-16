@@ -21,6 +21,19 @@ class UiToolsMcpTest(unittest.TestCase):
                 "ui.swipe",
                 {"startX": 1, "startY": 2, "endX": 3, "endY": 4, "durationMillis": 500},
             )
+            server.ui_long_press(DEVICE_ID, 10, 20, 800)
+            command.assert_called_with(
+                DEVICE_ID,
+                "ui.longPress",
+                {"x": 10, "y": 20, "durationMillis": 800},
+            )
+            server.ui_wait_for_text(DEVICE_ID, "Ready", 2000, True)
+            command.assert_called_with(
+                DEVICE_ID,
+                "ui.waitForText",
+                {"text": "Ready", "timeoutMillis": 2000, "caseSensitive": True},
+                timeout=22,
+            )
             server.ui_text(DEVICE_ID, "hello world")
             command.assert_called_with(DEVICE_ID, "ui.text", {"text": "hello world"})
             server.ui_key(DEVICE_ID, 4)
@@ -35,6 +48,10 @@ class UiToolsMcpTest(unittest.TestCase):
                     server.ui_tap(DEVICE_ID, value, 1)  # type: ignore[arg-type]
             with self.assertRaises(ValueError):
                 server.ui_swipe(DEVICE_ID, 0, 0, 1, 1, 0)
+            with self.assertRaises(ValueError):
+                server.ui_long_press(DEVICE_ID, 0, 0, 100)
+            with self.assertRaises(ValueError):
+                server.ui_wait_for_text(DEVICE_ID, "Ready", 0)
             with self.assertRaises(ValueError):
                 server.ui_text(DEVICE_ID, "x\x00y")
             with self.assertRaises(ValueError):

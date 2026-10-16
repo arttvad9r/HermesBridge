@@ -5,6 +5,7 @@ enum class ToolRisk {
     MUTATING,
     PRIVILEGED,
     UI_CONTROL,
+    TRUSTED_CONTROL,
     RAW_SHELL,
 }
 
@@ -56,6 +57,7 @@ object DefaultToolPolicy {
             ToolRisk.READ_ONLY -> ApprovalDecision.ALLOW
             ToolRisk.RAW_SHELL,
             ToolRisk.UI_CONTROL,
+            ToolRisk.TRUSTED_CONTROL,
             -> if (trustMode == AgentTrustMode.TRUSTED) {
                 ApprovalDecision.ALLOW
             } else {

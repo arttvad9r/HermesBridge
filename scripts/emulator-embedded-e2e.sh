@@ -32,7 +32,7 @@ probe() {
 cleanup() {
   probe shutdown >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" uninstall "$FIXTURE" >/dev/null 2>&1 || true
-  rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt
+  rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt /tmp/typeddroid-e2e-setting.txt /tmp/typeddroid-e2e-appops.txt /tmp/typeddroid-e2e-processes.txt /tmp/typeddroid-e2e-logcat.txt
 }
 trap cleanup EXIT
 "$ADB" -s "$SERIAL" shell "pkill -f EmbeddedPrivilegedMain 2>/dev/null || true" >/dev/null 2>&1 || true
@@ -88,6 +88,53 @@ echo "PASS rejected APK hash cleans staging and keeps helper alive"
 probe install files/typeddroid-e2e-fixture.apk e2e-fixture-debug.apk "$fixture_size" "$fixture_sha" false | grep -q '^exitCode=0$'
 "$ADB" -s "$SERIAL" shell pm list packages "$FIXTURE" | grep -q "$FIXTURE"
 echo "PASS APK streaming install"
+
+# Trusted structured system-control commands are built on the same bounded shell helper.
+probe exec 5000 settings put global typed_droid_e2e 1 | grep -q '^exitCode=0$'
+probe exec 5000 settings get global typed_droid_e2e > /tmp/typeddroid-e2e-setting.txt
+python3 - <<'PYSYSTEM'
+import base64
+v={}
+for line in open('/tmp/typeddroid-e2e-setting.txt'):
+    k, _, x=line.rstrip('\n').partition('='); v[k]=x
+assert v['exitCode']=='0'
+assert base64.b64decode(v['stdoutBase64']).decode().strip() == '1'
+PYSYSTEM
+probe exec 5000 settings delete global typed_droid_e2e >/dev/null
+echo "PASS settings get/put"
+
+probe exec 5000 appops set "$FIXTURE" CAMERA ignore | grep -q '^exitCode=0$'
+probe exec 5000 appops get "$FIXTURE" CAMERA > /tmp/typeddroid-e2e-appops.txt
+python3 - <<'PYSYSTEM'
+import base64
+v={}
+for line in open('/tmp/typeddroid-e2e-appops.txt'):
+    k, _, x=line.rstrip('\n').partition('='); v[k]=x
+assert v['exitCode']=='0'
+assert 'ignore' in base64.b64decode(v['stdoutBase64']).decode().lower()
+PYSYSTEM
+probe exec 5000 appops set "$FIXTURE" CAMERA default >/dev/null
+echo "PASS appops get/set"
+
+probe exec 5000 ps -A -o USER,PID,PPID,NAME > /tmp/typeddroid-e2e-processes.txt
+probe exec 5000 logcat -d -t 5 -v threadtime -b main > /tmp/typeddroid-e2e-logcat.txt
+python3 - <<'PYSYSTEM'
+import base64
+def read(path):
+    v={}
+    for line in open(path):
+        k, _, x=line.rstrip('\n').partition('='); v[k]=x
+    assert v['exitCode']=='0'
+    return base64.b64decode(v['stdoutBase64']).decode(errors='replace')
+assert 'init' in read('/tmp/typeddroid-e2e-processes.txt')
+read('/tmp/typeddroid-e2e-logcat.txt')
+PYSYSTEM
+echo "PASS process list + logcat"
+
+probe exec 10000 am start -W -n "$FIXTURE/.MainActivity" | grep -q '^exitCode=0$'
+sleep .3
+[[ -n $("$ADB" -s "$SERIAL" shell pidof "$FIXTURE" || true) ]]
+echo "PASS structured activity start command"
 
 probe open-app "$FIXTURE" | grep -q '^exitCode=0$'
 sleep .5

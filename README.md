@@ -80,11 +80,15 @@ Mutating/privileged typed tools, currently using the existing approval model:
 
 Full-control (all denied in SAFE and available only to a pairing explicitly switched to TRUSTED while the owned privileged helper is active):
 
+- `device_capabilities` — inspect trust/backend capability state;
 - `run_shell` — unrestricted Android shell UID command execution;
-- `open_app` — open a package's launcher activity;
-- `ui_hierarchy` — read a bounded Android UI hierarchy;
-- `ui_screenshot` — capture a bounded JPEG screenshot;
-- `ui_tap` / `ui_swipe` — coordinate input;
+- `open_app` / `activity_start` — launcher app and bounded component/action/data activity starts;
+- `settings_get` / `settings_put` — Android system/secure/global settings;
+- `appops_get` / `appops_set` — package AppOps inspection/control;
+- `process_list` / `logcat_read` — bounded process and Android log diagnostics;
+- `ui_hierarchy` / `ui_screenshot` — bounded UI perception;
+- `ui_tap` / `ui_swipe` / `ui_long_press` — coordinate input;
+- `ui_wait_for_text` — wait for a text signal in the UI hierarchy;
 - `ui_text` / `ui_key` — focused text and key-event input.
 
 Mutation retries can use explicit idempotency keys. Reusing a key for changed arguments fails closed.

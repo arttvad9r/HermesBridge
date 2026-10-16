@@ -2,7 +2,7 @@
 
 `mcp_adapter/` is the canonical AI-agent boundary for TypedDroid. It is a local MCP stdio server and is not tied to Hermes Agent or a particular model provider.
 
-The adapter exposes fixed tools plus `run_shell` for phones explicitly placed in TRUSTED mode. SAFE-mode phones reject raw shell locally. There is no arbitrary HTTP request, arbitrary Android intent, or arbitrary APK URL surface.
+The adapter exposes fixed tools plus a full-control TRUSTED surface (`run_shell`, structured activity/settings/AppOps/diagnostic tools, and UI perception/control). SAFE-mode phones reject that authority locally. There is no arbitrary HTTP request or arbitrary APK URL surface.
 
 ## Install
 

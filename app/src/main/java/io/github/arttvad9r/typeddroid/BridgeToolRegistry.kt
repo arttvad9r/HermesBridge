@@ -1,5 +1,6 @@
 package io.github.arttvad9r.typeddroid
 
+import io.github.arttvad9r.typeddroid.adb.shellQuote
 import io.github.arttvad9r.typeddroid.protocol.CommandRequestPayload
 import io.github.arttvad9r.typeddroid.protocol.CommandResultPayload
 import io.github.arttvad9r.typeddroid.protocol.ProtocolError
@@ -9,6 +10,7 @@ import io.github.arttvad9r.typeddroid.security.BridgeTool
 import io.github.arttvad9r.typeddroid.security.DefaultToolPolicy
 import io.github.arttvad9r.typeddroid.security.ToolRisk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -37,6 +39,7 @@ class BridgeToolRegistry(
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
         return when (request.tool) {
             DEVICE_HEALTH -> executeDeviceHealth(request)
+            DEVICE_CAPABILITIES -> executeDeviceCapabilities(request)
             BATTERY_USAGE -> executeBatteryUsage(request)
             APPS_LIST -> executeAppsList(request)
             APPS_USAGE -> AppUsageToolHandler(appsRepository, appUsageRepository).execute(request)
@@ -47,10 +50,19 @@ class BridgeToolRegistry(
             APPS_UNINSTALL -> executeAppsUninstall(request)
             APPS_FORCE_STOP -> executeAppsForceStop(request)
             APPS_OPEN -> executeAppsOpen(request)
+            ACTIVITY_START -> executeActivityStart(request)
+            SETTINGS_GET -> executeSettingsGet(request)
+            SETTINGS_PUT -> executeSettingsPut(request)
+            APPOPS_GET -> executeAppOpsGet(request)
+            APPOPS_SET -> executeAppOpsSet(request)
+            PROCESS_LIST -> executeProcessList(request)
+            LOGCAT_READ -> executeLogcatRead(request)
             UI_HIERARCHY -> executeUiHierarchy(request)
             UI_SCREENSHOT -> executeUiScreenshot(request)
             UI_TAP -> executeUiTap(request)
             UI_SWIPE -> executeUiSwipe(request)
+            UI_LONG_PRESS -> executeUiLongPress(request)
+            UI_WAIT_FOR_TEXT -> executeUiWaitForText(request)
             UI_TEXT -> executeUiText(request)
             UI_KEY -> executeUiKey(request)
             SHELL_RUN -> executeShellRun(request)
@@ -85,6 +97,41 @@ class BridgeToolRegistry(
                 put("totalMemoryBytes", health.totalMemoryBytes)
                 put("availableStorageBytes", health.availableStorageBytes)
                 put("totalStorageBytes", health.totalStorageBytes)
+            },
+        )
+    }
+
+    private fun executeDeviceCapabilities(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.isNotEmpty()) {
+            return failure(request.requestId, "invalid_arguments", "device.capabilities does not accept arguments.")
+        }
+        if (!isReadOnlyAllowed(DEVICE_CAPABILITIES)) {
+            return failure(request.requestId, "policy_denied", "Local policy did not allow the tool.")
+        }
+        val trust = agentTrustMode()
+        val shellReady = runCatching { rawShellBackend.readiness().ready }.getOrDefault(false)
+        val uiReady = runCatching { uiControlBackend.readiness().ready }.getOrDefault(false)
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("agentTrustMode", trust.name.lowercase())
+                put("embeddedPrivilegedReady", shellReady)
+                put("rawShell", trust == AgentTrustMode.TRUSTED && shellReady)
+                put("trustedSystemControl", trust == AgentTrustMode.TRUSTED && shellReady)
+                put("uiControl", trust == AgentTrustMode.TRUSTED && uiReady)
+                put("structuredAppManagement", privilegedAppsBackend.readiness().ready)
+                put("batteryDiagnostics", batteryDiagnosticsBackend.readiness().ready)
+                put(
+                    "trustedTools",
+                    buildJsonArray {
+                        listOf(
+                            APPS_OPEN, ACTIVITY_START, SETTINGS_GET, SETTINGS_PUT, APPOPS_GET, APPOPS_SET,
+                            PROCESS_LIST, LOGCAT_READ, UI_HIERARCHY, UI_SCREENSHOT, UI_TAP, UI_SWIPE,
+                            UI_LONG_PRESS, UI_WAIT_FOR_TEXT, UI_TEXT, UI_KEY, SHELL_RUN,
+                        ).forEach { add(JsonPrimitive(it)) }
+                    },
+                )
             },
         )
     }
@@ -667,6 +714,189 @@ class BridgeToolRegistry(
         }
     }
 
+    private suspend fun executeActivityStart(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(COMPONENT, ACTION, DATA_URI)
+        if (request.arguments.keys.any { it !in allowed }) {
+            return failure(request.requestId, "invalid_arguments", "activity.start accepts component, action and dataUri.")
+        }
+        val component = stringArgument(request, COMPONENT, MAX_COMPONENT_BYTES)
+        val action = stringArgument(request, ACTION, MAX_ACTION_BYTES)
+        val dataUri = stringArgument(request, DATA_URI, MAX_DATA_URI_BYTES)
+        if (component == null && action == null) {
+            return failure(request.requestId, "invalid_arguments", "activity.start requires component or action.")
+        }
+        if (component != null && !COMPONENT_REGEX.matches(component)) {
+            return failure(request.requestId, "invalid_arguments", "component is not a valid Android component name.")
+        }
+        if (action != null && !ACTION_REGEX.matches(action)) {
+            return failure(request.requestId, "invalid_arguments", "action is not a valid Android action name.")
+        }
+        if (dataUri != null && ('\n' in dataUri || '\r' in dataUri)) {
+            return failure(request.requestId, "invalid_arguments", "dataUri contains forbidden control characters.")
+        }
+        requireTrustedControl(request)?.let { return it }
+        val argv = mutableListOf("am", "start", "-W")
+        if (component != null) { argv += "-n"; argv += component }
+        if (action != null) { argv += "-a"; argv += action }
+        if (dataUri != null) { argv += "-d"; argv += dataUri }
+        val result = executeTrustedArgv(argv, TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "activity_start_failed")?.let { return it }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("started", true)
+                put("output", result.stdout.decodeToString().trim().take(MAX_TRUSTED_TEXT_RESULT_CHARS))
+            },
+        )
+    }
+
+    private suspend fun executeSettingsGet(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(NAMESPACE, KEY)) {
+            return failure(request.requestId, "invalid_arguments", "settings.get requires namespace and key.")
+        }
+        val namespace = settingsNamespace(request) ?: return trustedArgumentFailure(request)
+        val key = settingsKey(request) ?: return trustedArgumentFailure(request)
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(listOf("settings", "get", namespace, key), TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "settings_get_failed")?.let { return it }
+        val value = result.stdout.decodeToString().trimEnd('\r', '\n')
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(NAMESPACE, namespace)
+                put(KEY, key)
+                if (value == "null") put("value", JsonNull) else put("value", value)
+            },
+        )
+    }
+
+    private suspend fun executeSettingsPut(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(NAMESPACE, KEY, VALUE)) {
+            return failure(request.requestId, "invalid_arguments", "settings.put requires namespace, key and value.")
+        }
+        val namespace = settingsNamespace(request) ?: return trustedArgumentFailure(request)
+        val key = settingsKey(request) ?: return trustedArgumentFailure(request)
+        val value = stringArgument(request, VALUE, MAX_SETTING_VALUE_BYTES, allowEmpty = true)
+            ?: return trustedArgumentFailure(request)
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(listOf("settings", "put", namespace, key, value), TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "settings_put_failed")?.let { return it }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject { put(NAMESPACE, namespace); put(KEY, key); put("updated", true) },
+        )
+    }
+
+    private suspend fun executeAppOpsGet(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys.any { it != PACKAGE_NAME && it != OP_NAME } || PACKAGE_NAME !in request.arguments) {
+            return failure(request.requestId, "invalid_arguments", "appops.get requires packageName and optional opName.")
+        }
+        val packageName = parsePackageName(request) ?: return packageNameFailure(request)
+        val opName = if (OP_NAME in request.arguments) appOpName(request) ?: return trustedArgumentFailure(request) else null
+        requireTrustedControl(request)?.let { return it }
+        val argv = mutableListOf("appops", "get", packageName)
+        if (opName != null) argv += opName
+        val result = executeTrustedArgv(argv, TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "appops_get_failed")?.let { return it }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PACKAGE_NAME, packageName)
+                if (opName != null) put(OP_NAME, opName)
+                put("output", result.stdout.decodeToString())
+                put("truncated", result.stdoutTruncated)
+            },
+        )
+    }
+
+    private suspend fun executeAppOpsSet(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(PACKAGE_NAME, OP_NAME, MODE)) {
+            return failure(request.requestId, "invalid_arguments", "appops.set requires packageName, opName and mode.")
+        }
+        val packageName = parsePackageName(request) ?: return packageNameFailure(request)
+        if (packageName == TYPED_DROID_PACKAGE) {
+            return failure(request.requestId, "protected_package", "TypedDroid app-ops cannot be modified by its connected agent.")
+        }
+        val opName = appOpName(request) ?: return trustedArgumentFailure(request)
+        val mode = stringArgument(request, MODE, 32)?.lowercase()?.takeIf { it in APP_OP_MODES }
+            ?: return trustedArgumentFailure(request)
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(listOf("appops", "set", packageName, opName, mode), TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "appops_set_failed")?.let { return it }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject { put(PACKAGE_NAME, packageName); put(OP_NAME, opName); put(MODE, mode); put("updated", true) },
+        )
+    }
+
+    private suspend fun executeProcessList(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.isNotEmpty()) {
+            return failure(request.requestId, "invalid_arguments", "process.list does not accept arguments.")
+        }
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(listOf("ps", "-A", "-o", "USER,PID,PPID,NAME"), TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "process_list_failed")?.let { return it }
+        var omitted = false
+        val rows = result.stdout.decodeToString().lineSequence().drop(1).mapNotNull { line ->
+            val columns = line.trim().split(Regex("\\s+"), limit = 4)
+            if (columns.size != 4) null else columns
+        }.toList()
+        if (rows.size > MAX_PROCESS_RESULTS) omitted = true
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("processes", buildJsonArray {
+                    rows.take(MAX_PROCESS_RESULTS).forEach { columns ->
+                        add(buildJsonObject {
+                            put("user", columns[0])
+                            put("pid", columns[1].toIntOrNull() ?: -1)
+                            put("ppid", columns[2].toIntOrNull() ?: -1)
+                            put("name", columns[3])
+                        })
+                    }
+                })
+                put("truncated", result.stdoutTruncated || omitted)
+            },
+        )
+    }
+
+    private suspend fun executeLogcatRead(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(LINES, BUFFER)
+        if (request.arguments.keys.any { it !in allowed }) {
+            return failure(request.requestId, "invalid_arguments", "logcat.read accepts optional lines and buffer.")
+        }
+        val lines = if (LINES in request.arguments) {
+            (request.arguments[LINES] as? JsonPrimitive)?.intOrNull?.takeIf { it in 1..MAX_LOGCAT_LINES }
+                ?: return trustedArgumentFailure(request)
+        } else DEFAULT_LOGCAT_LINES
+        val buffer = if (BUFFER in request.arguments) {
+            stringArgument(request, BUFFER, 16)?.lowercase()?.takeIf { it in LOGCAT_BUFFERS }
+                ?: return trustedArgumentFailure(request)
+        } else DEFAULT_LOGCAT_BUFFER
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(
+            listOf("logcat", "-d", "-t", lines.toString(), "-v", "threadtime", "-b", buffer),
+            LOGCAT_TIMEOUT_MILLIS,
+        )
+        trustedCommandFailure(request, result, "logcat_read_failed")?.let { return it }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(LINES, lines)
+                put(BUFFER, buffer)
+                put("text", result.stdout.decodeToString())
+                put("truncated", result.stdoutTruncated)
+            },
+        )
+    }
+
     private suspend fun executeUiHierarchy(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.isNotEmpty()) {
             return failure(request.requestId, "invalid_arguments", "ui.hierarchy does not accept arguments.")
@@ -730,6 +960,70 @@ class BridgeToolRegistry(
         }
     }
 
+    private suspend fun executeUiLongPress(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(X, Y, DURATION_MILLIS)
+        if (request.arguments.keys.any { it !in allowed } || !request.arguments.keys.containsAll(setOf(X, Y))) {
+            return failure(request.requestId, "invalid_arguments", "ui.longPress requires x, y and optional durationMillis.")
+        }
+        val x = parseUiInt(request, X, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val y = parseUiInt(request, Y, 0..MAX_UI_COORDINATE) ?: return uiArgumentFailure(request)
+        val duration = if (DURATION_MILLIS in request.arguments) {
+            parseUiInt(request, DURATION_MILLIS, MIN_UI_LONG_PRESS_DURATION_MILLIS..MAX_UI_LONG_PRESS_DURATION_MILLIS)
+                ?: return uiArgumentFailure(request)
+        } else DEFAULT_UI_LONG_PRESS_DURATION_MILLIS
+        requireUiControl(request)?.let { return it }
+        return actionResult(request, uiControlBackend.swipe(x, y, x, y, duration), "ui_long_press_failed") {
+            put(X, x); put(Y, y); put(DURATION_MILLIS, duration); put("longPressed", true)
+        }
+    }
+
+    private suspend fun executeUiWaitForText(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(TEXT, TIMEOUT_MILLIS, CASE_SENSITIVE)
+        if (request.arguments.keys.any { it !in allowed } || TEXT !in request.arguments) {
+            return failure(request.requestId, "invalid_arguments", "ui.waitForText requires text and optional timeoutMillis/caseSensitive.")
+        }
+        val text = stringArgument(request, TEXT, MAX_UI_WAIT_TEXT_BYTES)
+            ?: return uiArgumentFailure(request)
+        val timeout = if (TIMEOUT_MILLIS in request.arguments) {
+            (request.arguments[TIMEOUT_MILLIS] as? JsonPrimitive)?.longOrNull
+                ?.takeIf { it in 1..MAX_UI_WAIT_TIMEOUT_MILLIS }
+                ?: return uiArgumentFailure(request)
+        } else DEFAULT_UI_WAIT_TIMEOUT_MILLIS
+        val caseSensitive = when (val value = request.arguments[CASE_SENSITIVE]) {
+            null -> false
+            is JsonPrimitive -> value.booleanOrNull ?: return uiArgumentFailure(request)
+            else -> return uiArgumentFailure(request)
+        }
+        requireUiControl(request)?.let { return it }
+        val started = System.nanoTime()
+        while (true) {
+            val result = uiControlBackend.hierarchy()
+            if (!result.ok) {
+                return failure(request.requestId, result.code ?: "ui_hierarchy_failed", result.message ?: "UI hierarchy failed.")
+            }
+            val xml = checkNotNull(result.xml)
+            val escaped = xmlEscape(text)
+            val matched = if (caseSensitive) {
+                xml.contains(text) || xml.contains(escaped)
+            } else {
+                xml.contains(text, ignoreCase = true) || xml.contains(escaped, ignoreCase = true)
+            }
+            if (matched) {
+                val elapsed = (System.nanoTime() - started) / 1_000_000
+                return CommandResultPayload(
+                    requestId = request.requestId,
+                    ok = true,
+                    result = buildJsonObject { put("matched", true); put("elapsedMillis", elapsed) },
+                )
+            }
+            val elapsed = (System.nanoTime() - started) / 1_000_000
+            if (elapsed >= timeout) {
+                return failure(request.requestId, "ui_wait_timeout", "Text did not appear before timeout.")
+            }
+            delay(minOf(UI_WAIT_POLL_MILLIS, timeout - elapsed))
+        }
+    }
+
     private suspend fun executeUiText(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys != setOf(TEXT)) return failure(request.requestId, "invalid_arguments", "ui.text requires text.")
         val primitive = request.arguments[TEXT] as? JsonPrimitive
@@ -776,6 +1070,74 @@ class BridgeToolRegistry(
         if (!result.ok) return failure(request.requestId, result.code ?: fallbackCode, result.message ?: "Android UI command failed.")
         return CommandResultPayload(requestId = request.requestId, ok = true, result = buildJsonObject(content))
     }
+
+    private fun requireTrustedControl(request: CommandRequestPayload): CommandResultPayload? {
+        if (DefaultToolPolicy.decision(BridgeTool(request.tool, ToolRisk.TRUSTED_CONTROL), agentTrustMode()) != ApprovalDecision.ALLOW) {
+            return failure(request.requestId, "policy_denied", "This system-control tool is available only to an agent explicitly placed in Trusted mode on the phone.")
+        }
+        val readiness = rawShellBackend.readiness()
+        return if (readiness.ready) null else failure(
+            request.requestId,
+            readiness.code ?: "embedded_privileged_unavailable",
+            readiness.message ?: "Embedded privileged helper is not running.",
+        )
+    }
+
+    private suspend fun executeTrustedArgv(argv: List<String>, timeoutMillis: Long): RawShellExecutionResult {
+        require(argv.isNotEmpty())
+        return rawShellBackend.execute(argv.joinToString(" ") { shellQuote(it) }, timeoutMillis)
+    }
+
+    private fun trustedCommandFailure(
+        request: CommandRequestPayload,
+        result: RawShellExecutionResult,
+        fallbackCode: String,
+    ): CommandResultPayload? {
+        if (!result.ok) {
+            return failure(request.requestId, result.code ?: fallbackCode, result.message ?: "Trusted system command failed.")
+        }
+        if (result.exitCode != 0) {
+            val detail = result.stderr.decodeToString().trim().ifEmpty { result.stdout.decodeToString().trim() }
+                .take(MAX_TRUSTED_ERROR_CHARS)
+            return failure(
+                request.requestId,
+                fallbackCode,
+                detail.ifEmpty { "Trusted system command exited with status ${result.exitCode}." },
+            )
+        }
+        return null
+    }
+
+    private fun stringArgument(
+        request: CommandRequestPayload,
+        key: String,
+        maxBytes: Int,
+        allowEmpty: Boolean = false,
+    ): String? {
+        val value = request.arguments[key] as? JsonPrimitive ?: return null
+        if (!value.isString) return null
+        val content = value.content
+        if ((!allowEmpty && content.isEmpty()) || '\u0000' in content || content.encodeToByteArray().size > maxBytes) return null
+        return content
+    }
+
+    private fun settingsNamespace(request: CommandRequestPayload): String? =
+        stringArgument(request, NAMESPACE, 16)?.lowercase()?.takeIf { it in SETTINGS_NAMESPACES }
+
+    private fun settingsKey(request: CommandRequestPayload): String? =
+        stringArgument(request, KEY, MAX_SETTINGS_KEY_BYTES)?.takeIf { SETTINGS_KEY_REGEX.matches(it) }
+
+    private fun appOpName(request: CommandRequestPayload): String? =
+        stringArgument(request, OP_NAME, MAX_APP_OP_NAME_BYTES)?.takeIf { APP_OP_NAME_REGEX.matches(it) }
+
+    private fun trustedArgumentFailure(request: CommandRequestPayload) =
+        failure(request.requestId, "invalid_arguments", "Trusted system-control arguments are invalid or outside supported bounds.")
+
+    private fun xmlEscape(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("\"", "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
 
     private suspend fun executeShellRun(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys.any { it != SHELL_COMMAND && it != TIMEOUT_MILLIS }) {
@@ -1001,6 +1363,7 @@ class BridgeToolRegistry(
 
     companion object {
         const val DEVICE_HEALTH = "device.health"
+        const val DEVICE_CAPABILITIES = "device.capabilities"
         const val BATTERY_USAGE = "battery.usage"
         const val APPS_LIST = "apps.list"
         const val APPS_USAGE = "apps.usage"
@@ -1011,10 +1374,19 @@ class BridgeToolRegistry(
         const val APPS_UNINSTALL = "apps.uninstall"
         const val APPS_FORCE_STOP = "apps.forceStop"
         const val APPS_OPEN = "apps.open"
+        const val ACTIVITY_START = "activity.start"
+        const val SETTINGS_GET = "settings.get"
+        const val SETTINGS_PUT = "settings.put"
+        const val APPOPS_GET = "appops.get"
+        const val APPOPS_SET = "appops.set"
+        const val PROCESS_LIST = "process.list"
+        const val LOGCAT_READ = "logcat.read"
         const val UI_HIERARCHY = "ui.hierarchy"
         const val UI_SCREENSHOT = "ui.screenshot"
         const val UI_TAP = "ui.tap"
         const val UI_SWIPE = "ui.swipe"
+        const val UI_LONG_PRESS = "ui.longPress"
+        const val UI_WAIT_FOR_TEXT = "ui.waitForText"
         const val UI_TEXT = "ui.text"
         const val UI_KEY = "ui.key"
         const val SHELL_RUN = "shell.run"
@@ -1027,6 +1399,13 @@ class BridgeToolRegistry(
         private const val MAX_UI_COORDINATE = 32_767
         private const val MAX_UI_SWIPE_DURATION_MILLIS = 10_000
         private const val DEFAULT_UI_SWIPE_DURATION_MILLIS = 300
+        private const val MIN_UI_LONG_PRESS_DURATION_MILLIS = 250
+        private const val MAX_UI_LONG_PRESS_DURATION_MILLIS = 5_000
+        private const val DEFAULT_UI_LONG_PRESS_DURATION_MILLIS = 700
+        private const val MAX_UI_WAIT_TIMEOUT_MILLIS = 30_000L
+        private const val DEFAULT_UI_WAIT_TIMEOUT_MILLIS = 10_000L
+        private const val UI_WAIT_POLL_MILLIS = 250L
+        private const val MAX_UI_WAIT_TEXT_BYTES = 2 * 1024
         private const val MAX_UI_TEXT_BYTES = 2 * 1024
         private const val MAX_UI_KEY_CODE = 1_000
         private const val X = "x"
@@ -1038,6 +1417,17 @@ class BridgeToolRegistry(
         private const val DURATION_MILLIS = "durationMillis"
         private const val TEXT = "text"
         private const val KEY_CODE = "keyCode"
+        private const val COMPONENT = "component"
+        private const val ACTION = "action"
+        private const val DATA_URI = "dataUri"
+        private const val NAMESPACE = "namespace"
+        private const val KEY = "key"
+        private const val VALUE = "value"
+        private const val OP_NAME = "opName"
+        private const val MODE = "mode"
+        private const val LINES = "lines"
+        private const val BUFFER = "buffer"
+        private const val CASE_SENSITIVE = "caseSensitive"
         private const val PATH_SEGMENTS = "pathSegments"
         private const val PACKAGE_NAME = "packageName"
         private const val KEEP_DATA = "keepData"
@@ -1050,6 +1440,27 @@ class BridgeToolRegistry(
         private const val VERSION_NAME = "versionName"
         private const val VERSION_CODE = "versionCode"
         private const val SIGNER_SHA256 = "signerSha256"
+        private const val TRUSTED_COMMAND_TIMEOUT_MILLIS = 30_000L
+        private const val LOGCAT_TIMEOUT_MILLIS = 30_000L
+        private const val DEFAULT_LOGCAT_LINES = 100
+        private const val MAX_LOGCAT_LINES = 500
+        private const val DEFAULT_LOGCAT_BUFFER = "main"
+        private const val MAX_PROCESS_RESULTS = 1_000
+        private const val MAX_COMPONENT_BYTES = 512
+        private const val MAX_ACTION_BYTES = 256
+        private const val MAX_DATA_URI_BYTES = 2 * 1024
+        private const val MAX_SETTING_VALUE_BYTES = 4 * 1024
+        private const val MAX_SETTINGS_KEY_BYTES = 128
+        private const val MAX_APP_OP_NAME_BYTES = 80
+        private const val MAX_TRUSTED_ERROR_CHARS = 300
+        private const val MAX_TRUSTED_TEXT_RESULT_CHARS = 4_000
+        private val SETTINGS_NAMESPACES = setOf("system", "secure", "global")
+        private val APP_OP_MODES = setOf("allow", "ignore", "deny", "default", "foreground")
+        private val LOGCAT_BUFFERS = setOf("main", "system", "events", "crash", "radio", "all")
+        private val SETTINGS_KEY_REGEX = Regex("^[A-Za-z0-9._:-]{1,128}$")
+        private val APP_OP_NAME_REGEX = Regex("^[A-Za-z0-9_.:-]{1,80}$")
+        private val COMPONENT_REGEX = Regex("^[A-Za-z_][A-Za-z0-9_.]*/\\.?[A-Za-z_][A-Za-z0-9_.$]*$")
+        private val ACTION_REGEX = Regex("^[A-Za-z_][A-Za-z0-9_.]{1,255}$")
         private const val TYPED_DROID_PACKAGE = "io.github.arttvad9r.typeddroid"
         private val PACKAGE_NAME_REGEX = Regex(
             "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"

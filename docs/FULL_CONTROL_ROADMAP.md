@@ -66,12 +66,12 @@ Acceptance: a fresh phone with only TypedDroid installed can pair once through A
 ## Phase 2 — full trusted tool surface
 
 - [x] `shell.run` with persistent `TRUSTED` authorization and SAFE-mode denial.
-- [ ] activity/intent operations.
-- [ ] package manager and appops operations.
-- [ ] settings read/write.
-- [ ] logcat/process/system diagnostics.
+- [x] activity/intent operations (bounded component/action/data activity starts; raw shell remains the escape hatch for uncommon intent flags/extras).
+- [x] package manager and AppOps operations (typed app management plus Trusted AppOps get/set).
+- [x] settings read/write for system/secure/global namespaces in Trusted mode.
+- [x] bounded logcat/process diagnostics.
 - [ ] broader file operations available to the shell UID.
-- [ ] capability introspection so agents know what this phone/backend can actually do.
+- [x] capability introspection so agents know what this phone/backend can actually do.
 
 Structured tools remain preferred for common tasks, but they no longer artificially define the maximum authority of a trusted agent.
 
@@ -80,9 +80,9 @@ Structured tools remain preferred for common tasks, but they no longer artificia
 - [x] UI-control is part of the pairing-scoped `TRUSTED` capability and remains denied in `SAFE`.
 - [x] bounded JPEG screenshot acquisition through the owned shell-UID helper.
 - [x] bounded UI hierarchy through Android `uiautomator` where available.
-- [x] tap, swipe, text input and key events; long-press remains a follow-up convenience primitive.
+- [x] tap, swipe, long-press, text input and key events.
 - [x] typed launcher-app open operation.
-- [ ] arbitrary activity and wait-for-UI primitives.
+- [x] bounded activity start and wait-for-text UI primitive.
 - [ ] dedicated UI-control foreground indicator/kill switch; command audit already covers remote UI actions.
 - [ ] investigate OEM behavior and protected/secure surfaces; do not claim bypasses Android does not provide.
 
