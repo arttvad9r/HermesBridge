@@ -2,153 +2,92 @@
 
 ## Principles
 
-1. **Outbound from phone.** The phone initiates the long-lived connection. No inbound port is required on Android.
-2. **Typed tools, not shell.** Hermes receives purpose-built operations.
-3. **Least privilege.** Modules and permissions are enabled only when needed.
-4. **Fail closed.** Unknown commands, invalid schemas and unavailable privileged backends are rejected.
-5. **Local policy wins.** The Android app may refuse an operation even if Hermes requested it.
-6. **Reuse proven components.** `droid-mcp` is the planned MCP/tool foundation; Shizuku is the first privileged backend.
+1. **Agent-neutral.** Android authority is independent of Codex, Claude Code, OpenCode, Hermes, Cursor, or any other MCP host.
+2. **Typed tools, not shell.** The agent sees fixed operations, never arbitrary argv or a generic Android command selector.
+3. **Local host boundary.** Agent integration and the admin API run locally on the user's computer.
+4. **Outbound from Android.** The phone initiates the authenticated device connection; no management port is opened on Android.
+5. **Android policy wins.** A compromised agent or host still cannot bypass Android-side validation and local approval.
+6. **Least privilege and bounded output.** Optional capabilities remain opt-in and results have explicit size/count limits.
+7. **Fail closed.** Unknown tools, malformed schemas, expired approvals and unavailable privileged backends are rejected.
 
 ## Runtime topology
 
 ```text
-+------------------+
-| User / Telegram  |
-+---------+--------+
-          |
-          v
-+------------------+
-| Hermes on VPS    |
-+---------+--------+
-          |
-          v
-+---------------------------+
-| Hermes Bridge relay       |
-| - device registry         |
-| - pairing                 |
-| - command routing         |
-| - approval notifications  |
-+------------+--------------+
-             ^
-             | outbound authenticated TLS/WebSocket
-             |
-+------------+--------------+
-| Android Hermes Bridge     |
-|                           |
-| Connection manager        |
-| Capability registry       |
-| Approval policy           |
-| Audit log                 |
-| Tool adapters             |
-+------+------+-------------+
-       |      |
-       |      +----------------------+
-       |                             |
-       v                             v
-Android APIs / droid-mcp       Optional backends
-                               - Usage Access
-                               - Shizuku
-                               - policy-gated UI-control session
++--------------------------------------+
+| Any MCP-capable AI agent             |
+| Codex / Claude / OpenCode / Hermes…  |
++-------------------+------------------+
+                    |
+                    | MCP stdio
+                    v
++--------------------------------------+
+| Generic MCP adapter                  |
+| - agent-neutral schemas              |
+| - second typed allowlist             |
++-------------------+------------------+
+                    |
+                    | loopback HTTP
+                    v
++--------------------------------------+
+| Local Bridge Host                    |
+| - pairing/device registry            |
+| - command routing                    |
+| - idempotency                        |
+| - short-lived APK artifacts          |
+| - redacted approval notifications    |
++-------------------+------------------+
+                    ^
+                    | authenticated Android channel
+                    |
++-------------------+------------------+
+| Android Hermes Bridge                |
+| - Keystore identity                  |
+| - typed tool router                  |
+| - local approval policy              |
+| - bounded audit history              |
+| - Android APIs / SAF / UsageStats    |
+| - optional typed Shizuku backend     |
++--------------------------------------+
 ```
+
+Hermes Agent is one optional adapter/configuration on top of the generic MCP boundary. It has no additional protocol authority.
+
+## Agent boundary
+
+The canonical public integration is `mcp_adapter/android_bridge_mcp` over MCP stdio. Agent-specific integrations may configure or package that server, but must not add tools that bypass the generic allowlist.
+
+MCP is deliberately local because stdio is broadly supported and keeps Bridge Host credentials off remote agent configuration. Streamable HTTP may be added later for clients that genuinely require a remote MCP endpoint, but it is not required by the core design.
+
+## Bridge Host
+
+The existing Kotlin relay runtime is the first Bridge Host transport implementation. It binds to `127.0.0.1`, persists device public keys/state under the current user, and exposes its admin API only locally.
+
+Device-facing WSS ingress is separate from agent integration. No specific cloud provider, tunnel or reverse proxy is part of the architecture.
 
 ## Android layers
 
 ### UI
 
-Compose screens:
-
-- status/dashboard;
-- pairing;
-- setup/capability wizard;
-- approvals;
-- audit/history;
-- settings.
+Compose screens provide pairing, setup/capability controls, local approvals, audit/history and status.
 
 ### Domain
 
-Pure Kotlin where possible:
-
-- `BridgeTool` catalog;
-- risk classification;
-- approval policy;
-- pairing-code validation;
-- relay protocol models;
-- connection state.
-
-Domain code should remain testable without Android.
+Pure Kotlin where possible: typed tool catalog, risk classes, approval policy, protocol models, pairing validation and connection state.
 
 ### Device/tool layer
 
-Typed adapters exposing only Hermes Bridge-approved tools.
-
-Planned `droid-mcp` adoption is incremental. Do not depend on the monolithic/all-tools module in production. Import only required modules and map their tool surface into a Hermes Bridge allowlist.
-
-Initial candidates:
-
-- device;
-- apps;
-- files/downloads;
-- network;
-- usage where supported;
-- Shizuku;
-- audit.
-
-Screen/UI tooling is optional and must be separately enabled.
+Only purpose-built operations are registered. Package visibility remains narrow; file access is restricted to the user-selected SAF tree; Usage Access and Shizuku are separate opt-in capabilities.
 
 ### Privileged layer
 
-Shizuku is the initial non-root privileged backend.
-
-Hermes Bridge must prefer dedicated operations such as `force_stop_app` or `install_apk` over a generic shell command. Generic shell execution is not exposed to Hermes.
+Shizuku provides selected non-root privileged operations through a typed Binder/UserService boundary. No generic shell method crosses that boundary or the agent boundary.
 
 ### UI-control boundary
 
-The standard Hermes Bridge build does not use `AccessibilityService` as an autonomous AI-control backend. See [ADR 0003](decisions/0003-ui-control-policy.md).
+The standard build does not expose autonomous Accessibility-based control. Any future UI-control feature remains a distinct, explicit, short-lived authority described by ADR 0003.
 
-Future UI-control work must prefer typed Android APIs and narrow typed Shizuku operations. If screen pixels are required, capture is an explicit short-lived MediaProjection session with fresh system consent for each new session and the required foreground-service lifecycle. Capture is never restored from boot and secure/unavailable content is not bypassed.
+## Security ownership
 
-UI-control authority is separate from base relay connectivity and ordinary Shizuku setup. Typed tap/swipe/input operations, if implemented, require an explicit local UI-control session/approval and remain bounded and auditable.
+The agent and Bridge Host are treated as potentially compromised. Android remains the final authority for dangerous actions. Local one-use approvals are bound to canonical arguments/content fingerprints and cannot be resolved by an MCP token, host admin token, or notification channel.
 
-### Transport
-
-V1 transport is a persistent outbound connection from Android to a relay near Hermes.
-
-Requirements:
-
-- TLS;
-- authenticated device;
-- reconnect with exponential backoff + jitter;
-- heartbeat;
-- message IDs and idempotency;
-- bounded queue;
-- no command execution before authentication;
-- command schema versioning.
-
-See [PROTOCOL.md](PROTOCOL.md).
-
-## Dependency boundary with droid-mcp
-
-`droid-mcp` solves Android MCP/tool implementation and optional Shizuku integration. Hermes Bridge adds:
-
-- user-friendly pairing;
-- outbound relay transport;
-- opinionated tool allowlist;
-- local approval policy;
-- capability setup UX;
-- Hermes-specific lifecycle and reconnect behavior.
-
-This avoids forking/reimplementing its Android tool internals while keeping our security policy independent.
-
-## Current implementation
-
-The current app includes:
-
-- Compose pairing/setup/dashboard and local approval/history UI;
-- an authenticated outbound relay connection with challenge/response device identity, reconnect and revocation flows;
-- a narrow local Hermes MCP adapter and Android-side typed tool router;
-- standard Android health/app/file adapters plus opt-in SAF and Usage Access capabilities;
-- Shizuku-backed typed privileged operations with no agent-facing raw shell;
-- exact local approval for mutating/privileged operations and a bounded local audit history;
-- CI gates for tests, lint, debug/release artifacts, signing-path verification and reproducible unsigned release builds.
-
-Physical-device network, permission and privileged-operation validation remains a separate release gate. UI automation is not implemented and must follow ADR 0003 rather than adding an Accessibility placeholder.
+See `SECURITY.md`, `PROTOCOL.md`, `MCP.md`, and `HOST.md`.

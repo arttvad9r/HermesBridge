@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from hermes_bridge_mcp import server
+from android_bridge_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"

@@ -62,7 +62,7 @@
             android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Maintains an authenticated outbound connection to the user's own Hermes agent so explicitly allowlisted device commands can be received while the app UI is closed." />
+                android:value="Maintains an authenticated outbound connection to the user's Bridge Host so explicitly allowlisted device commands can be received while the app UI is closed." />
         </service>
 
         <service

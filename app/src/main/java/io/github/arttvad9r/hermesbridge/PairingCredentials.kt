@@ -29,7 +29,7 @@ class PairingCredentialManager(
             pairingStore.clear()
             return Result.failure(
                 DeviceIdentityUnavailableException(
-                    message = "The stored device identity is missing. Pair the phone with Hermes again.",
+                    message = "The stored device identity is missing. Pair the phone with Bridge Host again.",
                     mode = DeviceIdentityFailureMode.REPAIR_REQUIRED,
                 )
             )

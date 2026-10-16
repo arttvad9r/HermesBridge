@@ -16,7 +16,7 @@
 - [x] Add basic app icon/assets without generated artwork.
 - [x] Apply security-driven Gradle/Kotlin toolchain upgrades only after concrete advisories and full CI validation.
 
-## P0 — real remote connection
+## P0 — authenticated device connection
 
 - [x] Protocol models with kotlinx.serialization.
 - [x] Generate P-256 device key in Android Keystore.
@@ -26,16 +26,16 @@
 - [x] Reconnect with exponential backoff + jitter.
 - [x] Foreground connection service and notification.
 - [x] Reconnect after reboot/package replacement for already paired devices.
-- [x] Relay service beside Hermes.
-- [x] VPS deployment examples for systemd + TLS reverse proxy.
+- [x] Local Bridge Host runtime with loopback-only admin API.
+- [x] Non-root local Bridge Host launcher with XDG user state and local token file.
 - [x] Recover cleanly when relay state no longer recognizes a paired device.
 - [x] Admin-only persistent device revocation endpoint.
 - [x] Authenticated device self-revocation and local clean re-pair flow.
 - [ ] End-to-end test over unrelated networks/mobile data on the physical phone.
 
-## P0 — Hermes MCP boundary
+## P0 — agent-neutral MCP boundary
 
-- [x] Local stdio MCP adapter for Hermes.
+- [x] Generic local stdio MCP adapter for any compatible agent.
 - [x] Fixed typed tools instead of a generic command passthrough.
 - [x] Loopback/HTTPS relay URL validation.
 - [x] Admin token validation.
@@ -52,7 +52,7 @@
 - [x] `list_files` inside the user-granted SAF tree.
 - [x] `analyze_files` with bounded recursive SAF storage analysis.
 - [x] `delete_path` behind Android-side exact-target approval.
-- [x] Typed `install_apk` with dedicated VPS staging directory, relay artifact transfer and Android-side verified-content approval.
+- [x] Typed `install_apk` with dedicated local staging directory, short-lived artifact transfer and Android-side verified-content approval.
 - [x] Typed `uninstall_app` behind Android-side exact-argument approval.
 - [x] Typed `force_stop_app` behind Android-side exact-argument approval.
 
@@ -78,7 +78,7 @@
 - [x] Path-segment validation and bounded file-list size/depth.
 - [x] Local persistent audit log with 200-entry retention, fail-closed tool/error metadata and no raw command arguments or secret-bearing error messages.
 - [ ] Add further read-only app details only when a concrete user scenario justifies them.
-- [ ] Idempotency where a future mutating operation is safely retryable.
+- [x] Explicit idempotency keys for retry-safe current mutating operations, with conflict detection.
 
 ## P1 — Android setup wizard
 
@@ -93,8 +93,8 @@
 - [x] Delayed post-reboot Shizuku restoration check that does not interfere with the base relay connection.
 - [x] "Advanced access needs restoration" notification only for previously configured Shizuku, with direct Shizuku launch when installed.
 - [x] Usage Access status/setup card with manual Android special-access flow.
-- [x] Guided first-run flow: connect Hermes, choose optional capabilities, finish into the normal dashboard.
-- [x] Local "История Hermes" screen reachable from the foreground-service notification.
+- [x] Guided first-run flow: connect Bridge Host, choose optional capabilities, finish into the normal dashboard.
+- [x] Local action-history screen reachable from the foreground-service notification.
 - [x] Gate any UI-control setup behind ADR 0003; do not ship an Accessibility placeholder before a concrete compliant backend/session exists.
 
 ## P1 — privileged actions
@@ -104,12 +104,12 @@
 - [x] Uninstall app.
 - [x] Force-stop app.
 - [x] Revoke one already-granted Android `dangerous` runtime permission from a launcher-visible app after exact local approval.
-- [ ] Migrate the fixed Shizuku command backend from deprecated reflective `Shizuku.newProcess` to a typed `UserService` before adopting Shizuku API 14; do not add a generic shell surface during migration.
+- [x] Migrate the fixed Shizuku backend from deprecated reflective `Shizuku.newProcess` to a typed `UserService` without adding a generic shell surface.
 - [ ] Permission grant operations, only if a separate safe exact-target policy is justified.
 - [ ] Selected safe settings operations.
 - [x] First selected diagnostic: bounded read-only Batterystats power-use and partial-wakelock snapshot.
 - [ ] Additional selected diagnostics (`dumpsys`) wrapped in typed tools as justified.
-- [x] Never register upstream/raw shell in the Hermes tool surface.
+- [x] Never register upstream/raw shell in the agent tool surface.
 
 ## P1 — approvals
 
@@ -122,13 +122,13 @@
 - [x] Permission-revoke approval binds to package + permission + derived Android user ID.
 - [x] Approved tickets are one-use only.
 - [x] Approval/denial decisions recorded in the local bounded audit history.
-- [x] Hermes/Telegram approval routing.
+- [x] Agent-neutral pending-approval notifications plus optional one-way Telegram notifier.
 - [ ] Per-tool "always allow" only where explicitly safe.
-- [x] Emergency disconnect/revoke button for the Hermes pairing itself.
+- [x] Emergency disconnect/revoke button for the Bridge pairing itself.
 
 ## P2 — UI automation
 
-- [x] Backend/release-channel ADR: the standard build does not use `AccessibilityService` for autonomous Hermes UI control.
+- [x] Backend/release-channel ADR: the standard build does not use `AccessibilityService` for autonomous agent UI control.
 - [ ] Prototype narrow typed Android/Shizuku UI actions without a generic shell surface.
 - [x] User-consented MediaProjection screen-capture strategy with one explicit short-lived capture session at a time.
 - [ ] Tap/swipe/input typed actions.
@@ -141,13 +141,13 @@
 - [x] Android Network Security Config plus strict canonical WSS relay endpoint/TLS policy tests.
 - [x] Keystore migration/recovery tests.
 - [ ] Process-death/reboot/network-handover tests on device.
-- [ ] Physical TLS/WSS certificate and handshake validation through the deployed VPS endpoint.
+- [ ] Physical TLS/WSS certificate and handshake validation through the configured device ingress to local Bridge Host.
 - [ ] Notification permission grant/deny/settings behavior on Android 13+ physical device.
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Usage Access behavior/revocation tests on physical device.
 - [ ] Shizuku reboot/reactivation and restoration-notification tests on physical device.
 - [ ] Audit-log persistence, clear-history and notification-entry E2E on physical device.
-- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through the deployed VPS relay.
+- [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through local Bridge Host.
 - [ ] Battery impact measurements.
 - [x] R8/release build and reflection keep-rule verification.
 - [x] Signed release process with external signing secrets, `apksigner` verification, and byte-for-byte reproducible unsigned APK gate.

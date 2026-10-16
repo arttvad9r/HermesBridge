@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.withLock
  * payload while its entry remains in this bounded table.
  *
  * `approval_required` is intentionally non-terminal: after the user resolves the exact local
- * ticket, Hermes may retry the same request ID and payload. Concurrent duplicates of one request
+ * ticket, an agent may retry the same request ID and payload. Concurrent duplicates of one request
  * ID share a single in-flight execution; unrelated request IDs are never serialized behind it.
  */
 internal class CommandReplayGuard {

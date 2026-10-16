@@ -154,9 +154,9 @@ class BridgeForegroundService : Service() {
         BridgeRuntime.update(state, message)
         val text = when (state) {
             ConnectionState.DISCONNECTED -> "Соединение остановлено"
-            ConnectionState.PAIRING -> "Подключение к Hermes…"
+            ConnectionState.PAIRING -> "Подключение к Bridge Host…"
             ConnectionState.RECONNECTING -> "Соединение потеряно. Переподключение…"
-            ConnectionState.CONNECTED -> "Hermes подключён к телефону"
+            ConnectionState.CONNECTED -> "Bridge Host подключён к телефону"
             ConnectionState.ERROR -> message ?: "Ошибка соединения"
         }
         startAsForeground("Hermes Bridge", text)
@@ -223,7 +223,7 @@ class BridgeForegroundService : Service() {
             "Hermes Bridge",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Постоянное защищённое соединение Hermes с телефоном"
+            description = "Постоянное защищённое соединение Bridge Host с телефоном"
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)

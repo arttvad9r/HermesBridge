@@ -24,7 +24,7 @@ Current tool:
 
 - `device.health`
 
-The richer `battery.usage` diagnostic is optional and uses the Shizuku backend through one fixed read-only Batterystats command. Hermes cannot pass arbitrary shell or `dumpsys` arguments.
+The richer `battery.usage` diagnostic is optional and uses the Shizuku backend through one fixed read-only Batterystats command. The agent cannot pass arbitrary shell or `dumpsys` arguments.
 
 ## App visibility
 
@@ -105,18 +105,18 @@ Hermes Bridge never registers a generic Shizuku shell for Hermes. Privileged ope
 
 ### Setup
 
-The app exposes Shizuku state separately from base Hermes connectivity. Once Hermes Bridge successfully reaches Shizuku `READY`, it stores only the fact that advanced access was previously configured. That flag contains no Shizuku credential or command capability.
+The app exposes Shizuku state separately from base Bridge Host connectivity. Once Hermes Bridge successfully reaches Shizuku `READY`, it stores only the fact that advanced access was previously configured. That flag contains no Shizuku credential or command capability.
 
 ### After reboot
 
 For a non-root Shizuku setup started through Wireless Debugging, the Shizuku service normally needs to be started again after a device reboot. The Android pairing itself generally does not need to be repeated each time.
 
-Hermes Bridge handles this without treating Shizuku loss as Hermes connection loss:
+Hermes Bridge handles this without treating Shizuku loss as Bridge Host connection loss:
 
-1. `BOOT_COMPLETED` starts the already-paired base Hermes relay connection immediately.
+1. `BOOT_COMPLETED` starts the already-paired base Bridge Host connection immediately.
 2. The foreground service waits briefly before checking Shizuku, avoiding an immediate false warning during boot.
 3. If Shizuku had previously reached `READY`, is still unavailable, and notification permission is granted, Hermes Bridge shows **Расширенный доступ нужно восстановить**.
-4. The notification explains that the base Hermes connection is still active.
+4. The notification explains that the base Bridge Host connection is still active.
 5. The notification opens Hermes Bridge and, when the official Shizuku app is visible, includes **Открыть Shizuku**.
 6. When Shizuku becomes `READY` again, the restoration notification is cancelled.
 
@@ -172,4 +172,4 @@ CI covers the permission/recovery policy and project build, but it cannot substi
 - actual OnePlus/ColorOS reboot and base relay reconnect;
 - Shizuku becoming unavailable after reboot and the restoration notification appearing only when expected;
 - reopening Shizuku and automatic cancellation of the reminder;
-- the privileged operations themselves through the deployed VPS relay.
+- the privileged operations themselves through the configured Bridge Host device channel.

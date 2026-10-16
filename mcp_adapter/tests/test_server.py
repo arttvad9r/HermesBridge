@@ -4,25 +4,33 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hermes_bridge_mcp import server
+from android_bridge_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
 
 
-class HermesBridgeMcpTest(unittest.TestCase):
+class AndroidBridgeMcpTest(unittest.TestCase):
     def test_relay_defaults_to_loopback(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(server._relay_url(), "http://127.0.0.1:8080")
+            self.assertEqual(server._host_url(), "http://127.0.0.1:8080")
+
+    def test_legacy_relay_url_env_remains_compatible(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"HERMES_BRIDGE_RELAY_URL": "https://bridge.example.com"},
+            clear=True,
+        ):
+            self.assertEqual(server._host_url(), "https://bridge.example.com")
 
     def test_plaintext_remote_relay_is_rejected(self) -> None:
         with patch.dict(
             os.environ,
-            {"HERMES_BRIDGE_RELAY_URL": "http://example.com:8080"},
+            {"HERMES_BRIDGE_HOST_URL": "http://example.com:8080"},
             clear=True,
         ):
             with self.assertRaises(RuntimeError):
-                server._relay_url()
+                server._host_url()
 
     def test_loopback_prefix_spoof_is_rejected(self) -> None:
         for url in (
@@ -31,11 +39,11 @@ class HermesBridgeMcpTest(unittest.TestCase):
         ):
             with self.subTest(url=url), patch.dict(
                 os.environ,
-                {"HERMES_BRIDGE_RELAY_URL": url},
+                {"HERMES_BRIDGE_HOST_URL": url},
                 clear=True,
             ):
                 with self.assertRaises(RuntimeError):
-                    server._relay_url()
+                    server._host_url()
 
     def test_device_health_cannot_select_arbitrary_tool(self) -> None:
         calls = []
@@ -230,6 +238,31 @@ class HermesBridgeMcpTest(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError):
                 server._admin_token()
+
+    def test_admin_token_defaults_to_local_config_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_home = Path(directory)
+            token_dir = config_home / "hermesbridge"
+            token_dir.mkdir()
+            (token_dir / "admin-token").write_text("a" * 64, encoding="utf-8")
+
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(server, "_config_home", return_value=config_home),
+            ):
+                self.assertEqual(server._admin_token(), "a" * 64)
+
+    def test_apk_directory_defaults_to_xdg_data_home(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                os.environ,
+                {"XDG_DATA_HOME": directory},
+                clear=True,
+            ):
+                self.assertEqual(
+                    server._apk_directory(),
+                    Path(directory).resolve() / "hermesbridge" / "apks",
+                )
 
 
 if __name__ == "__main__":

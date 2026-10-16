@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "android-bridge-mcp"
+version = "0.1.0"
+description = "Agent-neutral MCP adapter for security-first Android tools"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2,<3",
+]
+
+[project.scripts]
+android-bridge-mcp = "android_bridge_mcp.server:main"
+hermes-bridge-mcp = "android_bridge_mcp.server:main"
+android-bridge-telegram-approvals = "android_bridge_mcp.telegram_approvals:main"
+hermes-bridge-telegram-approvals = "android_bridge_mcp.telegram_approvals:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["android_bridge_mcp"]

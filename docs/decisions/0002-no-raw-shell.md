@@ -1,4 +1,4 @@
-# ADR 0002: Do not expose a raw shell to Hermes
+# ADR 0002: Do not expose a raw shell to agents
 
 Status: Accepted
 

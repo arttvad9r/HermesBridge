@@ -70,7 +70,7 @@ class PairingStore(context: Context) : PairingRecordStore {
                 .remove(KEY_PAIRING_RECORD)
                 .remove(KEY_LEGACY_DEVICE_ID)
                 .commit()
-        ) { "Could not durably clear Hermes pairing state." }
+        ) { "Could not durably clear bridge pairing state." }
     }
 
     private fun readRecord(): PairingRecordSnapshot? {
@@ -94,7 +94,7 @@ class PairingStore(context: Context) : PairingRecordStore {
                 .putString(KEY_PAIRING_RECORD, encoded)
                 .remove(KEY_LEGACY_DEVICE_ID)
                 .commit()
-        ) { "Could not durably persist Hermes pairing state." }
+        ) { "Could not durably persist bridge pairing state." }
     }
 
     private companion object {
@@ -129,7 +129,7 @@ internal fun isValidPairingDeviceId(deviceId: String): Boolean =
     PAIRING_DEVICE_ID_REGEX.matches(deviceId)
 
 private fun requireValidPairingDeviceId(deviceId: String) {
-    require(isValidPairingDeviceId(deviceId)) { "Invalid Hermes device ID." }
+    require(isValidPairingDeviceId(deviceId)) { "Invalid bridge device ID." }
 }
 
 private val PAIRING_DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9._-]{1,120}$")

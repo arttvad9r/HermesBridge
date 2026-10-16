@@ -16,7 +16,7 @@ The adapted Hermes Bridge process-execution pattern is kept private and is used 
 - `am force-stop <package>`;
 - `dumpsys batterystats --charged --checkin` for bounded read-only battery diagnostics.
 
-The upstream generic shell surface is not registered or exposed to Hermes. Hermes cannot provide argv for these commands.
+The upstream generic shell surface is not registered or exposed to any AI agent. The agent cannot provide argv for these commands.
 
 The Batterystats checkin parser, output bounds and MCP result model are Hermes Bridge code based on Android's documented `dumpsys batterystats --checkin` format; they are not copied from droid-mcp.
 
