@@ -41,7 +41,7 @@ Goal: privileged access without requiring Shizuku.
   - [x] pairing code validation and in-memory protocol E2E tests.
   - [x] in-app pairing onboarding with explicit split-screen guidance for Android's short-lived pairing dialog; physical OEM verification remains.
 - [x] Discover/connect to the device's local `adbd` endpoint through Android NSD.
-- [x] Add an owned shell-UID `app_process` helper with authenticated abstract-local-socket RPC, bootstrapped through ADB.
+- [x] Add an owned shell-UID `app_process` helper with authenticated loopback-only RPC, bootstrapped through ADB.
 - [ ] Complete the minimum ADB host protocol required by TypedDroid.
   - [x] CNXN/STLS negotiation and TLS 1.3 secure-connect client.
   - [x] OPEN/OKAY/WRTE/CLSE stream multiplexer.
@@ -51,8 +51,8 @@ Goal: privileged access without requiring Shizuku.
 - [ ] Finish shell execution lifecycle: output/packet/socket-time bounds and helper-side draining exist; cancellation still needs wiring.
 - [x] Reimplement current privileged app tools on the embedded ADB backend (install/uninstall/force-stop/permission revoke through the owned shell-UID helper; physical verification remains).
 - [x] Reimplement Batterystats diagnostics on the embedded ADB helper (physical verification remains).
-- [x] Remove Shizuku from the default runtime path; keep its code/dependency temporarily for physical parity comparison only.
-- [ ] Remove Shizuku dependency/provider/UI/recovery code after parity.
+- [x] Move the current privileged tool set to the owned helper backend.
+- [x] Remove Shizuku dependency/provider/UI/recovery code.
 
 Acceptance: a fresh phone with only TypedDroid installed can pair once through Android Wireless Debugging and perform the current privileged tool set without the Shizuku app.
 
@@ -134,8 +134,8 @@ Important: NAT traversal across arbitrary networks cannot be guaranteed by "no s
 
 1. Trust persistence and session binding.
 2. Embedded ADB protocol module and tests.
-3. Replace current Shizuku operations one by one.
-4. Remove Shizuku completely.
+3. Replace the former companion-app privileged operations with owned helper RPC.
+4. Remove the companion privilege dependency completely.
 5. Add trusted raw shell.
 6. Add UI perception/control.
 7. Collapse agent-side host into MCP.

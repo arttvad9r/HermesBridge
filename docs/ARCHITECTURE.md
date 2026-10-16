@@ -46,7 +46,7 @@
 | - local approval policy              |
 | - bounded audit history              |
 | - Android APIs / SAF / UsageStats    |
-| - optional typed Shizuku backend     |
+| - owned shell-UID helper backend     |
 +--------------------------------------+
 ```
 
@@ -76,11 +76,11 @@ Pure Kotlin where possible: typed tool catalog, risk classes, approval policy, p
 
 ### Device/tool layer
 
-Only purpose-built operations are registered. Package visibility remains narrow; file access is restricted to the user-selected SAF tree; Usage Access and Shizuku are separate opt-in capabilities.
+SAFE mode registers purpose-built operations only. Package visibility remains narrow and SAF stays scoped. The owned helper is a separate opt-in capability, and TRUSTED mode additionally permits the explicit raw-shell surface.
 
 ### Privileged layer
 
-Shizuku provides selected non-root privileged operations through a typed Binder/UserService boundary. No generic shell method crosses that boundary or the agent boundary.
+TypedDroid bootstraps its own `app_process` helper as Android shell UID through Wireless Debugging. The app and helper communicate over a loopback-only endpoint authenticated by a random 256-bit bootstrap secret. Android SELinux does not permit an ordinary app domain to connect to a shell-owned Unix stream socket. Typed operations use fixed argv; raw shell is separately available only to TRUSTED pairings.
 
 ### UI-control boundary
 

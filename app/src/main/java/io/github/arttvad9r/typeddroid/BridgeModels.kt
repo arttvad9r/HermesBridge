@@ -58,7 +58,5 @@ data class BridgeUiState(
     val agentTrustMode: AgentTrustMode = AgentTrustMode.SAFE,
     val embeddedAdb: EmbeddedAdbUiState = EmbeddedAdbUiState(),
     val pendingApprovals: List<ApprovalTicket> = emptyList(),
-    val shizuku: ShizukuAccessState = ShizukuAccessState(),
-    val shizukuWasConfigured: Boolean = false,
     val message: String? = null,
 )

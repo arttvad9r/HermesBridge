@@ -225,17 +225,17 @@ class BridgeToolRegistryTest {
     }
 
     @Test
-    fun installDoesNotDownloadWhenShizukuIsUnavailable() = runBlocking {
+    fun installDoesNotDownloadWhenPrivilegedBackendIsUnavailable() = runBlocking {
         BridgeApprovalRuntime.clear()
         val artifacts = RecordingApkArtifactRepository()
         val result = registry(
             privilegedAppsBackend = DisabledPrivilegedAppsBackend,
             apkArtifactRepository = artifacts,
             apkPackageInspector = RecordingApkPackageInspector(),
-        ).execute(installRequest("install-no-shizuku", artifactSuffix = "1"))
+        ).execute(installRequest("install-no-privileged-backend", artifactSuffix = "1"))
 
         assertFalse(result.ok)
-        assertEquals("shizuku_unavailable", result.error?.code)
+        assertEquals("embedded_privileged_unavailable", result.error?.code)
         assertEquals(0, artifacts.downloadCalls)
         assertTrue(BridgeApprovalRuntime.pendingTickets.value.isEmpty())
     }
@@ -280,7 +280,7 @@ class BridgeToolRegistryTest {
 
     @Test
     fun pmInstallCommandUsesOnlyGeneratedStagingPath() {
-        val stagedPath = createShizukuApkStagingPath("12345678-1234-1234-1234-1234567890ab")
+        val stagedPath = createPrivilegedApkStagingPath("12345678-1234-1234-1234-1234567890ab")
         assertArrayEquals(
             arrayOf("pm", "install", "-r", stagedPath),
             buildPmInstallCommand(stagedPath, replace = true),
@@ -340,11 +340,11 @@ class BridgeToolRegistryTest {
     }
 
     @Test
-    fun uninstallDoesNotCreateApprovalWhenShizukuIsUnavailable() = runBlocking {
+    fun uninstallDoesNotCreateApprovalWhenPrivilegedBackendIsUnavailable() = runBlocking {
         BridgeApprovalRuntime.clear()
-        val result = registry().execute(uninstallRequest("request-no-shizuku", keepData = false))
+        val result = registry().execute(uninstallRequest("request-no-privileged-backend", keepData = false))
         assertFalse(result.ok)
-        assertEquals("shizuku_unavailable", result.error?.code)
+        assertEquals("embedded_privileged_unavailable", result.error?.code)
         assertTrue(BridgeApprovalRuntime.pendingTickets.value.isEmpty())
     }
 

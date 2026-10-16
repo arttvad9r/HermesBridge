@@ -12,21 +12,21 @@ import org.junit.Test
 class PrivilegedApkInstallStagingTest {
     @Test
     fun generatedPathIsConfinedToShellStagingDirectory() {
-        val path = createShizukuApkStagingPath("12345678-1234-1234-1234-1234567890ab")
+        val path = createPrivilegedApkStagingPath("12345678-1234-1234-1234-1234567890ab")
 
         assertEquals(
             "/data/local/tmp/typed-droid-12345678-1234-1234-1234-1234567890ab.apk",
             path,
         )
-        assertTrue(isShizukuApkStagingPath(path))
+        assertTrue(isPrivilegedApkStagingPath(path))
         assertTrue(
-            isShizukuApkStagingFileName(
+            isPrivilegedApkStagingFileName(
                 "typed-droid-12345678-1234-1234-1234-1234567890ab.apk"
             )
         )
-        assertFalse(isShizukuApkStagingPath("/data/local/tmp/other.apk"))
-        assertFalse(isShizukuApkStagingPath("$path;id"))
-        assertFalse(isShizukuApkStagingFileName("../typed-droid-12345678-1234-1234-1234-1234567890ab.apk"))
+        assertFalse(isPrivilegedApkStagingPath("/data/local/tmp/other.apk"))
+        assertFalse(isPrivilegedApkStagingPath("$path;id"))
+        assertFalse(isPrivilegedApkStagingFileName("../typed-droid-12345678-1234-1234-1234-1234567890ab.apk"))
     }
 
     @Test
@@ -47,7 +47,7 @@ class PrivilegedApkInstallStagingTest {
                 "typed-droid-11111111-2222-3333-4444-555555555555.apk"
             ).apply { mkdir() }
 
-            assertEquals(2, cleanupOrphanedShizukuApkStagingFiles(root))
+            assertEquals(2, cleanupOrphanedPrivilegedApkStagingFiles(root))
             assertFalse(ownedOne.exists())
             assertFalse(ownedTwo.exists())
             assertTrue(unrelated.isFile)
@@ -63,7 +63,7 @@ class PrivilegedApkInstallStagingTest {
         val root = Files.createTempDirectory("typed-droid-staging-missing").toFile()
         assertTrue(root.delete())
 
-        assertEquals(0, cleanupOrphanedShizukuApkStagingFiles(root))
+        assertEquals(0, cleanupOrphanedPrivilegedApkStagingFiles(root))
     }
 
     @Test

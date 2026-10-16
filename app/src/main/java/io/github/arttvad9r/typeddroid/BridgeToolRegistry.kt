@@ -95,8 +95,8 @@ class BridgeToolRegistry(
         if (!readiness.ready) {
             return failure(
                 request.requestId,
-                readiness.code ?: "shizuku_unavailable",
-                readiness.message ?: "Shizuku is not ready for battery diagnostics.",
+                readiness.code ?: "embedded_privileged_unavailable",
+                readiness.message ?: "Embedded privileged access is not ready for battery diagnostics.",
             )
         }
 
@@ -819,8 +819,8 @@ class BridgeToolRegistry(
         val readiness = privilegedAppsBackend.readiness()
         return if (readiness.ready) null else failure(
             request.requestId,
-            readiness.code ?: "shizuku_unavailable",
-            readiness.message ?: "Shizuku is not ready.",
+            readiness.code ?: "embedded_privileged_unavailable",
+            readiness.message ?: "Embedded privileged access is not ready.",
         )
     }
 

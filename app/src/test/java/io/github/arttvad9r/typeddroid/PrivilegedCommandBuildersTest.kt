@@ -8,7 +8,7 @@ import org.junit.Test
 class PrivilegedCommandBuildersTest {
     @Test
     fun installCommandUsesOnlyServiceGeneratedStagingPath() {
-        val stagedPath = createShizukuApkStagingPath("12345678-1234-1234-1234-1234567890ab")
+        val stagedPath = createPrivilegedApkStagingPath("12345678-1234-1234-1234-1234567890ab")
         assertArrayEquals(
             arrayOf("pm", "install", stagedPath),
             buildPmInstallCommand(stagedApkPath = stagedPath, replace = false),

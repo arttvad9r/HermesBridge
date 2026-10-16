@@ -2,20 +2,36 @@ package io.github.arttvad9r.typeddroid
 
 import android.content.Context
 
+internal data class EmbeddedPrivilegedEndpoint(
+    val port: Int,
+    val authToken: String,
+) {
+    init {
+        require(port in 1..65535) { "Invalid embedded privileged port." }
+        require(isValidEmbeddedPrivilegedAuthToken(authToken)) { "Invalid embedded privileged auth token." }
+    }
+}
+
 internal class EmbeddedPrivilegedStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
         "typed_droid_embedded_privileged",
         Context.MODE_PRIVATE,
     )
 
-    fun socketName(): String? = preferences.getString(KEY_SOCKET_NAME, null)
-        ?.takeIf(::isValidEmbeddedPrivilegedSocketName)
+    fun endpoint(): EmbeddedPrivilegedEndpoint? {
+        val port = preferences.getInt(KEY_PORT, -1)
+        val token = preferences.getString(KEY_AUTH_TOKEN, null) ?: return null
+        return runCatching { EmbeddedPrivilegedEndpoint(port, token) }.getOrNull()
+    }
 
-    fun saveSocketName(socketName: String) {
-        require(isValidEmbeddedPrivilegedSocketName(socketName)) { "Invalid embedded privileged socket name." }
-        check(preferences.edit().putString(KEY_SOCKET_NAME, socketName).commit()) {
-            "Could not persist embedded privileged helper state."
-        }
+    fun saveEndpoint(endpoint: EmbeddedPrivilegedEndpoint) {
+        check(
+            preferences.edit()
+                .putInt(KEY_PORT, endpoint.port)
+                .putString(KEY_AUTH_TOKEN, endpoint.authToken)
+                .remove(LEGACY_SOCKET_NAME)
+                .commit()
+        ) { "Could not persist embedded privileged helper state." }
     }
 
     fun wasAdbPaired(): Boolean = preferences.getBoolean(KEY_ADB_PAIRED, false)
@@ -27,9 +43,13 @@ internal class EmbeddedPrivilegedStore(context: Context) {
     }
 
     fun clear() {
-        check(preferences.edit().remove(KEY_SOCKET_NAME).commit()) {
-            "Could not clear embedded privileged helper state."
-        }
+        check(
+            preferences.edit()
+                .remove(KEY_PORT)
+                .remove(KEY_AUTH_TOKEN)
+                .remove(LEGACY_SOCKET_NAME)
+                .commit()
+        ) { "Could not clear embedded privileged helper state." }
     }
 
     fun clearAll() {
@@ -39,12 +59,14 @@ internal class EmbeddedPrivilegedStore(context: Context) {
     }
 
     private companion object {
-        const val KEY_SOCKET_NAME = "socket_name_v1"
+        const val KEY_PORT = "loopback_port_v2"
+        const val KEY_AUTH_TOKEN = "loopback_auth_token_v2"
         const val KEY_ADB_PAIRED = "adb_paired_v1"
+        const val LEGACY_SOCKET_NAME = "socket_name_v1"
     }
 }
 
-internal fun isValidEmbeddedPrivilegedSocketName(value: String): Boolean =
-    EMBEDDED_PRIVILEGED_SOCKET_NAME.matches(value)
+internal fun isValidEmbeddedPrivilegedAuthToken(value: String): Boolean =
+    EMBEDDED_PRIVILEGED_AUTH_TOKEN.matches(value)
 
-private val EMBEDDED_PRIVILEGED_SOCKET_NAME = Regex("^typeddroid-[a-f0-9]{32}$")
+private val EMBEDDED_PRIVILEGED_AUTH_TOKEN = Regex("^[a-f0-9]{64}$")

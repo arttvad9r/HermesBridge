@@ -6,7 +6,7 @@ TypedDroid lets an MCP-capable agent use an Android phone through a local, user-
 
 Hermes Agent is only an optional adapter; the protocol and privilege model are agent-neutral.
 
-> Status: active full-control development on the dedicated development branch. SAFE/TRUSTED policy, generic MCP, repository-owned Android 11+ ADB pairing/transport, shell-v2, a shell-UID `app_process` helper, and TRUSTED `run_shell` are implemented and covered by automated gates. Wireless-Debugging onboarding and helper bootstrap are now present in the Android UI, but physical-device interoperability/reboot/OEM tests are still required before this architecture can replace the legacy Shizuku backend in a stable release.
+> Status: active full-control development on the dedicated development branch. SAFE/TRUSTED policy, generic MCP, repository-owned Android 11+ ADB pairing/transport, shell-v2, a shell-UID `app_process` helper, TRUSTED `run_shell`, and the existing privileged typed tools are implemented on the owned backend. Wireless-Debugging onboarding and helper bootstrap are present in the Android UI. Physical-device interoperability/reboot/OEM tests are still required before stable release.
 
 ## Why this exists
 
@@ -17,12 +17,11 @@ Giving an autonomous agent ordinary `adb shell` is powerful but coarse. TypedDro
 - the user may explicitly switch that pairing to **TRUSTED** for the full-control surface;
 - `run_shell` is then a named capability rather than an accidental arbitrary-command escape hatch;
 - the Android app owns the ADB identity, pairing, policy, audit and privileged-helper lifecycle;
-- the new privileged path requires no Shizuku/Termux/Tasker companion app;
+- the privileged path requires no companion privilege app such as Shizuku, Termux or Tasker;
 - root is optional and is not required for the normal shell-UID backend;
 - lockscreen credential automation remains outside the trusted grant;
 - the agent-facing protocol is MCP rather than a vendor-specific integration.
 
-Shizuku remains temporarily as a legacy fallback while existing typed privileged tools are migrated to the owned backend.
 
 ## Architecture
 
@@ -47,9 +46,8 @@ Codex / Claude / OpenCode / Cursor / Hermes / ...
                             TypedDroid app_process helper
                                 (Android shell UID)
                                      |
-                           abstract local Unix socket
+                           authenticated loopback-only RPC
 
-Legacy fallback: TypedDroid -> Shizuku typed UserService
 ```
 
 Wireless Debugging is used to establish/restore the shell-UID helper, not as the intended long-lived agent transport. The normal agent↔phone connection remains TypedDroid's authenticated device channel, so future Wi-Fi↔mobile-network handover is independent of ADB networking.
@@ -183,10 +181,9 @@ release/verify-reproducible-unsigned-apk.sh
 - Ktor WebSockets 3.1.2
 - kotlinx.serialization 1.11.0
 - AndroidX DocumentFile 1.1.0
-- Shizuku API/provider 13.1.5
 - Python MCP SDK v2
 
-The narrow Shizuku process-execution pattern is adapted from Apache-2.0 `droid-mcp` source pinned in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The upstream generic shell surface is not exposed.
+Historical Apache-2.0 provenance for early package-command behavior is retained in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). TypedDroid no longer ships or requires the Shizuku API/provider.
 
 ## Documentation
 

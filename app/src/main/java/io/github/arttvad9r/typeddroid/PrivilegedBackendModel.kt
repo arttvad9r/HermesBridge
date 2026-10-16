@@ -7,7 +7,6 @@ package io.github.arttvad9r.typeddroid
  */
 enum class PrivilegedBackendKind {
     NONE,
-    SHIZUKU_LEGACY,
     EMBEDDED_ADB,
     ROOT,
 }
@@ -29,17 +28,6 @@ object PrivilegedBackendProfiles {
         rawShell = false,
         packageManager = false,
         activityManager = false,
-        appOps = false,
-        systemSettings = false,
-        logcat = false,
-        root = false,
-    )
-
-    val LegacyShizuku = PrivilegedBackendCapabilities(
-        kind = PrivilegedBackendKind.SHIZUKU_LEGACY,
-        rawShell = false,
-        packageManager = true,
-        activityManager = true,
         appOps = false,
         systemSettings = false,
         logcat = false,

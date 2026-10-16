@@ -10,9 +10,9 @@ Current Android permissions:
 - `ACCESS_NETWORK_STATE` — connection state;
 - `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_SPECIAL_USE` — long-lived authenticated bridge connection;
 - `RECEIVE_BOOT_COMPLETED` — restore an already paired bridge after reboot;
-- `POST_NOTIFICATIONS` — Android 13+ notification-drawer UX for connection status, quick history access and Shizuku restoration reminders.
+- `POST_NOTIFICATIONS` — Android 13+ notification-drawer UX for connection status and quick history access.
 
-`POST_NOTIFICATIONS` is not authority to control the phone and is not required for the authenticated relay itself to work. On Android 13+ TypedDroid shows an explicit setup card and requests it only after the user presses the button. If the user denies it, the base foreground service/relay can continue, but ordinary notification-drawer visibility and the Shizuku reboot reminder are unavailable.
+`POST_NOTIFICATIONS` is not authority to control the phone and is not required for the authenticated relay itself to work. On Android 13+ TypedDroid shows an explicit setup card and requests it only after the user presses the button. If the user denies it, the base foreground service/relay can continue, but ordinary notification-drawer visibility is unavailable.
 
 No privileged permission is needed just to pair and maintain the authenticated outbound connection.
 
@@ -24,7 +24,7 @@ Current tool:
 
 - `device.health`
 
-The richer `battery.usage` diagnostic is optional and uses the Shizuku backend through one fixed read-only Batterystats command. The agent cannot pass arbitrary shell or `dumpsys` arguments.
+The richer `battery.usage` diagnostic is optional and uses the owned helper through one fixed read-only Batterystats command. The agent cannot pass arbitrary shell or `dumpsys` arguments.
 
 ## App visibility
 
@@ -33,9 +33,8 @@ Android 11+ filters package visibility by default.
 TypedDroid deliberately does **not** request `QUERY_ALL_PACKAGES`. The manifest declares:
 
 - a `MAIN` + `LAUNCHER` query used to derive the normal app inventory;
-- one exact package query for the official Shizuku package (`moe.shizuku.privileged.api`) so the recovery UI can offer a direct **Открыть Shizuku** action when it is installed.
 
-`apps.list`, usage data, permission reads, permission audit and permission revocation remain launcher-scoped. The exact Shizuku package query does not become part of the agent's general app inventory.
+`apps.list`, usage data, permission reads, permission audit and permission revocation remain launcher-scoped.
 
 Current app tools include:
 
@@ -100,46 +99,12 @@ The Android UI now provides an **Встроенный ADB** setup card. Initial 
 3. keep that short-lived pairing dialog alive (split-screen with TypedDroid is the current compatible flow on devices that close it when Settings loses foreground);
 4. enter the six-digit code in TypedDroid;
 5. TypedDroid discovers `_adb-tls-pairing._tcp` and `_adb-tls-connect._tcp` with Android NSD, performs SPAKE2/TLS pairing, and starts its own `app_process` helper as Android shell UID;
-6. the app verifies the helper over an abstract local Unix socket and stores only the local helper endpoint plus the fact that its ADB identity has been paired.
+6. the app verifies the helper over an authenticated loopback-only endpoint and stores only that local endpoint credential plus the fact that its ADB identity has been paired.
 
 The helper accepts connections only from the exact TypedDroid app UID, while the app verifies that the peer is Android shell UID. No TCP listener is created for helper RPC. Raw shell is still denied to SAFE agent pairings; it is exposed only after the user explicitly changes that agent pairing to TRUSTED.
 
 The helper is designed to remain usable after the Wireless Debugging transport used for bootstrap is closed, until Android kills the helper process or the phone reboots. This lifecycle still requires physical-device/OEM verification before stable release. After reboot, the stored ADB identity can normally bootstrap a new helper without another six-digit code as long as Android has not revoked the paired key; Wireless debugging must temporarily be available again for that restore step.
 
-## Legacy advanced access: Shizuku
-
-Shizuku is optional and remains the legacy privileged backend while typed install/uninstall/force-stop/permission/battery operations are migrated to the owned helper. Root is not required.
-
-Current typed uses include:
-
-- APK installation from a verified TypedDroid staged artifact;
-- uninstall;
-- force-stop;
-- revoke one already-granted Android `dangerous` runtime permission from one launcher-visible app;
-- the fixed read-only Batterystats diagnostic.
-
-TypedDroid never registers a generic Shizuku shell for any agent. Privileged operations use internally constructed commands and the Android-side typed router/approval policy remains authoritative.
-
-### Setup
-
-The app exposes Shizuku state separately from base Bridge Host connectivity. Once TypedDroid successfully reaches Shizuku `READY`, it stores only the fact that advanced access was previously configured. That flag contains no Shizuku credential or command capability.
-
-### After reboot
-
-For a non-root Shizuku setup started through Wireless Debugging, the Shizuku service normally needs to be started again after a device reboot. The Android pairing itself generally does not need to be repeated each time.
-
-TypedDroid handles this without treating Shizuku loss as Bridge Host connection loss:
-
-1. `BOOT_COMPLETED` starts the already-paired base Bridge Host connection immediately.
-2. The foreground service waits briefly before checking Shizuku, avoiding an immediate false warning during boot.
-3. If Shizuku had previously reached `READY`, is still unavailable, and notification permission is granted, TypedDroid shows **Расширенный доступ нужно восстановить**.
-4. The notification explains that the base Bridge Host connection is still active.
-5. The notification opens TypedDroid and, when the official Shizuku app is visible, includes **Открыть Shizuku**.
-6. When Shizuku becomes `READY` again, the restoration notification is cancelled.
-
-`MY_PACKAGE_REPLACED` uses the normal reconnect path and does not generate a fake post-reboot warning.
-
-On ColorOS/OnePlus devices, Shizuku's own troubleshooting guidance may require changing the OEM Developer Options setting commonly named **Permission monitoring** if ADB-mode permissions do not work correctly. This is device-side Shizuku setup, not a permission TypedDroid can silently alter.
 
 ## Notifications
 
@@ -151,7 +116,6 @@ On Android 13+:
 - the user explicitly initiates the runtime request from the setup/dashboard card;
 - denial does not stop the relay or remove already granted device capabilities;
 - the card explains what will be missing and provides a system notification-settings fallback;
-- the Shizuku restoration notifier checks effective permission again immediately before posting.
 
 The restoration notification contains no pairing code, auth token, raw tool argument, file content or other secret-bearing data.
 
@@ -159,19 +123,18 @@ The restoration notification contains no pairing code, auth token, raw tool argu
 
 UI control is not currently implemented and the standard build does not declare an autonomous `AccessibilityService` for agents. See [ADR 0003](decisions/0003-ui-control-policy.md).
 
-Future UI-control must remain a separate opt-in capability rather than inheriting authority from the base relay or ordinary Shizuku setup. Typed Android/Shizuku operations are preferred for actions. If screen pixels are needed, the user must explicitly start a short-lived MediaProjection session and accept the system capture prompt for each new capture session. The projection runs only with the required `mediaProjection` foreground-service type and is never silently restored after reboot.
+Future UI-control must remain a separate opt-in capability rather than inheriting authority from the base relay or ordinary embedded-helper setup. Typed Android/helper operations are preferred for actions. If screen pixels are needed, the user must explicitly start a short-lived MediaProjection session and accept the system capture prompt for each new capture session. The projection runs only with the required `mediaProjection` foreground-service type and is never silently restored after reboot.
 
 A future setup card must appear only after a concrete compliant UI-control implementation exists. TypedDroid must not add a placeholder Accessibility permission/service merely to satisfy the wizard roadmap.
 
 ## Capability matrix
 
-| Capability | Base | Notifications | SAF folder | Usage Access | Shizuku | Future UI-control session |
+| Capability | Base | Notifications | SAF folder | Usage Access | Embedded helper | Future UI-control session |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Bridge connection | ✓ | | | | | |
 | Battery/memory/storage totals | ✓ | | | | | |
 | Launcher-visible app list | ✓ | | | | | |
 | Notification-drawer status/history | | ✓ | | | | |
-| Shizuku reboot reminder | | ✓ | | | ✓ | |
 | Read/analyze selected files | | | ✓ | | | |
 | Approved delete inside selected tree | | | ✓ | | | |
 | Detailed app usage | | | | ✓ | | |
@@ -187,6 +150,5 @@ CI covers the permission/recovery policy and project build, but it cannot substi
 
 - Android 13+ notification grant, denial and system-settings return behavior;
 - actual OnePlus/ColorOS reboot and base relay reconnect;
-- Shizuku becoming unavailable after reboot and the restoration notification appearing only when expected;
-- reopening Shizuku and automatic cancellation of the reminder;
+- owned helper loss/reboot restoration through Wireless Debugging;
 - the privileged operations themselves through the configured Bridge Host device channel.

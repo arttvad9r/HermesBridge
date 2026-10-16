@@ -41,12 +41,12 @@ An optional capability grants more authority than the user expected.
 Mitigations:
 
 - capability groups shown separately;
-- base mode works without Shizuku/Accessibility;
+- base mode works without privileged helper/UI-control;
 - Android 13+ notification permission is requested explicitly and does not gate the relay;
 - Usage Access and SAF are separate opt-in capabilities;
 - UI control is a separate opt-in capability;
-- Shizuku is a separate opt-in capability;
-- no `QUERY_ALL_PACKAGES`; Shizuku recovery uses one exact package query only.
+- the shell-UID helper is a separate opt-in capability;
+- no `QUERY_ALL_PACKAGES`; embedded ADB discovery uses Android NSD rather than package visibility.
 
 ### Compromised agent host
 
@@ -156,13 +156,14 @@ The audit history intentionally does **not** persist raw command arguments or ra
 
 The history screen is an internal non-exported activity and can be cleared locally by the user. The foreground-service notification provides a local shortcut to it when notifications are available.
 
-## Reboot and Shizuku recovery
+## Reboot and embedded-helper recovery
 
-The base relay and Shizuku are separate security/capability layers. Losing Shizuku after reboot must not silently widen access, weaken authentication, or be represented as loss of the base Android device connection.
+The base authenticated agent connection and the shell-UID helper are separate capability layers. Losing the helper after reboot/process death must not be represented as loss of the base connection and must not widen access.
 
-TypedDroid stores only a boolean that Shizuku previously reached `READY`; it does not persist a Shizuku credential or shell capability. After `BOOT_COMPLETED`, the base authenticated relay reconnect starts independently. A delayed check may show a local restoration notification only when Shizuku had previously been configured and notification permission is currently granted.
+TypedDroid persists its own ADB identity and whether pairing previously succeeded, but not a reusable shell command channel. After reboot the app may rediscover `_adb-tls-connect._tcp` while Wireless Debugging is enabled, authenticate with the paired key, and bootstrap a new helper. If Android revoked that key, the user must repeat the six-digit pairing flow.
 
-The restoration notification contains no pairing code, relay token, raw command argument, file content or package data. It can open TypedDroid and may launch only the exact official Shizuku package declared in package visibility. `MY_PACKAGE_REPLACED` does not trigger the reboot reminder. When Shizuku returns to `READY`, the reminder is cancelled.
+The helper binds TCP only to the device loopback interface and authenticates every RPC with a random 256-bit bootstrap secret stored in TypedDroid private state. Android SELinux prevents an ordinary app domain from connecting to a shell-owned Unix stream socket, so loopback is used deliberately. The listener is never bound to Wi-Fi/cellular interfaces; request frames are tightly bounded; and SAFE/TRUSTED authorization remains enforced in the app regardless of helper availability.
+
 
 ## Android component exposure
 
@@ -171,7 +172,7 @@ The restoration notification contains no pairing code, relay token, raw command 
 - the audit-history activity is `exported=false`;
 - no cleartext network traffic;
 - no externally reachable local MCP server in the default product topology;
-- package visibility remains launcher-scoped plus the exact official Shizuku package used for recovery UX;
+- package visibility remains launcher-scoped;
 - any deep link used for pairing must validate origin and nonce.
 
 ## Dependency policy

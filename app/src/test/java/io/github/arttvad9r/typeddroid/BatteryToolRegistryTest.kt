@@ -71,23 +71,23 @@ class BatteryToolRegistryTest {
     }
 
     @Test
-    fun batteryUsageFailsClosedWhenShizukuIsUnavailable() = runBlocking {
+    fun batteryUsageFailsClosedWhenPrivilegedBackendIsUnavailable() = runBlocking {
         val backend = RecordingBatteryBackend(
             readiness = PrivilegedBackendReadiness(
                 ready = false,
-                code = "shizuku_unavailable",
+                code = "embedded_privileged_unavailable",
                 message = "not ready",
             )
         )
         val result = registry(backend).execute(
             CommandRequestPayload(
                 tool = BridgeToolRegistry.BATTERY_USAGE,
-                requestId = "battery-no-shizuku",
+                requestId = "battery-no-privileged-backend",
             )
         )
 
         assertFalse(result.ok)
-        assertEquals("shizuku_unavailable", result.error?.code)
+        assertEquals("embedded_privileged_unavailable", result.error?.code)
         assertEquals(0, backend.readCalls)
     }
 

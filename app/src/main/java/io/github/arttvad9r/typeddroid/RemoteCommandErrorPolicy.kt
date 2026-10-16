@@ -39,7 +39,7 @@ internal fun remoteSafeCommandErrorMessage(code: String): String = when (code) {
     "invalid_arguments" -> "The command arguments are invalid."
     "unknown_tool" -> "The requested tool is not available on the Android device."
     "policy_denied" -> "Local Android policy denied the command."
-    "shizuku_unavailable" -> "Shizuku is not ready for this operation."
+    "embedded_privileged_unavailable" -> "Embedded privileged access is not ready for this operation."
     "usage_access_not_granted" -> "Usage Access is not granted on the Android device."
     "usage_access_unavailable" -> "Usage Access is unavailable in this build."
     "usage_query_failed" -> "Android could not query app usage."

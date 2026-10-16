@@ -114,8 +114,8 @@ class AppPermissionRevokeToolHandler(
         if (!readiness.ready) {
             return failure(
                 request.requestId,
-                readiness.code ?: "shizuku_unavailable",
-                readiness.message ?: "Shizuku is not ready.",
+                readiness.code ?: "embedded_privileged_unavailable",
+                readiness.message ?: "Embedded privileged access is not ready.",
             )
         }
 

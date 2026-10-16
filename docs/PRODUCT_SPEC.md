@@ -19,7 +19,7 @@ Technical concepts such as ADB, MCP servers, ports, addresses and Termux must no
 3. Tap **Connect Bridge**.
 4. Scan a QR code or enter a one-time pairing code produced by the local Bridge Host.
 5. Complete a guided capability wizard.
-6. Optional: enable Advanced access through Shizuku.
+6. Optional: enable full device access through the built-in Wireless-Debugging bootstrap.
 7. Land on one status screen showing that the bridge is connected.
 
 UI control is not part of the standard V1 setup. If a future policy-compatible UI-control backend is enabled, it is a separate explicit capability/session rather than an Accessibility permission bundled into first-run setup.
@@ -91,9 +91,9 @@ V1 will not provide:
   - connected/disconnected;
   - base access;
   - Usage Access;
-  - Advanced/Shizuku access;
+  - Embedded privileged access;
   - any future active UI-control session.
-- After reboot, if Shizuku is inactive, basic access stays online and the app shows one actionable notification to restore advanced access.
+- After reboot, basic agent connectivity remains separate; embedded privileged access is restored explicitly through Wireless Debugging when needed.
 - Screen capture/UI-control must never be silently restored after reboot.
 - No fake success: pairing is only shown as connected after authenticated device registration succeeds.
 
@@ -104,6 +104,6 @@ V1 will not provide:
 - The user's agent machine runs Bridge Host locally; no separate always-on server is required.
 - Device can reconnect after network changes.
 - Basic read-only health/app/file queries work through the generic MCP adapter.
-- At least install APK, uninstall and force-stop work through Shizuku.
+- Install APK, uninstall, force-stop, permission revoke and Batterystats work through the owned helper.
 - Destructive actions can require approval.
 - Audit history identifies tool, timestamp, decision and outcome.

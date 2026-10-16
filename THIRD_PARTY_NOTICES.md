@@ -2,7 +2,7 @@
 
 ## droid-mcp
 
-TypedDroid contains a narrow adaptation of Shizuku process-execution and typed package-management behavior from **droid-mcp** by stixez.
+TypedDroid retains Apache-2.0 attribution for early typed package-management behavior reviewed/adapted from **droid-mcp** by stixez. The Shizuku API/provider and companion app are no longer runtime dependencies.
 
 - Upstream: https://github.com/stixez/droid-mcp
 - Source commit used for the adaptation: `aeaa5b9e8e96f56ef64a7ca23d0726585f7b1103`

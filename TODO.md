@@ -97,7 +97,7 @@
 - [x] Local action-history screen reachable from the foreground-service notification.
 - [x] Gate any UI-control setup behind ADR 0003; do not ship an Accessibility placeholder before a concrete compliant backend/session exists.
 
-## P1 — privileged actions
+## P1 — privileged actions (legacy milestones retained for history)
 
 - [x] Shizuku API/provider dependency and typed privileged backend.
 - [x] Install APK through a service-generated staging path passed only to fixed `pm install [-r] <path>`.
@@ -129,7 +129,7 @@
 ## P2 — UI automation
 
 - [x] Backend/release-channel ADR: the standard build does not use `AccessibilityService` for autonomous agent UI control.
-- [ ] Prototype narrow typed Android/Shizuku UI actions without a generic shell surface.
+- [ ] Build UI-control capabilities on the owned helper/Android APIs.
 - [x] User-consented MediaProjection screen-capture strategy with one explicit short-lived capture session at a time.
 - [ ] Tap/swipe/input typed actions.
 - [ ] Short-lived UI-control sessions with visible local state and explicit revocation.
@@ -145,10 +145,17 @@
 - [ ] Notification permission grant/deny/settings behavior on Android 13+ physical device.
 - [ ] SAF permission revocation/provider failure tests on device.
 - [ ] Usage Access behavior/revocation tests on physical device.
-- [ ] Shizuku reboot/reactivation and restoration-notification tests on physical device.
+- [ ] Embedded-helper reboot/reactivation tests on physical device.
 - [ ] Audit-log persistence, clear-history and notification-entry E2E on physical device.
 - [ ] Physical-device install/uninstall/force-stop/file-delete/battery-diagnostics/app-usage/app-permissions/permissions-audit/permission-revoke E2E through local Bridge Host.
 - [ ] Battery impact measurements.
 - [x] R8/release build and reflection keep-rule verification.
 - [x] Signed release process with external signing secrets, `apksigner` verification, and byte-for-byte reproducible unsigned APK gate.
 - [x] Decide project license: Apache-2.0.
+
+## Full-control migration
+
+- [x] Replace Shizuku runtime dependency with repository-owned Wireless-ADB bootstrap.
+- [x] Move typed privileged operations to the owned shell-UID helper.
+- [x] Remove Shizuku provider/dependencies/UI/recovery code.
+- [ ] Complete physical-device helper lifecycle and OEM compatibility gates.

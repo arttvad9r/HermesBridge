@@ -1,45 +1,41 @@
 package io.github.arttvad9r.typeddroid.adb
 
-import android.os.Process
 import io.github.arttvad9r.typeddroid.BuildConfig
 import io.github.arttvad9r.typeddroid.EmbeddedPrivilegedClient
+import io.github.arttvad9r.typeddroid.EmbeddedPrivilegedEndpoint
 import io.github.arttvad9r.typeddroid.EmbeddedPrivilegedStore
-import java.util.UUID
+import java.security.SecureRandom
 
 internal data class EmbeddedAdbBootstrapResult(
-    val socketName: String,
+    val endpoint: EmbeddedPrivilegedEndpoint,
     val apkPath: String,
 )
 
 /** Starts the TypedDroid-owned shell-UID helper from the installed APK. */
 internal class EmbeddedAdbBootstrap(
     private val store: EmbeddedPrivilegedStore? = null,
+    private val random: SecureRandom = SecureRandom(),
 ) {
     fun bootstrap(connection: AdbSecureConnection): EmbeddedAdbBootstrapResult {
         val shell = connection.shellExecutor()
         val apkPath = discoverBaseApk(shell)
-        val socketName = "typeddroid-" + UUID.randomUUID().toString().replace("-", "")
-        val command = buildBootstrapCommand(
-            apkPath = apkPath,
-            socketName = socketName,
-            appUid = Process.myUid(),
-        )
-        val result = shell.execute(command)
-        check(result.exitCode == 0) {
-            "Could not start embedded privileged helper: ${result.stderr.decodeToString().take(200)}"
-        }
-        if (store != null) {
-            check(waitForHelper(socketName)) {
-                "Embedded privileged helper started but its authenticated local socket did not become ready."
+        repeat(BOOTSTRAP_ATTEMPTS) {
+            val endpoint = newEndpoint()
+            val result = shell.execute(buildBootstrapCommand(apkPath, endpoint))
+            check(result.exitCode == 0) {
+                "Could not start embedded privileged helper: ${result.stderr.decodeToString().take(200)}"
             }
-            store.saveSocketName(socketName)
+            if (waitForHelper(endpoint)) {
+                store?.saveEndpoint(endpoint)
+                return EmbeddedAdbBootstrapResult(endpoint, apkPath)
+            }
         }
-        return EmbeddedAdbBootstrapResult(socketName, apkPath)
+        error("Embedded privileged helper did not become reachable on loopback.")
     }
 
-    private fun waitForHelper(socketName: String): Boolean {
+    private fun waitForHelper(endpoint: EmbeddedPrivilegedEndpoint): Boolean {
         repeat(HELPER_READY_ATTEMPTS) {
-            if (EmbeddedPrivilegedClient(socketName).ping()) return true
+            if (EmbeddedPrivilegedClient(endpoint).ping()) return true
             Thread.sleep(HELPER_READY_DELAY_MILLIS)
         }
         return false
@@ -63,29 +59,38 @@ internal class EmbeddedAdbBootstrap(
         return base
     }
 
+    private fun newEndpoint(): EmbeddedPrivilegedEndpoint {
+        val port = MIN_LOOPBACK_PORT + random.nextInt(MAX_LOOPBACK_PORT - MIN_LOOPBACK_PORT + 1)
+        val tokenBytes = ByteArray(32).also(random::nextBytes)
+        return EmbeddedPrivilegedEndpoint(
+            port = port,
+            authToken = tokenBytes.joinToString("") { "%02x".format(it) },
+        )
+    }
+
     private companion object {
+        const val BOOTSTRAP_ATTEMPTS = 4
         const val HELPER_READY_ATTEMPTS = 40
         const val HELPER_READY_DELAY_MILLIS = 50L
+        const val MIN_LOOPBACK_PORT = 32_768
+        const val MAX_LOOPBACK_PORT = 60_999
     }
 }
 
 internal fun buildBootstrapCommand(
     apkPath: String,
-    socketName: String,
-    appUid: Int,
+    endpoint: EmbeddedPrivilegedEndpoint,
 ): String {
     require(apkPath.startsWith("/data/app/") && apkPath.endsWith(".apk")) { "Invalid bootstrap APK path." }
-    require(Regex("^typeddroid-[a-f0-9]{32}$").matches(socketName)) { "Invalid bootstrap socket name." }
-    require(appUid >= 10_000) { "Invalid bootstrap app UID." }
     return buildString {
         append("CLASSPATH=")
         append(shellQuote(apkPath))
         append(" /system/bin/app_process /system/bin ")
         append("io.github.arttvad9r.typeddroid.EmbeddedPrivilegedMain")
-        append(" --socket ")
-        append(shellQuote(socketName))
-        append(" --app-uid ")
-        append(appUid)
+        append(" --port ")
+        append(endpoint.port)
+        append(" --token ")
+        append(shellQuote(endpoint.authToken))
         append(" </dev/null >/dev/null 2>&1 &")
     }
 }

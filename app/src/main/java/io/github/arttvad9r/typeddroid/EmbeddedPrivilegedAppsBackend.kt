@@ -76,12 +76,18 @@ class EmbeddedPrivilegedAppsBackend(context: Context) : PrivilegedAppsBackend {
         failureCode: String,
         block: (EmbeddedPrivilegedClient) -> PrivilegedOperationResult,
     ): PrivilegedOperationResult = withContext(Dispatchers.IO) {
-        val socketName = store.socketName()
+        val endpoint = store.endpoint()
             ?: return@withContext unavailableResult()
         try {
-            block(EmbeddedPrivilegedClient(socketName))
+            block(EmbeddedPrivilegedClient(endpoint))
         } catch (error: CancellationException) {
             throw error
+        } catch (error: EmbeddedPrivilegedRemoteException) {
+            PrivilegedOperationResult(
+                ok = false,
+                code = if (error.timedOut) "${failureCode}_timeout" else failureCode,
+                message = (error.message ?: "The embedded privileged operation failed.").take(300),
+            )
         } catch (_: Throwable) {
             runCatching(store::clear)
             PrivilegedOperationResult(
@@ -103,13 +109,13 @@ class EmbeddedPrivilegedAppsBackend(context: Context) : PrivilegedAppsBackend {
 }
 
 internal fun embeddedHelperReadiness(store: EmbeddedPrivilegedStore): PrivilegedBackendReadiness {
-    val socketName = store.socketName()
+    val endpoint = store.endpoint()
         ?: return PrivilegedBackendReadiness(
             ready = false,
             code = "embedded_privileged_unavailable",
             message = "Embedded privileged helper has not been bootstrapped.",
         )
-    val ready = EmbeddedPrivilegedClient(socketName).ping()
+    val ready = EmbeddedPrivilegedClient(endpoint).ping()
     if (!ready) runCatching(store::clear)
     return if (ready) {
         PrivilegedBackendReadiness(ready = true)

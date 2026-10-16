@@ -18,7 +18,7 @@ internal data class AdbTcpEndpoint(
 }
 
 internal data class EmbeddedAdbAccessResult(
-    val socketName: String,
+    val endpoint: io.github.arttvad9r.typeddroid.EmbeddedPrivilegedEndpoint,
     val deviceGuid: String? = null,
 )
 
@@ -28,8 +28,8 @@ internal class EmbeddedAdbAccessManager(context: Context) {
     private val identityStore = AndroidAdbIdentityStore()
 
     fun helperReady(): Boolean {
-        val socketName = store.socketName() ?: return false
-        val ready = EmbeddedPrivilegedClient(socketName).ping()
+        val endpoint = store.endpoint() ?: return false
+        val ready = EmbeddedPrivilegedClient(endpoint).ping()
         if (!ready) runCatching(store::clear)
         return ready
     }
@@ -71,7 +71,7 @@ internal class EmbeddedAdbAccessManager(context: Context) {
         try {
             check(store.wasAdbPaired()) { "TypedDroid has not paired its embedded ADB identity yet." }
             val bootstrap = connectAndBootstrap(connect, identityStore.getOrCreate())
-            Result.success(EmbeddedAdbAccessResult(socketName = bootstrap.socketName))
+            Result.success(EmbeddedAdbAccessResult(endpoint = bootstrap.endpoint))
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -81,7 +81,7 @@ internal class EmbeddedAdbAccessManager(context: Context) {
     }
 
     fun forgetEmbeddedAdb() {
-        store.socketName()?.let { runCatching { EmbeddedPrivilegedClient(it).shutdown() } }
+        store.endpoint()?.let { runCatching { EmbeddedPrivilegedClient(it).shutdown() } }
         store.clearAll()
         identityStore.reset()
     }

@@ -11,6 +11,7 @@ class EmbeddedPrivilegedProtocolTest {
         val request = EmbeddedPrivilegedRequest(
             id = "request-1",
             operation = EmbeddedPrivilegedProtocol.OP_EXEC,
+            authToken = "a".repeat(64),
             command = "id; getprop ro.build.version.release",
             timeoutMillis = 12_345,
         )
@@ -31,6 +32,7 @@ class EmbeddedPrivilegedProtocolTest {
         val request = EmbeddedPrivilegedRequest(
             id = "typed-1",
             operation = EmbeddedPrivilegedProtocol.OP_INSTALL_APK,
+            authToken = "b".repeat(64),
             packageName = "com.example.app",
             permissionName = "android.permission.CAMERA",
             userId = 10,

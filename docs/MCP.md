@@ -115,7 +115,7 @@ Android runs exactly:
 dumpsys batterystats -c --charged
 ```
 
-through Shizuku. `-c` requests the current statistics in checkin-format output without using the real `--checkin` path. `--charged` scopes the data to since the last charge. Execution time and stdout/stderr sizes are bounded, and Android parses only supported sections rather than returning the raw dump.
+through the owned shell-UID helper. `-c` requests the current statistics in checkin-format output without using the real `--checkin` path. `--charged` scopes the data to since the last charge. Execution time and stdout/stderr sizes are bounded, and Android parses only supported sections rather than returning the raw dump.
 
 Returned data includes, when Android provides it:
 
@@ -184,7 +184,7 @@ Maps only to `files.analyze` and is read-only. Android recursively analyzes only
 
 Maps only to Android `shell.run`. The adapter validates the command size, NUL exclusion and a 1–300 second timeout before sending it. Android then enforces pairing-scoped trust: SAFE mode returns `policy_denied`; TRUSTED mode may execute through the TypedDroid-owned shell-UID helper.
 
-The helper is bootstrapped through Android Wireless Debugging but is reached afterward through an authenticated abstract local socket. Output is bounded and returned as `exitCode`, `stdout`, `stderr`, `stdoutTruncated`, and `stderrTruncated`. This is intentionally a broad capability: a user who enables TRUSTED is granting the agent the authority available to Android's shell UID.
+The helper is bootstrapped through Android Wireless Debugging but is reached afterward through authenticated loopback-only RPC. Output is bounded and returned as `exitCode`, `stdout`, `stderr`, `stdoutTruncated`, and `stderrTruncated`. This is intentionally a broad capability: a user who enables TRUSTED is granting the agent the authority available to Android's shell UID.
 
 ## Mutating / privileged MCP tools
 
@@ -202,7 +202,7 @@ Before approval Android verifies that:
 - the permission is currently granted;
 - the target is not TypedDroid itself.
 
-The Android user ID is derived locally from the bridge process UID; the agent cannot supply it. Approval is bound to canonical `packageName + permissionName + userId` and is one-use. After approval the agent retries the same logical call. Shizuku receives only the internally built command:
+The Android user ID is derived locally from the bridge process UID; the agent cannot supply it. Approval is bound to canonical `packageName + permissionName + userId` and is one-use. After approval the agent retries the same logical call. The owned helper receives only the internally built command:
 
 ```text
 pm revoke --user <derived-user-id> <package> <permission>
@@ -216,7 +216,7 @@ Maps only to `files.delete`. The target must be below the SAF root; the granted 
 
 ### `install_apk(device_id, apk_name, replace=true)`
 
-Maps only to `apps.install` and requires Shizuku plus explicit Android-side approval.
+Maps only to `apps.install` and requires the owned privileged helper plus explicit Android-side approval.
 
 `apk_name` must be a simple `.apk` filename directly inside `TYPED_DROID_APK_DIR`; arbitrary host paths and URLs are rejected.
 
@@ -228,17 +228,17 @@ The flow is:
 4. Android verifies exact size and SHA-256, then parses package/version/signing certificates.
 5. Approval is bound to verified content/package/signing metadata plus `replace`.
 6. After approval the agent retries the same logical install.
-7. The typed Shizuku UserService copies exactly the verified byte count into a service-generated staging path, then receives only an internally constructed `pm install [-r] <staging-path>` command. The staging path is not agent-controlled and is deleted after the attempt.
+7. The owned helper receives the declared byte count as a raw local-socket stream, hashes it while writing to a helper-generated `/data/local/tmp` staging path, verifies size/SHA-256, then executes only an internally constructed `pm install [-r] <staging-path>` command. The staging path is not agent-controlled and is deleted after the attempt.
 
 TypedDroid refuses to replace itself through this tool.
 
 ### `uninstall_app(device_id, package_name, keep_data=false)`
 
-Maps only to `apps.uninstall`. It requires Shizuku and a one-use Android-side approval bound to normalized `packageName + keepData`. TypedDroid cannot uninstall itself.
+Maps only to `apps.uninstall`. It requires the owned privileged helper and a one-use Android-side approval bound to normalized `packageName + keepData`. TypedDroid cannot uninstall itself.
 
 ### `force_stop_app(device_id, package_name)`
 
-Maps only to `apps.forceStop`. It requires Shizuku and exact-argument approval. TypedDroid cannot force-stop itself because that would terminate the active bridge process.
+Maps only to `apps.forceStop`. It requires the owned privileged helper and exact-argument approval. TypedDroid cannot force-stop itself because that would terminate the active bridge process.
 
 ## Approval behavior
 
@@ -299,10 +299,10 @@ After Bridge Host and MCP are configured:
 5. Call `permissions_audit` and check `scanTruncated/resultTruncated` before treating the result as complete.
 6. Enable Usage Access and test `app_usage`; check `truncated` before treating its app list as complete.
 7. Grant a SAF folder and test `list_files` / `analyze_files`.
-8. Activate/authorize Shizuku and call `battery_usage`.
+8. Enable/restore **Встроенный ADB** and call `battery_usage`.
 9. Trigger one mutating command and verify `pending_approvals` exposes only target-free notification metadata while the Android card shows the exact target locally.
 10. On a disposable app with a granted dangerous permission, call `revoke_app_permission`, approve the exact package/permission shown on Android and retry the same call.
 11. Test `delete_path`, `force_stop_app` or `uninstall_app` on disposable targets, approving the exact Android card and retrying the same call.
 12. Stage a disposable APK and test `install_apk` through the same approval/retry flow.
 
-Physical-device end-to-end validation is still required before Shizuku-backed and mutating actions should be treated as production-ready.
+Physical-device end-to-end validation is still required before the owned helper and mutating actions should be treated as production-ready.

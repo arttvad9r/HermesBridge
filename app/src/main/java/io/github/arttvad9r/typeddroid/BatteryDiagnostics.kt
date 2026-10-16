@@ -259,10 +259,10 @@ class EmbeddedBatteryDiagnosticsBackend(context: Context) : BatteryDiagnosticsBa
     override fun readiness(): PrivilegedBackendReadiness = embeddedHelperReadiness(store)
 
     override suspend fun readUsage(): BatteryDiagnosticsResult = withContext(Dispatchers.IO) {
-        val socketName = store.socketName()
+        val endpoint = store.endpoint()
             ?: return@withContext unavailableBatteryResult()
         try {
-            val transport = EmbeddedPrivilegedClient(socketName).batteryStats()
+            val transport = EmbeddedPrivilegedClient(endpoint).batteryStats()
             if (transport.exitCode != 0) {
                 return@withContext BatteryDiagnosticsResult(
                     ok = false,
@@ -290,6 +290,12 @@ class EmbeddedBatteryDiagnosticsBackend(context: Context) : BatteryDiagnosticsBa
             BatteryDiagnosticsResult(ok = true, snapshot = snapshot)
         } catch (error: CancellationException) {
             throw error
+        } catch (error: EmbeddedPrivilegedRemoteException) {
+            BatteryDiagnosticsResult(
+                ok = false,
+                code = if (error.timedOut) "battery_stats_timeout" else "battery_stats_failed",
+                message = (error.message ?: "Battery diagnostics failed.").take(300),
+            )
         } catch (_: Throwable) {
             runCatching(store::clear)
             unavailableBatteryResult()
@@ -315,46 +321,6 @@ object DisabledBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
         code = "embedded_privileged_unavailable",
         message = "Battery diagnostics backend is not configured.",
     )
-}
-
-class ShizukuBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
-    override fun readiness(): PrivilegedBackendReadiness =
-        ShizukuPrivilegedUserServiceClient.readiness()
-
-    override suspend fun readUsage(): BatteryDiagnosticsResult {
-        val transport = ShizukuPrivilegedUserServiceClient.readBatteryStats()
-        if (!transport.ok) {
-            return BatteryDiagnosticsResult(
-                ok = false,
-                code = transport.code,
-                message = transport.message,
-            )
-        }
-        if (transport.truncated) {
-            return BatteryDiagnosticsResult(
-                ok = false,
-                code = "battery_stats_too_large",
-                message = "Battery diagnostics exceeded the ${MAX_BATTERY_STATS_OUTPUT_BYTES / (1024 * 1024)} MiB safety limit.",
-            )
-        }
-
-        val text = transport.text ?: return BatteryDiagnosticsResult(
-            ok = false,
-            code = "battery_stats_stream_failed",
-            message = "Battery diagnostics returned no streamed output.",
-        )
-        val snapshot = try {
-            BatteryStatsCheckinParser.parse(text)
-        } catch (error: BatteryStatsParseException) {
-            return BatteryDiagnosticsResult(
-                ok = false,
-                code = "battery_stats_parse_failed",
-                message = error.message ?: "Battery diagnostics could not be parsed.",
-            )
-        }
-
-        return BatteryDiagnosticsResult(ok = true, snapshot = snapshot)
-    }
 }
 
 internal data class BoundedBatteryStatsText(

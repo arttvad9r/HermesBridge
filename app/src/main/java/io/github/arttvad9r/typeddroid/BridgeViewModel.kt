@@ -25,7 +25,6 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     private val pairingStore = PairingStore(application)
     private val treeStore = SafTreeStore(application)
     private val setupStore = SetupStore(application)
-    private val advancedAccessStore = AdvancedAccessStore(application)
     private val embeddedAdbAccess = EmbeddedAdbAccessManager(application)
     private val embeddedAdbDiscovery = AndroidAdbNsdDiscovery(application)
 
@@ -38,7 +37,6 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             setupCompleted = setupStore.isCompleted(),
             agentTrustMode = pairingStore.trustMode(),
             embeddedAdb = currentEmbeddedAdbState(),
-            shizukuWasConfigured = advancedAccessStore.wasConfigured(),
         )
     )
     val state: StateFlow<BridgeUiState> = _state.asStateFlow()
@@ -75,23 +73,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        viewModelScope.launch {
-            ShizukuRuntime.state.collectLatest { shizuku ->
-                if (shizuku.status == ShizukuAccessStatus.READY) {
-                    advancedAccessStore.markConfigured()
-                    ShizukuRestorationNotifier.cancel(app)
-                }
-                _state.update {
-                    it.copy(
-                        shizuku = shizuku,
-                        shizukuWasConfigured = advancedAccessStore.wasConfigured(),
-                    )
-                }
-            }
-        }
-
         BridgeApprovalRuntime.refresh()
-        ShizukuRuntime.refresh()
 
         if (pairingStore.deviceId() != null) {
             runCatching { BridgeForegroundService.connect(app) }
@@ -244,14 +226,6 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
             wasPaired = paired,
             message = message,
         )
-    }
-
-    fun requestShizukuPermission() {
-        ShizukuRuntime.requestPermission()
-    }
-
-    fun refreshShizuku() {
-        ShizukuRuntime.refresh()
     }
 
     fun grantFileTree(uri: Uri) {

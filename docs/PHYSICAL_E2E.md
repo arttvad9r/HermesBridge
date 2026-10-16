@@ -57,7 +57,7 @@ Validate on the physical phone:
 - notification permission grant, deny, and settings recovery;
 - SAF grant, revoke, provider failure, and changed tree;
 - Usage Access grant and revoke;
-- Shizuku authorization, reboot loss, reactivation, and restoration notification;
+- embedded-ADB pairing, helper bootstrap, reboot/process-loss restoration, and key revocation;
 - local audit persistence and clear-history behavior.
 
 ## 6. Typed tool matrix
@@ -92,11 +92,12 @@ For every mutating tool verify:
 5. keyed exact retries are idempotent;
 6. reuse of the same idempotency key with different arguments fails closed.
 
-## 7. Shizuku UserService physical gate
+## 7. Owned privileged helper physical gate
 
-Confirm the legacy Shizuku path still uses the typed `IPrivilegedBridgeService` boundary for existing privileged tools, while the new embedded backend can bootstrap the owned shell-UID helper. Verify `shell.run` is denied in SAFE, works in TRUSTED, survives closing Wireless Debugging while the helper remains alive, and requires restoration after reboot/process death.
+Confirm the release build bootstraps `EmbeddedPrivilegedMain` from the installed APK, authenticates the app/helper loopback RPC with the per-bootstrap secret, and performs install/uninstall/force-stop/permission-revoke/Batterystats without any companion privilege app. Verify `shell.run` is denied in SAFE and works in TRUSTED.
 
-Test Shizuku process death/restart and ensure the app recovers without widening authority.
+Test closing Wireless Debugging after bootstrap, helper process death, reboot restoration with the persisted ADB identity, Android-side key revocation, and restoration failure without silently widening authority.
+
 
 ## 8. Battery impact
 
@@ -106,7 +107,7 @@ Measure an idle baseline and a representative connected period with the foregrou
 
 Repeat the physical smoke test with the minified signed RC, not only debug builds. Confirm:
 
-- `TypedDroidUserService` survives R8;
+- `EmbeddedPrivilegedMain` survives R8 under its exact bootstrap class name;
 - pairing/reconnect still works;
 - all tool schemas match debug behavior;
 - no debug-only test surface is present.

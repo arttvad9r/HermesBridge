@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 internal data class EmbeddedPrivilegedRequest(
     val id: String,
     val operation: String,
+    val authToken: String,
     val command: String? = null,
     val timeoutMillis: Long? = null,
     val packageName: String? = null,
@@ -47,7 +48,8 @@ internal object EmbeddedPrivilegedProtocol {
     const val OP_REVOKE_PERMISSION = "revoke_permission"
     const val OP_BATTERY_STATS = "battery_stats"
     // Batterystats may retain up to 4 MiB before base64 encoding into the response frame.
-    const val MAX_FRAME_BYTES = 8 * 1024 * 1024
+    const val MAX_REQUEST_FRAME_BYTES = 128 * 1024
+    const val MAX_RESPONSE_FRAME_BYTES = 8 * 1024 * 1024
     const val MAX_COMMAND_BYTES = 64 * 1024
     const val MAX_TIMEOUT_MILLIS = 5 * 60 * 1000L
 
@@ -58,29 +60,29 @@ internal object EmbeddedPrivilegedProtocol {
     }
 
     fun writeRequest(output: OutputStream, request: EmbeddedPrivilegedRequest) =
-        writeFrame(output, json.encodeToString(request).encodeToByteArray())
+        writeFrame(output, json.encodeToString(request).encodeToByteArray(), MAX_REQUEST_FRAME_BYTES)
 
     fun readRequest(input: InputStream): EmbeddedPrivilegedRequest =
-        json.decodeFromString(readFrame(input).decodeToString(throwOnInvalidSequence = true))
+        json.decodeFromString(readFrame(input, MAX_REQUEST_FRAME_BYTES).decodeToString(throwOnInvalidSequence = true))
 
     fun writeResponse(output: OutputStream, response: EmbeddedPrivilegedResponse) =
-        writeFrame(output, json.encodeToString(response).encodeToByteArray())
+        writeFrame(output, json.encodeToString(response).encodeToByteArray(), MAX_RESPONSE_FRAME_BYTES)
 
     fun readResponse(input: InputStream): EmbeddedPrivilegedResponse =
-        json.decodeFromString(readFrame(input).decodeToString(throwOnInvalidSequence = true))
+        json.decodeFromString(readFrame(input, MAX_RESPONSE_FRAME_BYTES).decodeToString(throwOnInvalidSequence = true))
 
-    private fun writeFrame(output: OutputStream, payload: ByteArray) {
-        require(payload.size in 1..MAX_FRAME_BYTES) { "Embedded privileged frame size is invalid." }
+    private fun writeFrame(output: OutputStream, payload: ByteArray, maxBytes: Int) {
+        require(payload.size in 1..maxBytes) { "Embedded privileged frame size is invalid." }
         val data = DataOutputStream(output)
         data.writeInt(payload.size)
         data.write(payload)
         data.flush()
     }
 
-    private fun readFrame(input: InputStream): ByteArray {
+    private fun readFrame(input: InputStream, maxBytes: Int): ByteArray {
         val data = DataInputStream(input)
         val size = data.readInt()
-        require(size in 1..MAX_FRAME_BYTES) { "Embedded privileged frame size is invalid." }
+        require(size in 1..maxBytes) { "Embedded privileged frame size is invalid." }
         return ByteArray(size).also(data::readFully)
     }
 }

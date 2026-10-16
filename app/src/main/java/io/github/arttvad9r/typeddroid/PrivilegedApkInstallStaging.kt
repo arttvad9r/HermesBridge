@@ -7,18 +7,18 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.UUID
 
-internal const val SHIZUKU_APK_STAGING_DIRECTORY = "/data/local/tmp"
+internal const val PRIVILEGED_APK_STAGING_DIRECTORY = "/data/local/tmp"
 
-internal fun createShizukuApkStagingPath(id: String = UUID.randomUUID().toString()): String {
+internal fun createPrivilegedApkStagingPath(id: String = UUID.randomUUID().toString()): String {
     require(UUID_REGEX.matches(id)) { "Invalid staging ID." }
-    return "$SHIZUKU_APK_STAGING_DIRECTORY/typed-droid-$id.apk"
+    return "$PRIVILEGED_APK_STAGING_DIRECTORY/typed-droid-$id.apk"
 }
 
-internal fun isShizukuApkStagingPath(path: String): Boolean =
-    SHIZUKU_APK_STAGING_PATH_REGEX.matches(path)
+internal fun isPrivilegedApkStagingPath(path: String): Boolean =
+    PRIVILEGED_APK_STAGING_PATH_REGEX.matches(path)
 
-internal fun isShizukuApkStagingFileName(name: String): Boolean =
-    SHIZUKU_APK_STAGING_FILE_NAME_REGEX.matches(name)
+internal fun isPrivilegedApkStagingFileName(name: String): Boolean =
+    PRIVILEGED_APK_STAGING_FILE_NAME_REGEX.matches(name)
 
 /**
  * Removes only regular files that match TypedDroid's generated APK staging-name contract.
@@ -28,13 +28,13 @@ internal fun isShizukuApkStagingFileName(name: String): Boolean =
  * a newly created service removes its own orphaned files before accepting Binder work. Unrelated
  * files, directories and symbolic links in `/data/local/tmp` are deliberately left untouched.
  */
-internal fun cleanupOrphanedShizukuApkStagingFiles(
-    directory: File = File(SHIZUKU_APK_STAGING_DIRECTORY),
+internal fun cleanupOrphanedPrivilegedApkStagingFiles(
+    directory: File = File(PRIVILEGED_APK_STAGING_DIRECTORY),
 ): Int {
     val children = directory.listFiles() ?: return 0
     var removed = 0
     children.forEach { candidate ->
-        if (!isShizukuApkStagingFileName(candidate.name)) return@forEach
+        if (!isPrivilegedApkStagingFileName(candidate.name)) return@forEach
         val path = candidate.toPath()
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) return@forEach
         if (runCatching { Files.deleteIfExists(path) }.getOrDefault(false)) {
@@ -80,9 +80,9 @@ internal class ApkStagingSizeException(message: String) : IllegalStateException(
 
 private val UUID_REGEX =
     Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-private val SHIZUKU_APK_STAGING_FILE_NAME_REGEX = Regex(
+private val PRIVILEGED_APK_STAGING_FILE_NAME_REGEX = Regex(
     "^typed-droid-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.apk$"
 )
-private val SHIZUKU_APK_STAGING_PATH_REGEX = Regex(
+private val PRIVILEGED_APK_STAGING_PATH_REGEX = Regex(
     "^/data/local/tmp/typed-droid-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.apk$"
 )

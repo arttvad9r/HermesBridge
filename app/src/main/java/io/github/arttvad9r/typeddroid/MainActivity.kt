@@ -114,11 +114,6 @@ class MainActivity : ComponentActivity() {
                     onOpenDeveloperSettings = {
                         runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
                     },
-                    onRequestShizukuPermission = vm::requestShizukuPermission,
-                    onRefreshShizuku = vm::refreshShizuku,
-                    onOpenShizuku = {
-                        ShizukuRestorationNotifier.shizukuLaunchIntent(this)?.let { startActivity(it) }
-                    },
                     onStartUiCapture = {
                         startActivity(Intent(this, UiCaptureConsentActivity::class.java))
                     },
@@ -172,9 +167,6 @@ private fun BridgeScreen(
     onRefreshEmbeddedAdb: () -> Unit,
     onForgetEmbeddedAdb: () -> Unit,
     onOpenDeveloperSettings: () -> Unit,
-    onRequestShizukuPermission: () -> Unit,
-    onRefreshShizuku: () -> Unit,
-    onOpenShizuku: () -> Unit,
     onStartUiCapture: () -> Unit,
     onStopUiCapture: () -> Unit,
 ) {
@@ -279,20 +271,11 @@ private fun BridgeScreen(
                         onChange = onSetAgentTrustMode,
                     )
 
-                    ShizukuCard(
-                        state = state.shizuku,
-                        wasConfigured = state.shizukuWasConfigured,
-                        onRequestPermission = onRequestShizukuPermission,
-                        onRefresh = onRefreshShizuku,
-                        onOpenShizuku = onOpenShizuku,
-                    )
-
                     FinishSetupCard(
                         notificationsGranted = state.notificationsGranted,
                         fileAccessConfigured = state.fileAccessConfigured,
                         usageAccessGranted = state.usageAccessGranted,
                         embeddedAdbReady = state.embeddedAdb.ready,
-                        shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
                         onFinish = onFinishSetup,
                     )
                 }
@@ -347,14 +330,6 @@ private fun BridgeScreen(
                     onOpenDeveloperSettings = onOpenDeveloperSettings,
                 )
 
-                ShizukuCard(
-                    state = state.shizuku,
-                    wasConfigured = state.shizukuWasConfigured,
-                    onRequestPermission = onRequestShizukuPermission,
-                    onRefresh = onRefreshShizuku,
-                    onOpenShizuku = onOpenShizuku,
-                )
-
                 UiCaptureCard(
                     state = uiCaptureSession,
                     onStart = onStartUiCapture,
@@ -365,7 +340,6 @@ private fun BridgeScreen(
                     fileAccessConfigured = state.fileAccessConfigured,
                     usageAccessGranted = state.usageAccessGranted,
                     embeddedAdbReady = state.embeddedAdb.ready,
-                    shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
                     agentTrustMode = state.agentTrustMode,
                 )
 
@@ -420,7 +394,6 @@ private fun FinishSetupCard(
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
     embeddedAdbReady: Boolean,
-    shizukuReady: Boolean,
     onFinish: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -437,7 +410,6 @@ private fun FinishSetupCard(
             CapabilityRow("Файлы", if (fileAccessConfigured) "Настроено" else "Можно позже")
             CapabilityRow("Статистика приложений", if (usageAccessGranted) "Настроено" else "Можно позже")
             CapabilityRow("Встроенный ADB", if (embeddedAdbReady) "Готово" else "Можно позже")
-            CapabilityRow("Shizuku (legacy)", if (shizukuReady) "Настроено" else "Можно позже")
             Text(
                 "Нажмите «Завершить», чтобы перейти к обычной панели. Все эти разрешения можно изменить позже.",
                 style = MaterialTheme.typography.bodySmall,
@@ -650,9 +622,9 @@ private fun NotificationAccessCard(
             )
             Text(
                 if (granted) {
-                    "TypedDroid может показывать статус фонового соединения, быстрый доступ к истории и напоминание восстановить Shizuku после перезагрузки."
+                    "TypedDroid может показывать статус фонового соединения и быстрый доступ к истории."
                 } else {
-                    "Базовое соединение работает и без них, но Android не покажет постоянный статус Bridge Host и напоминание восстановить Shizuku после перезагрузки."
+                    "Базовое соединение работает и без них, но Android не покажет обычное уведомление о состоянии Bridge Host."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -871,7 +843,7 @@ private fun EmbeddedAdbCard(
             Text(status, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(
                 when {
-                    state.ready -> "TypedDroid использует собственный shell-UID helper. Shizuku для полного режима не нужен; helper продолжает работать после закрытия Wireless Debugging, пока Android не завершит процесс или телефон не перезагрузится."
+                    state.ready -> "TypedDroid использует собственный shell-UID helper. Helper рассчитан на работу после закрытия Wireless Debugging, пока Android не завершит процесс или телефон не перезагрузится."
                     state.wasPaired -> "ADB-ключ уже спарен. Включите Wireless debugging и нажмите «Восстановить», чтобы снова запустить helper после перезагрузки или остановки процесса."
                     else -> "Для первичной настройки откройте Wireless debugging → Pair device with pairing code. Pairing-окно должно оставаться открытым; на телефонах, где переключение приложения его закрывает, используйте split-screen с Settings и TypedDroid."
                 },
@@ -926,81 +898,6 @@ private fun EmbeddedAdbCard(
                     enabled = !state.busy,
                 ) {
                     Text("Сбросить встроенную ADB-привязку")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ShizukuCard(
-    state: ShizukuAccessState,
-    wasConfigured: Boolean,
-    onRequestPermission: () -> Unit,
-    onRefresh: () -> Unit,
-    onOpenShizuku: () -> Unit,
-) {
-    val title = when (state.status) {
-        ShizukuAccessStatus.UNAVAILABLE -> if (wasConfigured) "Shizuku нужно запустить снова" else "Shizuku не запущен"
-        ShizukuAccessStatus.UNSUPPORTED -> "Shizuku устарел"
-        ShizukuAccessStatus.PERMISSION_REQUIRED -> "Shizuku готов к авторизации"
-        ShizukuAccessStatus.DENIED -> "Доступ Shizuku не выдан"
-        ShizukuAccessStatus.READY -> "Shizuku подключён"
-    }
-    val message = if (wasConfigured && state.status == ShizukuAccessStatus.UNAVAILABLE) {
-        "После перезагрузки Android запустите Shizuku снова. Базовое соединение Bridge Host уже работает; восстановить нужно только расширенные команды."
-    } else {
-        state.message
-    }
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    "Расширенный доступ",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                TextButton(onClick = onRefresh) {
-                    Text("Проверить")
-                }
-            }
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            message?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (state.status == ShizukuAccessStatus.READY) {
-                val mode = when (state.serverUid) {
-                    0 -> "root"
-                    2000 -> "ADB/shell"
-                    null -> "неизвестно"
-                    else -> "UID ${state.serverUid}"
-                }
-                MetricRow("API Shizuku", state.serverApiVersion?.toString() ?: "—")
-                HorizontalDivider()
-                MetricRow("Режим", mode)
-            }
-            if (state.status == ShizukuAccessStatus.PERMISSION_REQUIRED) {
-                Button(
-                    onClick = onRequestPermission,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Выдать доступ TypedDroid")
-                }
-            }
-            if (wasConfigured && state.status == ShizukuAccessStatus.UNAVAILABLE) {
-                Button(
-                    onClick = onOpenShizuku,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Открыть Shizuku")
                 }
             }
         }
@@ -1079,7 +976,6 @@ private fun CapabilitiesCard(
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
     embeddedAdbReady: Boolean,
-    shizukuReady: Boolean,
     agentTrustMode: AgentTrustMode,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -1095,7 +991,6 @@ private fun CapabilitiesCard(
                 "Доверие агенту",
                 if (agentTrustMode == AgentTrustMode.TRUSTED) "Полный доступ" else "Безопасный режим",
             )
-            CapabilityRow("Shizuku (legacy)", if (shizukuReady) "Готово" else "Не настроено")
             CapabilityRow("Управление интерфейсом", "Опционально")
         }
     }

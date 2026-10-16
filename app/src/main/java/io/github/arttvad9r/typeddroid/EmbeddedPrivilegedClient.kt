@@ -1,11 +1,15 @@
 package io.github.arttvad9r.typeddroid
 
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
-import android.os.Process
-import java.io.Closeable
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.Base64
 import java.util.UUID
+
+internal class EmbeddedPrivilegedRemoteException(
+    message: String,
+    val timedOut: Boolean,
+) : IllegalStateException(message)
 
 internal data class EmbeddedPrivilegedExecResult(
     val exitCode: Int,
@@ -16,7 +20,7 @@ internal data class EmbeddedPrivilegedExecResult(
 )
 
 internal class EmbeddedPrivilegedClient(
-    private val socketName: String,
+    private val endpoint: EmbeddedPrivilegedEndpoint,
 ) {
     fun ping(): Boolean = runCatching {
         request(EmbeddedPrivilegedProtocol.OP_PING).ok
@@ -31,27 +35,21 @@ internal class EmbeddedPrivilegedClient(
             command = command,
             timeoutMillis = timeoutMillis,
         )
-        check(response.ok) { response.error ?: "Embedded privileged command failed." }
-        return EmbeddedPrivilegedExecResult(
-            exitCode = checkNotNull(response.exitCode),
-            stdout = Base64.getDecoder().decode(response.stdoutBase64 ?: ""),
-            stderr = Base64.getDecoder().decode(response.stderrBase64 ?: ""),
-            stdoutTruncated = response.stdoutTruncated,
-            stderrTruncated = response.stderrTruncated,
-        )
+        response.requireRemoteSuccess("Embedded privileged command failed.")
+        return response.toExecResult()
     }
 
     fun installApk(artifact: VerifiedApkArtifact, replace: Boolean): EmbeddedPrivilegedExecResult {
         require(artifact.file.isFile && artifact.sizeBytes in 1..MAX_APK_ARTIFACT_BYTES) { "APK artifact is invalid." }
         require(artifact.file.length() == artifact.sizeBytes) { "APK artifact size changed before upload." }
-        val socket = openSocket(APK_RPC_TIMEOUT_MILLIS)
-        socket.use {
+        openSocket(APK_RPC_TIMEOUT_MILLIS).use { socket ->
             val id = UUID.randomUUID().toString()
             EmbeddedPrivilegedProtocol.writeRequest(
                 socket.outputStream,
                 EmbeddedPrivilegedRequest(
                     id = id,
                     operation = EmbeddedPrivilegedProtocol.OP_INSTALL_APK,
+                    authToken = endpoint.authToken,
                     artifactSizeBytes = artifact.sizeBytes,
                     artifactSha256 = artifact.sha256,
                     replace = replace,
@@ -78,6 +76,7 @@ internal class EmbeddedPrivilegedClient(
             EmbeddedPrivilegedRequest(
                 id = UUID.randomUUID().toString(),
                 operation = EmbeddedPrivilegedProtocol.OP_UNINSTALL_APP,
+                authToken = endpoint.authToken,
                 packageName = packageName,
                 keepData = keepData,
             )
@@ -88,6 +87,7 @@ internal class EmbeddedPrivilegedClient(
             EmbeddedPrivilegedRequest(
                 id = UUID.randomUUID().toString(),
                 operation = EmbeddedPrivilegedProtocol.OP_FORCE_STOP_APP,
+                authToken = endpoint.authToken,
                 packageName = packageName,
             )
         )
@@ -97,6 +97,7 @@ internal class EmbeddedPrivilegedClient(
             EmbeddedPrivilegedRequest(
                 id = UUID.randomUUID().toString(),
                 operation = EmbeddedPrivilegedProtocol.OP_REVOKE_PERMISSION,
+                authToken = endpoint.authToken,
                 packageName = packageName,
                 permissionName = permissionName,
                 userId = userId,
@@ -108,51 +109,24 @@ internal class EmbeddedPrivilegedClient(
             EmbeddedPrivilegedRequest(
                 id = UUID.randomUUID().toString(),
                 operation = EmbeddedPrivilegedProtocol.OP_BATTERY_STATS,
+                authToken = endpoint.authToken,
             ),
             timeoutMillis = BATTERY_RPC_TIMEOUT_MILLIS,
         )
+
+    fun shutdown(): Boolean = runCatching {
+        request(EmbeddedPrivilegedProtocol.OP_SHUTDOWN).ok
+    }.getOrDefault(false)
 
     private fun typedRequest(
         request: EmbeddedPrivilegedRequest,
         timeoutMillis: Long = TYPED_RPC_TIMEOUT_MILLIS,
     ): EmbeddedPrivilegedExecResult {
-        val socket = openSocket(timeoutMillis)
-        socket.use {
+        openSocket(timeoutMillis).use { socket ->
             EmbeddedPrivilegedProtocol.writeRequest(socket.outputStream, request)
             return decodeExecResponse(request.id, EmbeddedPrivilegedProtocol.readResponse(socket.inputStream))
         }
     }
-
-    private fun decodeExecResponse(id: String, response: EmbeddedPrivilegedResponse): EmbeddedPrivilegedExecResult {
-        check(response.id == id) { "Mismatched privileged RPC response ID." }
-        check(response.ok) { response.error ?: "Embedded privileged operation failed." }
-        return EmbeddedPrivilegedExecResult(
-            exitCode = checkNotNull(response.exitCode),
-            stdout = Base64.getDecoder().decode(response.stdoutBase64 ?: ""),
-            stderr = Base64.getDecoder().decode(response.stderrBase64 ?: ""),
-            stdoutTruncated = response.stdoutTruncated,
-            stderrTruncated = response.stderrTruncated,
-        )
-    }
-
-    private fun openSocket(timeoutMillis: Long): LocalSocket {
-        val socket = LocalSocket()
-        try {
-            socket.connect(LocalSocketAddress(socketName, LocalSocketAddress.Namespace.ABSTRACT))
-            socket.soTimeout = timeoutMillis.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-            check(socket.peerCredentials.uid == Process.SHELL_UID) {
-                "TypedDroid privileged socket peer is not Android shell UID."
-            }
-            return socket
-        } catch (error: Throwable) {
-            runCatching { socket.close() }
-            throw error
-        }
-    }
-
-    fun shutdown(): Boolean = runCatching {
-        request(EmbeddedPrivilegedProtocol.OP_SHUTDOWN).ok
-    }.getOrDefault(false)
 
     private fun request(
         operation: String,
@@ -161,14 +135,14 @@ internal class EmbeddedPrivilegedClient(
     ): EmbeddedPrivilegedResponse {
         val responseTimeout = ((timeoutMillis ?: DEFAULT_RPC_TIMEOUT_MILLIS) + RPC_TIMEOUT_GRACE_MILLIS)
             .coerceAtMost(EmbeddedPrivilegedProtocol.MAX_TIMEOUT_MILLIS + RPC_TIMEOUT_GRACE_MILLIS)
-        val socket = openSocket(responseTimeout)
-        socket.use {
+        openSocket(responseTimeout).use { socket ->
             val id = UUID.randomUUID().toString()
             EmbeddedPrivilegedProtocol.writeRequest(
                 socket.outputStream,
                 EmbeddedPrivilegedRequest(
                     id = id,
                     operation = operation,
+                    authToken = endpoint.authToken,
                     command = command,
                     timeoutMillis = timeoutMillis,
                 ),
@@ -179,7 +153,45 @@ internal class EmbeddedPrivilegedClient(
         }
     }
 
+    private fun openSocket(timeoutMillis: Long): Socket {
+        val socket = Socket()
+        try {
+            val timeout = timeoutMillis.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), endpoint.port), minOf(timeout, CONNECT_TIMEOUT_MILLIS))
+            socket.soTimeout = timeout
+            socket.tcpNoDelay = true
+            return socket
+        } catch (error: Throwable) {
+            runCatching { socket.close() }
+            throw error
+        }
+    }
+
+    private fun decodeExecResponse(id: String, response: EmbeddedPrivilegedResponse): EmbeddedPrivilegedExecResult {
+        check(response.id == id) { "Mismatched privileged RPC response ID." }
+        response.requireRemoteSuccess("Embedded privileged operation failed.")
+        return response.toExecResult()
+    }
+
+    private fun EmbeddedPrivilegedResponse.requireRemoteSuccess(defaultMessage: String) {
+        if (!ok) {
+            throw EmbeddedPrivilegedRemoteException(
+                message = error ?: defaultMessage,
+                timedOut = timedOut,
+            )
+        }
+    }
+
+    private fun EmbeddedPrivilegedResponse.toExecResult() = EmbeddedPrivilegedExecResult(
+        exitCode = checkNotNull(exitCode),
+        stdout = Base64.getDecoder().decode(stdoutBase64 ?: ""),
+        stderr = Base64.getDecoder().decode(stderrBase64 ?: ""),
+        stdoutTruncated = stdoutTruncated,
+        stderrTruncated = stderrTruncated,
+    )
+
     private companion object {
+        const val CONNECT_TIMEOUT_MILLIS = 2_000
         const val DEFAULT_RPC_TIMEOUT_MILLIS = 5_000L
         const val RPC_TIMEOUT_GRACE_MILLIS = 5_000L
         const val TYPED_RPC_TIMEOUT_MILLIS = 45_000L

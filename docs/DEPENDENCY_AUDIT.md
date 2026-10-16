@@ -73,11 +73,10 @@ Reference:
 
 - https://github.com/advisories/GHSA-8qv4-773j-c979
 
-### Shizuku API/provider 13.1.5
+### Removed: Shizuku API/provider
 
-The Maven API/provider artifact version is intentionally treated separately from the installed Shizuku Android application's release number. No raw shell is exposed to any agent regardless of Shizuku version: privileged access remains behind typed Android tools and local exact-target approvals.
+The Shizuku API/provider dependency has been removed from the Android module. Privileged operations now use the repository-owned ADB bootstrap and shell-UID helper. No Shizuku package/provider is declared in the manifest.
 
-No actionable advisory requiring a library-version change was identified in this review. Future Shizuku changes require re-checking permission semantics and the typed privileged boundary before upgrading.
 
 ### kotlinx.serialization 1.11.0
 
@@ -127,5 +126,5 @@ References:
 3. Keep dependency repositories narrow and centralized.
 4. Keep the Gradle Wrapper distribution checksum pinned.
 5. Run unit tests, generic MCP tests, Android lint, APK build and relay distribution build after build-tool/dependency changes.
-6. Re-audit the TypedDroid Android tool allowlist after any Shizuku, Android privilege or MCP SDK change.
+6. Re-audit the TypedDroid Android tool allowlist after any embedded-ADB, Android privilege or MCP SDK change.
 7. Do not enable dependency-update auto-merge for security-sensitive tooling without a separate policy decision.

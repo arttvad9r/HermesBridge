@@ -13,9 +13,4 @@ class PrivilegedBackendModelTest {
         assertFalse(PrivilegedBackendProfiles.EmbeddedAdb.root)
     }
 
-    @Test
-    fun legacyShizukuProfileDoesNotPromiseGenericShell() {
-        assertFalse(PrivilegedBackendProfiles.LegacyShizuku.rawShell)
-        assertTrue(PrivilegedBackendProfiles.LegacyShizuku.packageManager)
-    }
 }
