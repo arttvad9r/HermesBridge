@@ -30,7 +30,7 @@ ProtectKernelLogs=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# HotSpot JIT requires executable anonymous memory, so MemoryDenyWriteExecute cannot be enabled.
 ReadWritePaths=/var/lib/hermes-bridge
 
 [Install]

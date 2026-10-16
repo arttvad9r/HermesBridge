@@ -139,11 +139,16 @@ fi
 mv -- "$new_dir" "$INSTALL_ROOT/relay"
 
 rollback_binary() {
+    systemctl stop "$SERVICE_NAME" || true
     rm -rf -- "$INSTALL_ROOT/relay"
     if [[ -d "$old_dir" ]]; then
         mv -- "$old_dir" "$INSTALL_ROOT/relay"
         systemctl daemon-reload || true
         systemctl restart "$SERVICE_NAME" || true
+    else
+        # A failed first install has no known-good binary to restore. Keep the
+        # failed unit stopped and disabled instead of leaving an endless restart loop.
+        systemctl disable "$SERVICE_NAME" || true
     fi
 }
 
