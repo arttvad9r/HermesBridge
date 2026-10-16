@@ -27,7 +27,7 @@ class PairingCredentialsTest {
         val result = PairingCredentialManager(store, identity).validateResume()
 
         assertTrue(result.isSuccess)
-        assertEquals("device_pending", result.getOrNull())
+        assertEquals("device_pending", store.deviceId())
         assertTrue(store.hasPendingDeviceId())
         assertFalse(store.cleared)
     }
