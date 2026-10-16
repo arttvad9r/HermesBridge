@@ -2,7 +2,7 @@
 
 Audit snapshot: 2026-09-10.
 
-This file records security-relevant dependency decisions for Hermes Bridge. It is a point-in-time review, not a claim that a dependency can never receive a future advisory. Weekly Dependabot checks cover Gradle/Maven, Python and GitHub Actions dependencies; changes still require review and CI rather than automatic merging.
+This file records security-relevant dependency decisions for TypedDroid. It is a point-in-time review, not a claim that a dependency can never receive a future advisory. Weekly Dependabot checks cover Gradle/Maven, Python and GitHub Actions dependencies; changes still require review and CI rather than automatic merging.
 
 ## Build toolchain
 
@@ -18,7 +18,7 @@ Findings:
 
 Remediation:
 
-- Hermes Bridge uses Gradle 8.14.4.
+- TypedDroid uses Gradle 8.14.4.
 - The repository contains a standard Gradle Wrapper and CI uses `./gradlew` instead of a runner-provided Gradle binary.
 - `gradle-wrapper.properties` pins the official 8.14.4 binary distribution SHA-256.
 - `gradle/actions/setup-gradle` wrapper validation recognizes the committed wrapper JAR as a known Gradle wrapper.
@@ -45,13 +45,13 @@ Findings:
 
 Remediation:
 
-- Hermes Bridge uses Kotlin 2.4.20 for the Android, JVM, Compose and serialization plugins.
+- TypedDroid uses Kotlin 2.4.20 for the Android, JVM, Compose and serialization plugins.
 - The Android module was migrated from the removed string `kotlinOptions.jvmTarget` DSL to typed `compilerOptions` with JVM target 17.
 - Gradle build cache is explicitly disabled with `org.gradle.caching=false` as additional defense in depth.
 - `settings.gradle.kts` pins `com.android.tools:r8:9.1.29` on the Android build classpath instead of accepting an older bundled R8 for minification.
 - The additional R8 repository is scoped to `pluginManagement.buildscript.repositories` and content-filtered to `com.android.tools:r8`; it cannot resolve application/runtime dependencies through `dependencyResolutionManagement`.
 - CI captures the reproducible unsigned minified release log and fails if the Kotlin-metadata parsing warning returns.
-- The Kotlin/R8 combination must pass protocol/relay/app unit tests, Hermes MCP tests, Android lint, debug APK, signed release verification, reproducible unsigned minified release APK and relay distribution builds before adoption.
+- The Kotlin/R8 combination must pass protocol/relay/app unit tests, generic MCP tests, Android lint, debug APK, signed release verification, reproducible unsigned minified release APK and relay distribution builds before adoption.
 
 References:
 
@@ -65,7 +65,7 @@ References:
 
 ### Ktor 3.1.2
 
-Reviewed known Ktor client advisory CVE-2024-49580 / GHSA-8qv4-773j-c979. It affects `ktor-client-core-jvm` versions below 2.3.13; Hermes Bridge uses Ktor 3.1.2, so that advisory does not require a remediation bump.
+Reviewed known Ktor client advisory CVE-2024-49580 / GHSA-8qv4-773j-c979. It affects `ktor-client-core-jvm` versions below 2.3.13; TypedDroid uses Ktor 3.1.2, so that advisory does not require a remediation bump.
 
 The project does not upgrade Ktor solely because newer feature releases exist. A future update should be driven by a security fix, Android/network compatibility need, or a concrete product requirement and must run the full relay/Android test suite.
 
@@ -75,7 +75,7 @@ Reference:
 
 ### Shizuku API/provider 13.1.5
 
-The Maven API/provider artifact version is intentionally treated separately from the installed Shizuku Android application's release number. No raw shell is exposed to Hermes regardless of Shizuku version: privileged access remains behind typed Android tools and local exact-target approvals.
+The Maven API/provider artifact version is intentionally treated separately from the installed Shizuku Android application's release number. No raw shell is exposed to any agent regardless of Shizuku version: privileged access remains behind typed Android tools and local exact-target approvals.
 
 No actionable advisory requiring a library-version change was identified in this review. Future Shizuku changes require re-checking permission semantics and the typed privileged boundary before upgrading.
 
@@ -83,7 +83,7 @@ No actionable advisory requiring a library-version change was identified in this
 
 `kotlinx.serialization` 1.11.0 adds an explicit production privacy control for JSON decoding exceptions. While the API is experimental, `exceptionsWithDebugInfo` is still `true` by default in this release; with debug info enabled, exception messages may include the raw input or an excerpt of it.
 
-This matters for Hermes Bridge because `BridgeProtocol` decodes relay-supplied JSON and transport failures can propagate a `Throwable.message` to the Android UI/foreground notification. Protocol payloads can contain command arguments and other data that should not be repeated in error surfaces.
+This matters for TypedDroid because `BridgeProtocol` decodes relay-supplied JSON and transport failures can propagate a `Throwable.message` to the Android UI/foreground notification. Protocol payloads can contain command arguments and other data that should not be repeated in error surfaces.
 
 Remediation:
 
@@ -99,11 +99,11 @@ References:
 
 ### kotlinx.coroutines / AndroidX
 
-No actionable security advisory requiring an immediate version change was identified in this review for the versions currently used by Hermes Bridge. They remain under Dependabot monitoring. A newer version alone is not sufficient reason for a broad coordinated upgrade.
+No actionable security advisory requiring an immediate version change was identified in this review for the versions currently used by TypedDroid. They remain under Dependabot monitoring. A newer version alone is not sufficient reason for a broad coordinated upgrade.
 
 ## Python MCP adapter
 
-The adapter intentionally has a narrow direct dependency surface (`mcp>=2,<3`). Dependabot monitors `/hermes_mcp`. Major MCP SDK changes must be reviewed for tool registration, transport, schema and authorization behavior before adoption.
+The adapter intentionally has a narrow direct dependency surface (`mcp>=2,<3`). Dependabot monitors `/mcp_adapter`. Major MCP SDK changes must be reviewed for tool registration, transport, schema and authorization behavior before adoption.
 
 ## GitHub Actions
 
@@ -126,6 +126,6 @@ References:
 2. Avoid unrelated bulk upgrades in the same change as a security fix.
 3. Keep dependency repositories narrow and centralized.
 4. Keep the Gradle Wrapper distribution checksum pinned.
-5. Run unit tests, Hermes MCP tests, Android lint, APK build and relay distribution build after build-tool/dependency changes.
-6. Re-audit the Hermes Android tool allowlist after any Shizuku, Android privilege or MCP SDK change.
+5. Run unit tests, generic MCP tests, Android lint, APK build and relay distribution build after build-tool/dependency changes.
+6. Re-audit the TypedDroid Android tool allowlist after any Shizuku, Android privilege or MCP SDK change.
 7. Do not enable dependency-update auto-merge for security-sensitive tooling without a separate policy decision.

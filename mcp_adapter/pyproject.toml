@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "typeddroid-mcp"
+version = "0.1.0"
+description = "Agent-neutral MCP adapter for security-first Android tools"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2,<3",
+]
+
+[project.scripts]
+typeddroid-mcp = "typeddroid_mcp.server:main"
+typeddroid-telegram-approvals = "typeddroid_mcp.telegram_approvals:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["typeddroid_mcp"]

@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "io.github.arttvad9r.hermesbridge.fixture"
+    namespace = "io.github.arttvad9r.typeddroid.fixture"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.github.arttvad9r.hermesbridge.fixture"
+        applicationId = "io.github.arttvad9r.typeddroid.fixture"
         minSdk = 30
         targetSdk = 35
         versionCode = 1

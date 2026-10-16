@@ -1,14 +1,14 @@
 # ADR 0001: Phone-initiated outbound relay connection
 
-Status: Accepted
+Status: Superseded by ADR 0004
 
 ## Context
 
-Normal ADB-over-Wi-Fi expects the phone and workstation to be mutually reachable and is a poor daily UX for a roaming phone. The product goal requires Hermes on a VPS to work while the laptop is off and the phone is on cellular or unrelated Wi-Fi.
+The original product direction assumed an always-available remote agent host while the phone roamed across unrelated networks. That assumption is no longer part of the current architecture; see ADR 0004.
 
 ## Decision
 
-The Android app initiates and maintains an authenticated TLS/WebSocket connection to a relay near Hermes.
+The Android app initiates and maintains an authenticated TLS/WebSocket connection to a relay endpoint.
 
 No inbound phone port is required in the default architecture.
 
@@ -18,7 +18,7 @@ Positive:
 
 - works behind carrier NAT;
 - works across network changes;
-- removes laptop from runtime path;
+- allows a host to be reachable across network changes;
 - no user-visible IP/port configuration.
 
 Negative:

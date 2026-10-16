@@ -1,0 +1,269 @@
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from typeddroid_mcp import server
+
+
+DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
+
+
+class TypedDroidMcpTest(unittest.TestCase):
+    def test_relay_defaults_to_loopback(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(server._host_url(), "http://127.0.0.1:8080")
+
+    def test_legacy_relay_url_env_remains_compatible(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TYPED_DROID_RELAY_URL": "https://bridge.example.com"},
+            clear=True,
+        ):
+            self.assertEqual(server._host_url(), "https://bridge.example.com")
+
+    def test_plaintext_remote_relay_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TYPED_DROID_HOST_URL": "http://example.com:8080"},
+            clear=True,
+        ):
+            with self.assertRaises(RuntimeError):
+                server._host_url()
+
+    def test_loopback_prefix_spoof_is_rejected(self) -> None:
+        for url in (
+            "http://localhost.evil.example:8080",
+            "http://127.0.0.1.evil.example:8080",
+        ):
+            with self.subTest(url=url), patch.dict(
+                os.environ,
+                {"TYPED_DROID_HOST_URL": url},
+                clear=True,
+            ):
+                with self.assertRaises(RuntimeError):
+                    server._host_url()
+
+    def test_device_health_cannot_select_arbitrary_tool(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
+            return {"ok": True, "result": {"batteryPercent": 80}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.device_health(DEVICE_ID)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(calls), 1)
+        method, path, payload, _ = calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, f"/api/v1/devices/{DEVICE_ID}/commands")
+        self.assertEqual(payload, {"tool": "device.health", "arguments": {}})
+
+    def test_list_apps_maps_only_to_apps_list(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
+            return {"ok": True, "result": {"count": 1, "apps": []}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.list_apps(DEVICE_ID)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][2], {"tool": "apps.list", "arguments": {}})
+
+    def test_list_files_maps_only_to_scoped_files_list(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
+            return {"ok": True, "result": {"count": 1, "entries": []}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.list_files(DEVICE_ID, ["Documents", "Notes"])
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "tool": "files.list",
+                "arguments": {"pathSegments": ["Documents", "Notes"]},
+            },
+        )
+
+    def test_list_files_rejects_traversal_before_request(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            with self.assertRaises(ValueError):
+                server.list_files(DEVICE_ID, [".."])
+            request.assert_not_called()
+
+    def test_install_apk_maps_staged_artifact_only_to_install_tool(self) -> None:
+        staged = {
+            "artifactId": "apk_123e4567-e89b-12d3-a456-426614174000",
+            "downloadToken": "A" * 43,
+            "fileName": "example.apk",
+            "sizeBytes": 1234,
+            "sha256": "a" * 64,
+            "expiresAtEpochMillis": 123456789,
+        }
+        calls = []
+
+        def fake_device_command(device_id, tool, arguments=None, **kwargs):
+            calls.append((device_id, tool, arguments, kwargs))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with (
+            patch.object(server, "_stage_apk", return_value=staged) as stage,
+            patch.object(server, "_device_command", side_effect=fake_device_command),
+        ):
+            result = server.install_apk(DEVICE_ID, "example.apk", replace=False)
+
+        self.assertFalse(result["ok"])
+        stage.assert_called_once_with("example.apk")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], DEVICE_ID)
+        self.assertEqual(calls[0][1], "apps.install")
+        self.assertEqual(
+            calls[0][2],
+            {
+                "artifactId": staged["artifactId"],
+                "downloadToken": staged["downloadToken"],
+                "fileName": staged["fileName"],
+                "sizeBytes": staged["sizeBytes"],
+                "sha256": staged["sha256"],
+                "replace": False,
+            },
+        )
+        self.assertEqual(calls[0][3], {"timeout": 300})
+
+    def test_apk_name_is_confined_to_dedicated_staging_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "ok.apk").write_bytes(b"apk")
+            (root / "not-apk.txt").write_bytes(b"text")
+            with patch.dict(
+                os.environ,
+                {"TYPED_DROID_APK_DIR": directory},
+                clear=False,
+            ):
+                self.assertEqual(server._resolve_apk_file("ok.apk"), root / "ok.apk")
+                for name in ("../ok.apk", "sub/ok.apk", "not-apk.txt", ""):
+                    with self.subTest(name=name):
+                        with self.assertRaises((ValueError, FileNotFoundError)):
+                            server._resolve_apk_file(name)
+
+    def test_install_rejects_non_boolean_replace_before_staging(self) -> None:
+        with patch.object(server, "_stage_apk") as stage:
+            with self.assertRaises(ValueError):
+                server.install_apk(DEVICE_ID, "example.apk", replace="yes")
+            stage.assert_not_called()
+
+    def test_uninstall_app_maps_only_to_approved_typed_tool(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.uninstall_app(DEVICE_ID, "com.example.app", keep_data=True)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "tool": "apps.uninstall",
+                "arguments": {
+                    "packageName": "com.example.app",
+                    "keepData": True,
+                },
+            },
+        )
+
+    def test_force_stop_maps_only_to_approved_typed_tool(self) -> None:
+        calls = []
+
+        def fake_request(method, path, payload=None, **kwargs):
+            calls.append((method, path, payload, kwargs))
+            return {"ok": False, "error": {"code": "approval_required"}}
+
+        with patch.object(server, "_request_json", side_effect=fake_request):
+            result = server.force_stop_app(DEVICE_ID, "com.example.app")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "tool": "apps.forceStop",
+                "arguments": {"packageName": "com.example.app"},
+            },
+        )
+
+    def test_package_mutations_reject_invalid_package_before_request(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            for package_name in ("../other", "com/example/app", "single", ""):
+                with self.subTest(package_name=package_name):
+                    with self.assertRaises(ValueError):
+                        server.uninstall_app(DEVICE_ID, package_name)
+                    with self.assertRaises(ValueError):
+                        server.force_stop_app(DEVICE_ID, package_name)
+            request.assert_not_called()
+
+    def test_package_mutations_reject_bridge_package(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            with self.assertRaises(ValueError):
+                server.uninstall_app(DEVICE_ID, server.TYPED_DROID_PACKAGE)
+            with self.assertRaises(ValueError):
+                server.force_stop_app(DEVICE_ID, server.TYPED_DROID_PACKAGE)
+            request.assert_not_called()
+
+    def test_invalid_device_id_is_rejected_before_request(self) -> None:
+        with patch.object(server, "_request_json") as request:
+            with self.assertRaises(ValueError):
+                server.device_health("../other")
+            request.assert_not_called()
+
+    def test_short_admin_token_is_rejected(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TYPED_DROID_ADMIN_TOKEN": "too-short"},
+            clear=True,
+        ):
+            with self.assertRaises(RuntimeError):
+                server._admin_token()
+
+    def test_admin_token_defaults_to_local_config_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_home = Path(directory)
+            token_dir = config_home / "typeddroid"
+            token_dir.mkdir()
+            (token_dir / "admin-token").write_text("a" * 64, encoding="utf-8")
+
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch.object(server, "_config_home", return_value=config_home),
+            ):
+                self.assertEqual(server._admin_token(), "a" * 64)
+
+    def test_apk_directory_defaults_to_xdg_data_home(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(
+                os.environ,
+                {"XDG_DATA_HOME": directory},
+                clear=True,
+            ):
+                self.assertEqual(
+                    server._apk_directory(),
+                    Path(directory).resolve() / "typeddroid" / "apks",
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,12 +1,12 @@
 # Security model
 
-Hermes Bridge gives an AI agent the ability to observe and potentially mutate a personal phone. This makes the local policy boundary more important than ordinary remote-control authentication.
+TypedDroid gives an AI agent the ability to observe and potentially mutate a personal phone. This makes the local policy boundary more important than ordinary remote-control authentication.
 
 ## Threats considered
 
 ### Stolen relay/device credential
 
-An attacker obtains a token or attempts to impersonate Hermes.
+An attacker obtains a token or attempts to impersonate a paired Android device or local Bridge Host client.
 
 Mitigations:
 
@@ -18,9 +18,9 @@ Mitigations:
 - TLS;
 - never log pairing secrets.
 
-### Prompt injection reaches Hermes
+### Prompt injection reaches the agent
 
-Hermes reads hostile content that attempts to make the agent call phone tools.
+The AI agent reads hostile content that attempts to make it call phone tools.
 
 Network authentication does not mitigate this.
 
@@ -49,9 +49,9 @@ Mitigations:
 - Shizuku is a separate opt-in capability;
 - no `QUERY_ALL_PACKAGES`; Shizuku recovery uses one exact package query only.
 
-### Compromised VPS
+### Compromised agent host
 
-A compromised relay or Hermes instance attempts unrestricted actions.
+A compromised AI agent, MCP process, or local Bridge Host attempts unrestricted actions.
 
 Mitigations:
 
@@ -62,13 +62,13 @@ Mitigations:
 - tool allowlist enforced on device;
 - relay-supplied error messages are treated as untrusted; Android surfaces only fixed local text selected from an allowlisted protocol error code;
 - Android command-result errors cross the phone→relay boundary only as a bounded protocol-style code plus deterministic local text selected at the top-level command router; arbitrary local exception messages, system stderr, paths, URLs and backend detail are not forwarded;
-- remote approval notifications are informational only: the relay admin token, Hermes process and Telegram/VPS callbacks cannot approve, deny or consume an Android ticket;
+- remote approval notifications are informational only: the Bridge Host admin token, agent process and notification callbacks cannot approve, deny or consume an Android ticket;
 - approval notifications contain only device/approval IDs, an exact allowlisted tool/risk pair and a short relative TTL; target package names, permission names, SAF paths, APK filenames, raw arguments and the local approval-card summary remain on-device;
 - unknown approval tools or mismatched risk classifications are never queued for the remote notification path;
 - losing pairing identity clears pending local approvals and unsent notification records before a future re-pair;
 - command outcomes and approval decisions are recorded locally on the phone.
 
-A future fully remote approval mechanism must remain independently verifiable when the VPS is hostile. In particular, a signing credential stored or processed on the same VPS is not an independent approval factor. Any such design must bind the user's decision to the Android-created ticket/fingerprint and be verified on-device.
+A future fully remote approval mechanism must remain independently verifiable when the local host is hostile. In particular, a signing credential stored or processed on the same host is not an independent approval factor. Any such design must bind the user's decision to the Android-created ticket/fingerprint and be verified on-device.
 
 ## Risk classes
 
@@ -83,7 +83,7 @@ The user may later create narrower trust rules, but the shipped default remains 
 
 ## Explicitly forbidden tool surface
 
-These must not be exposed to Hermes in V1:
+These must not be exposed to any agent in V1:
 
 - `run_shell`;
 - arbitrary Intent sender;
@@ -92,18 +92,18 @@ These must not be exposed to Hermes in V1:
 - unrestricted root command;
 - arbitrary filesystem path outside allowed storage roots.
 
-If an upstream dependency exposes one of these, Hermes Bridge must omit it from registration rather than relying on prompting instructions.
+If an upstream dependency exposes one of these, TypedDroid must omit it from registration rather than relying on model instructions.
 
 ## Screen-capture boundary
 
 MediaProjection is an explicit local capability, not an implicit extension of the relay connection. The current pixel path is intentionally narrower than a screenshot tool:
 
 - each Android consent grant is used for at most one `MediaProjection.createVirtualDisplay()` call;
-- the virtual display is non-secure, so Android continues to blank `FLAG_SECURE` / protected window content instead of Hermes Bridge attempting to capture it;
+- the virtual display is non-secure, so Android continues to blank `FLAG_SECURE` / protected window content instead of TypedDroid attempting to capture it;
 - the capture surface is aspect-ratio preserving and bounded to at most 1,600 pixels on either axis and 1,500,000 total pixels;
 - the process-local copied RGBA frame is therefore bounded to 6,000,000 bytes;
 - exactly one frame is acquired;
-- before that temporary RGBA copy is erased, Hermes Bridge masks locally derived system-bar and display-cutout edge regions with opaque black pixels;
+- before that temporary RGBA copy is erased, TypedDroid masks locally derived system-bar and display-cutout edge regions with opaque black pixels;
 - when the software keyboard is visible, its visibility-sensitive IME inset is read from a fresh `WindowInsets` snapshot after the frame arrives and unioned with the system-edge mask; `getInsetsIgnoringVisibility(Type.ime())` is not used;
 - if the maximum-window source geometry changed between capture setup and frame redaction, the redaction path fails closed rather than applying fresh insets in a stale coordinate system;
 - after local masking, the copied byte array is overwritten immediately, and the `Image`, `ImageReader`, `VirtualDisplay`, and `MediaProjection` resources are released;
@@ -152,7 +152,7 @@ Command entries contain only:
 - success/error outcome;
 - a normalized bounded error code, otherwise `other_error`.
 
-Approval entries additionally contain the bounded human-facing summary that was already displayed in the local approval card plus approved/denied outcome.
+Approval entries persist only the allowlisted tool name and approved/denied outcome. Target package names, permissions, SAF paths and APK metadata remain on-device only for the live approval UI and are not persisted in audit history.
 
 The audit history intentionally does **not** persist raw command arguments or raw error messages. It therefore does not record APK download tokens, relay/auth credentials, remote URLs, SAF paths supplied as command arguments, file contents, package-install bytes, pairing codes or arbitrary unknown tool strings.
 
@@ -160,11 +160,11 @@ The history screen is an internal non-exported activity and can be cleared local
 
 ## Reboot and Shizuku recovery
 
-The base relay and Shizuku are separate security/capability layers. Losing Shizuku after reboot must not silently widen access, weaken authentication, or be represented as loss of the base Hermes connection.
+The base relay and Shizuku are separate security/capability layers. Losing Shizuku after reboot must not silently widen access, weaken authentication, or be represented as loss of the base Android device connection.
 
-Hermes Bridge stores only a boolean that Shizuku previously reached `READY`; it does not persist a Shizuku credential or shell capability. After `BOOT_COMPLETED`, the base authenticated relay reconnect starts independently. A delayed check may show a local restoration notification only when Shizuku had previously been configured and notification permission is currently granted.
+TypedDroid stores only a boolean that Shizuku previously reached `READY`; it does not persist a Shizuku credential or shell capability. After `BOOT_COMPLETED`, the base authenticated relay reconnect starts independently. A delayed check may show a local restoration notification only when Shizuku had previously been configured and notification permission is currently granted.
 
-The restoration notification contains no pairing code, relay token, raw command argument, file content or package data. It can open Hermes Bridge and may launch only the exact official Shizuku package declared in package visibility. `MY_PACKAGE_REPLACED` does not trigger the reboot reminder. When Shizuku returns to `READY`, the reminder is cancelled.
+The restoration notification contains no pairing code, relay token, raw command argument, file content or package data. It can open TypedDroid and may launch only the exact official Shizuku package declared in package visibility. `MY_PACKAGE_REPLACED` does not trigger the reboot reminder. When Shizuku returns to `READY`, the reminder is cancelled.
 
 ## Android component exposure
 
