@@ -37,9 +37,16 @@ class DefaultToolPolicyTest {
     @Test
     fun trustedModeCanRequestFullControlTools() {
         assertEquals(
-            ApprovalDecision.REQUIRE_APPROVAL,
+            ApprovalDecision.ALLOW,
             DefaultToolPolicy.decision(
                 BridgeTool("run_shell", ToolRisk.RAW_SHELL),
+                AgentTrustMode.TRUSTED,
+            ),
+        )
+        assertEquals(
+            ApprovalDecision.ALLOW,
+            DefaultToolPolicy.decision(
+                BridgeTool("shell.run", ToolRisk.RAW_SHELL),
                 AgentTrustMode.TRUSTED,
             ),
         )

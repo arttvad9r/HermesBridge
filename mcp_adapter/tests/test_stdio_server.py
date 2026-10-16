@@ -23,11 +23,12 @@ EXPECTED_TOOLS = {
     "install_apk",
     "uninstall_app",
     "force_stop_app",
+    "run_shell",
 }
 
 
 class StdioMcpCompatibilityTest(unittest.TestCase):
-    def test_generic_stdio_server_initializes_and_lists_only_typed_tools(self) -> None:
+    def test_generic_stdio_server_initializes_and_lists_expected_tools(self) -> None:
         async def run() -> None:
             parameters = StdioServerParameters(
                 command=sys.executable,
@@ -40,7 +41,6 @@ class StdioMcpCompatibilityTest(unittest.TestCase):
 
                     self.assertEqual(initialized.server_info.name, "TypedDroid")
                     self.assertEqual({tool.name for tool in tools.tools}, EXPECTED_TOOLS)
-                    self.assertNotIn("run_shell", EXPECTED_TOOLS)
 
         anyio.run(run)
 

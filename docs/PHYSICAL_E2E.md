@@ -24,7 +24,7 @@ Required checks:
 
 - `list_devices` works identically across hosts;
 - `create_pairing_code` creates one short-lived pairing code;
-- no host receives a generic shell/tool selector;
+- SAFE mode rejects `shell.run`; TRUSTED mode exposes it only after an explicit local trust grant and embedded-helper bootstrap;
 - Bridge Host admin token is read locally and is not copied into agent project configuration.
 
 ## 3. Pairing and reconnect
@@ -94,7 +94,7 @@ For every mutating tool verify:
 
 ## 7. Shizuku UserService physical gate
 
-Confirm the release build uses the typed `IPrivilegedBridgeService` UserService boundary for install/uninstall/force-stop/permission-revoke/Batterystats and does not expose raw argv or a generic shell method.
+Confirm the legacy Shizuku path still uses the typed `IPrivilegedBridgeService` boundary for existing privileged tools, while the new embedded backend can bootstrap the owned shell-UID helper. Verify `shell.run` is denied in SAFE, works in TRUSTED, survives closing Wireless Debugging while the helper remains alive, and requires restoration after reboot/process death.
 
 Test Shizuku process death/restart and ensure the app recovers without widening authority.
 

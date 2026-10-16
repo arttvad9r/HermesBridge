@@ -26,25 +26,28 @@ No VPS, Shizuku, Termux, Tasker or vendor-specific agent is mandatory.
 - [x] Separate backend authority from agent trust.
 - [x] Define embedded ADB and root capability profiles.
 - [x] Supersede the old "never raw shell" product decision for trusted mode.
-- [ ] Persist per-device/per-agent trust selection in Android UI.
-- [ ] Include trust mode in pairing/session authorization.
+- [x] Persist pairing-scoped agent trust selection in Android UI.
+- [x] Route persisted trust mode into authorization for the new full-control MCP tools.
 
 ## Phase 1 — owned embedded ADB backend
 
 Goal: privileged access without requiring Shizuku.
 
-- [ ] Add repository-owned ADB key generation/storage using Android Keystore where practical.
-- [ ] Implement Android 11+ wireless-debugging pairing client.
-  - TLS pairing transport.
-  - SPAKE2 shared-secret authentication.
-  - ADB RSA public-key peer information exchange.
-  - pairing code validation and clear local setup UX.
+- [x] Add repository-owned ADB key generation/storage using Android Keystore.
+- [ ] Complete Android 11+ wireless-debugging pairing product flow.
+  - [x] TLS 1.3 pairing transport and TLS exporter.
+  - [x] repository-owned SPAKE2 shared-secret authentication.
+  - [x] AES-GCM pairing channel and ADB RSA/Device GUID PeerInfo exchange.
+  - [x] pairing code validation and in-memory protocol E2E tests.
+  - [ ] production onboarding that keeps Android's short-lived pairing dialog alive.
 - [ ] Discover/connect to the device's local `adbd` endpoint.
-- [ ] Implement the minimum ADB host protocol required by TypedDroid.
-  - CNXN/AUTH handshake.
-  - OPEN/OKAY/WRTE/CLSE streams.
-  - `shell,v2` where supported.
-- [ ] Implement bounded shell execution with timeout, stdout/stderr limits and cancellation.
+- [x] Add an owned shell-UID `app_process` helper with authenticated abstract-local-socket RPC, bootstrapped through ADB.
+- [ ] Complete the minimum ADB host protocol required by TypedDroid.
+  - [x] CNXN/STLS negotiation and TLS 1.3 secure-connect client.
+  - [x] OPEN/OKAY/WRTE/CLSE stream multiplexer.
+  - [x] `shell,v2` framing and stdout/stderr/exit parsing.
+  - [ ] mDNS discovery and reconnect lifecycle for `_adb-tls-connect._tcp`.
+- [ ] Finish shell execution lifecycle: output/packet/socket-time bounds and helper-side draining exist; cancellation still needs wiring.
 - [ ] Reimplement current privileged app tools on the embedded ADB backend.
 - [ ] Reimplement Batterystats diagnostics on embedded ADB.
 - [ ] Keep Shizuku only as a temporary fallback until parity tests pass.
@@ -52,9 +55,16 @@ Goal: privileged access without requiring Shizuku.
 
 Acceptance: a fresh phone with only TypedDroid installed can pair once through Android Wireless Debugging and perform the current privileged tool set without the Shizuku app.
 
+### Embedded ADB implementation notes
+
+- ADB framing, stream multiplexing, shell-v2, RSA key encoding, SPAKE2, pairing wire protocol, AES-GCM and policy are implemented in this repository.
+- TypedDroid bundles Conscrypt as its TLS 1.3 provider because Android's system TLS exporter is hidden from ordinary apps. Conscrypt is library code inside the APK, not a second app or service. Implementing a custom TLS 1.3 stack is explicitly out of scope because it would create unnecessary cryptographic risk.
+- Android invalidates the short-lived Wireless Debugging pairing endpoint when the pairing dialog is dismissed in the tested flow. Production onboarding must therefore keep Settings alive, for example with split-screen or a foreground-service/notification flow, rather than assuming the user can freely switch apps after reading the code.
+
+
 ## Phase 2 — full trusted tool surface
 
-- [ ] `shell.run` with explicit `TRUSTED` authorization.
+- [x] `shell.run` with persistent `TRUSTED` authorization and SAFE-mode denial.
 - [ ] activity/intent operations.
 - [ ] package manager and appops operations.
 - [ ] settings read/write.

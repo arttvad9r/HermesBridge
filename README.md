@@ -12,7 +12,7 @@ Hermes Agent is only an optional adapter; the runtime architecture is local and 
 
 Most Android agent bridges become powerful by exposing shell, arbitrary commands, Accessibility automation, or broad package access. TypedDroid takes the opposite approach:
 
-- no agent-facing `run_shell` or arbitrary argv;
+- SAFE mode exposes no raw shell; TRUSTED mode can opt into `run_shell` once the owned privileged helper is bootstrapped;
 - no arbitrary Android intents/content URIs;
 - no arbitrary APK URL;
 - no `QUERY_ALL_PACKAGES`;

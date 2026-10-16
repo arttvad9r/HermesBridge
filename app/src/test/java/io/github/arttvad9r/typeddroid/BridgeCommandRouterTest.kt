@@ -97,7 +97,7 @@ class BridgeCommandRouterTest {
         val router = router(null)
         val result = router.execute(
             CommandRequestPayload(
-                tool = "shell.run",
+                tool = "totally.unknown",
                 requestId = "router-unknown",
             )
         )

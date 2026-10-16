@@ -8,18 +8,18 @@ import org.junit.Test
 
 class AdbConnectionBannerTest {
     @Test
-    fun hostBannerIsDeterministicAndNulTerminated() {
+    fun hostBannerMatchesCurrentAospWireFormat() {
         val banner = buildHostConnectBanner(setOf("shell_v2", "cmd", "abb_exec"))
 
         assertEquals(
-            "host::features=abb_exec,cmd,shell_v2;\u0000",
+            "host::features=abb_exec,cmd,shell_v2;",
             banner.decodeToString(),
         )
     }
 
     @Test
     fun emptyHostFeatureSetProducesMinimalBanner() {
-        assertEquals("host::\u0000", buildHostConnectBanner(emptySet()).decodeToString())
+        assertEquals("host::", buildHostConnectBanner(emptySet()).decodeToString())
     }
 
     @Test
@@ -48,12 +48,12 @@ class AdbConnectionBannerTest {
     }
 
     @Test
-    fun malformedOrUnterminatedBannerIsRejected() {
-        assertThrows(IllegalArgumentException::class.java) {
-            parseDeviceConnectBanner("device::features=shell_v2;".encodeToByteArray())
-        }
+    fun malformedBannerIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             parseDeviceConnectBanner("host::features=shell_v2;\u0000".encodeToByteArray())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            parseDeviceConnectBanner("device::features=shell_v2;\u0000evil".encodeToByteArray())
         }
         assertThrows(IllegalArgumentException::class.java) {
             parseDeviceConnectBanner("device::features=shell_v2;features=cmd;\u0000".encodeToByteArray())
@@ -65,5 +65,14 @@ class AdbConnectionBannerTest {
         assertThrows(IllegalArgumentException::class.java) {
             buildHostConnectBanner(setOf("shell_v2;evil=x"))
         }
+    }
+
+    @Test
+    fun `device banner accepts current AOSP non nul payload`() {
+        val parsed = parseDeviceConnectBanner(
+            "device::ro.product.model=Pixel;features=shell_v2,cmd;".encodeToByteArray()
+        )
+        assertEquals("Pixel", parsed.productModel)
+        assertTrue("shell_v2" in parsed.features)
     }
 }

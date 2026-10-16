@@ -13,6 +13,7 @@ internal object AdbProtocol {
     const val VERSION_MIN = 0x01000000
     const val VERSION_SKIP_CHECKSUM = 0x01000001
     const val VERSION = VERSION_SKIP_CHECKSUM
+    const val TLS_VERSION = 0x01000000
 
     const val HEADER_SIZE = 24
     const val MAX_PAYLOAD = 1024 * 1024

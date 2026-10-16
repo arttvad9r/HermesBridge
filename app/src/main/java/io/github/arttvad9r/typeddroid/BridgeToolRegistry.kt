@@ -28,6 +28,7 @@ class BridgeToolRegistry(
     private val apkPackageInspector: ApkPackageInspector? = null,
     private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
     private val appUsageRepository: AppUsageRepository? = null,
+    private val rawShellBackend: RawShellBackend = DisabledRawShellBackend,
     private val agentTrustMode: () -> AgentTrustMode = { AgentTrustMode.SAFE },
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
@@ -42,6 +43,7 @@ class BridgeToolRegistry(
             APPS_INSTALL -> executeAppsInstall(request)
             APPS_UNINSTALL -> executeAppsUninstall(request)
             APPS_FORCE_STOP -> executeAppsForceStop(request)
+            SHELL_RUN -> executeShellRun(request)
             else -> failure(
                 request.requestId,
                 "unknown_tool",
@@ -642,6 +644,73 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeShellRun(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys.any { it != SHELL_COMMAND && it != TIMEOUT_MILLIS }) {
+            return failure(
+                request.requestId,
+                "invalid_arguments",
+                "shell.run accepts only command and optional timeoutMillis.",
+            )
+        }
+        val commandValue = request.arguments[SHELL_COMMAND] as? JsonPrimitive
+            ?: return failure(request.requestId, "invalid_arguments", "command is required.")
+        if (!commandValue.isString) {
+            return failure(request.requestId, "invalid_arguments", "command must be a string.")
+        }
+        val command = commandValue.content
+        if (command.isEmpty() || '\u0000' in command || command.encodeToByteArray().size > MAX_SHELL_COMMAND_BYTES) {
+            return failure(request.requestId, "invalid_arguments", "command is empty, too large, or contains NUL.")
+        }
+        val timeoutMillis = when (val value = request.arguments[TIMEOUT_MILLIS]) {
+            null -> DEFAULT_SHELL_TIMEOUT_MILLIS
+            is JsonPrimitive -> value.longOrNull
+                ?.takeIf { it in 1..MAX_SHELL_TIMEOUT_MILLIS }
+                ?: return failure(
+                    request.requestId,
+                    "invalid_arguments",
+                    "timeoutMillis must be an integer from 1 to $MAX_SHELL_TIMEOUT_MILLIS.",
+                )
+            else -> return failure(request.requestId, "invalid_arguments", "timeoutMillis must be an integer.")
+        }
+
+        if (DefaultToolPolicy.decision(BridgeTool(SHELL_RUN, ToolRisk.RAW_SHELL), agentTrustMode()) != ApprovalDecision.ALLOW) {
+            return failure(
+                request.requestId,
+                "policy_denied",
+                "Raw shell is available only to an agent explicitly placed in Trusted mode on the phone.",
+            )
+        }
+
+        val readiness = rawShellBackend.readiness()
+        if (!readiness.ready) {
+            return failure(
+                request.requestId,
+                readiness.code ?: "embedded_privileged_unavailable",
+                readiness.message ?: "Embedded privileged helper is not running.",
+            )
+        }
+
+        val result = rawShellBackend.execute(command, timeoutMillis)
+        if (!result.ok) {
+            return failure(
+                request.requestId,
+                result.code ?: "shell_failed",
+                result.message ?: "Raw shell command failed before an exit status was available.",
+            )
+        }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put("exitCode", checkNotNull(result.exitCode))
+                put("stdout", result.stdout.decodeToString())
+                put("stderr", result.stderr.decodeToString())
+                put("stdoutTruncated", result.stdoutTruncated)
+                put("stderrTruncated", result.stderrTruncated)
+            },
+        )
+    }
+
     private fun parseOnlyPathSegments(
         request: CommandRequestPayload,
         allowEmpty: Boolean,
@@ -808,7 +877,13 @@ class BridgeToolRegistry(
         const val APPS_INSTALL = "apps.install"
         const val APPS_UNINSTALL = "apps.uninstall"
         const val APPS_FORCE_STOP = "apps.forceStop"
+        const val SHELL_RUN = "shell.run"
 
+        private const val SHELL_COMMAND = "command"
+        private const val TIMEOUT_MILLIS = "timeoutMillis"
+        private const val DEFAULT_SHELL_TIMEOUT_MILLIS = 30_000L
+        private const val MAX_SHELL_TIMEOUT_MILLIS = 300_000L
+        private const val MAX_SHELL_COMMAND_BYTES = 64 * 1024
         private const val PATH_SEGMENTS = "pathSegments"
         private const val PACKAGE_NAME = "packageName"
         private const val KEEP_DATA = "keepData"

@@ -38,6 +38,7 @@ object DefaultToolPolicy {
 
     private val trustedOnlyNames = setOf(
         "run_shell",
+        "shell.run",
         "arbitrary_intent",
         "arbitrary_content_uri",
     )
@@ -53,10 +54,14 @@ object DefaultToolPolicy {
 
         return when (tool.risk) {
             ToolRisk.READ_ONLY -> ApprovalDecision.ALLOW
+            ToolRisk.RAW_SHELL -> if (trustMode == AgentTrustMode.TRUSTED) {
+                ApprovalDecision.ALLOW
+            } else {
+                ApprovalDecision.DENY
+            }
             ToolRisk.MUTATING,
             ToolRisk.PRIVILEGED,
             ToolRisk.UI_CONTROL,
-            ToolRisk.RAW_SHELL,
             -> ApprovalDecision.REQUIRE_APPROVAL
         }
     }

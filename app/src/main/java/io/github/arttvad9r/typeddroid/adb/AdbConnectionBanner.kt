@@ -28,14 +28,15 @@ internal fun buildHostConnectBanner(features: Set<String>): ByteArray {
     } else {
         "$FEATURES_KEY=${safeFeatures.joinToString(",")};"
     }
-    return "$HOST_BANNER_PREFIX$properties\u0000".encodeToByteArray()
+    return "$HOST_BANNER_PREFIX$properties".encodeToByteArray()
 }
 
 internal fun parseDeviceConnectBanner(payload: ByteArray): AdbDeviceBanner {
     require(payload.isNotEmpty()) { "ADB CNXN banner is empty." }
-    require(payload.last() == 0.toByte()) { "ADB CNXN banner must be NUL terminated." }
+    val content = if (payload.last() == 0.toByte()) payload.copyOf(payload.size - 1) else payload
+    require(content.none { it == 0.toByte() }) { "ADB CNXN banner contains an embedded NUL." }
 
-    val raw = payload.copyOf(payload.size - 1).decodeToString(throwOnInvalidSequence = true)
+    val raw = content.decodeToString(throwOnInvalidSequence = true)
     require(raw.startsWith(DEVICE_BANNER_PREFIX)) { "Unsupported ADB CNXN banner prefix." }
     val body = raw.removePrefix(DEVICE_BANNER_PREFIX)
 

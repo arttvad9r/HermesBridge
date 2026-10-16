@@ -44,6 +44,10 @@ Shizuku is a migration backend only. New privileged architecture must not depend
 
 The embedded ADB implementation will be owned in this repository. It may adapt Apache-2.0 AOSP implementation details with attribution, but TypedDroid must not require LADB, Shizuku, Termux, Tasker, or another Android application at runtime.
 
+The protocol implementation remains repository-owned, but TLS is a deliberate exception to the "own the code" preference: TypedDroid bundles Conscrypt inside the APK for TLS 1.3 and TLS-exporter support. A probe on an ordinary Android app showed that the platform Conscrypt exporter is not part of the public app API. Reimplementing TLS 1.3 in application code would add security risk without product value. Conscrypt is therefore an internal library dependency, not an external runtime application or service.
+
+Initial Wireless Debugging pairing also has an Android lifecycle constraint: the temporary pairing endpoint may disappear when the system pairing dialog is dismissed. The onboarding flow must keep that dialog alive while TypedDroid performs pairing, using a supported foreground/split-screen/notification-assisted flow where necessary. This is a setup constraint only; normal post-pairing agent control does not depend on keeping Settings open.
+
 ## Full-control boundary
 
 `TRUSTED` may expose generic tools that `SAFE` denies, including raw shell. This does not mean "everything executes silently": approval policy, per-agent permissions, audit, output bounds, timeouts, and sensitive-operation restrictions remain separate controls.

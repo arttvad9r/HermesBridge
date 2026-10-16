@@ -2,7 +2,7 @@
 
 `mcp_adapter/` is the canonical AI-agent boundary for TypedDroid. It is a local MCP stdio server and is not tied to Hermes Agent or a particular model provider.
 
-The adapter exposes only fixed typed tools. There is no generic command selector, raw shell, arbitrary HTTP request, arbitrary Android intent, or arbitrary APK URL.
+The adapter exposes fixed tools plus `run_shell` for phones explicitly placed in TRUSTED mode. SAFE-mode phones reject raw shell locally. There is no arbitrary HTTP request, arbitrary Android intent, or arbitrary APK URL surface.
 
 ## Install
 
@@ -70,7 +70,7 @@ The MCP layer is a second allowlist in addition to Android:
 1. Each MCP function maps to one fixed Android tool.
 2. Android independently validates schemas, risk and exact approval arguments.
 3. The Bridge Host admin API stays loopback-only.
-4. The agent never receives a raw shell/argv surface.
+4. Raw shell is a separate TRUSTED-only capability and is denied by the phone in SAFE mode.
 5. Package visibility stays launcher-scoped; `QUERY_ALL_PACKAGES` is not used.
 6. APK installation accepts only a simple file name from the dedicated local staging directory, then Android verifies the actual artifact before approval.
 7. Approval notifications are informational. A compromised agent/host cannot turn them into Android approval.

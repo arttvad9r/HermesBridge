@@ -30,6 +30,8 @@ MAX_PERMISSION_NAME_LENGTH = 255
 MAX_APK_NAME_LENGTH = 120
 MAX_APK_BYTES = 200 * 1024 * 1024
 MAX_PENDING_APPROVALS = 200
+MAX_SHELL_COMMAND_BYTES = 64 * 1024
+MAX_SHELL_TIMEOUT_SECONDS = 300
 TYPED_DROID_PACKAGE = "io.github.arttvad9r.typeddroid"
 APK_NAME_HEADER = "X-TypedDroid-Apk-Name"
 APK_STAGING_KEY_HEADER = "X-TypedDroid-Apk-Staging-Key"
@@ -536,6 +538,32 @@ def force_stop_app(
         "apps.forceStop",
         {"packageName": package},
         **_idempotency_kwargs(idempotency_key),
+    )
+
+
+@mcp.tool()
+def run_shell(
+    device_id: str,
+    command: str,
+    timeout_seconds: int = 30,
+) -> dict[str, Any]:
+    """Run an unrestricted Android shell command on a phone whose local trust mode is explicitly set to Trusted. Safe-mode phones reject this tool."""
+    if not isinstance(command, str):
+        raise ValueError("command must be a string.")
+    if not command or "\x00" in command or len(command.encode("utf-8")) > MAX_SHELL_COMMAND_BYTES:
+        raise ValueError("command is empty, too large, or contains NUL.")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
+        raise ValueError("timeout_seconds must be an integer.")
+    if not 1 <= timeout_seconds <= MAX_SHELL_TIMEOUT_SECONDS:
+        raise ValueError(f"timeout_seconds must be from 1 to {MAX_SHELL_TIMEOUT_SECONDS}.")
+    return _device_command(
+        device_id,
+        "shell.run",
+        {
+            "command": command,
+            "timeoutMillis": timeout_seconds * 1000,
+        },
+        timeout=timeout_seconds + 15,
     )
 
 

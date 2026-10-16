@@ -11,3 +11,7 @@
 -keep class io.github.arttvad9r.typeddroid.TypedDroidUserService {
     public <init>();
 }
+# Launched directly by Android app_process from the installed APK during embedded-ADB bootstrap.
+-keep class io.github.arttvad9r.typeddroid.EmbeddedPrivilegedMain {
+    public static void main(java.lang.String[]);
+}

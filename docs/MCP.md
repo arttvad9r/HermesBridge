@@ -2,7 +2,7 @@
 
 TypedDroid exposes one canonical, agent-neutral MCP server over local stdio. The same executable works with Codex, Claude Code, OpenCode, Cursor, Hermes Agent, and other MCP hosts.
 
-The MCP process talks only to the local Bridge Host over loopback. It never exposes a generic Android command selector, raw shell, arbitrary HTTP client, arbitrary Android intent, or arbitrary APK URL.
+The MCP process talks only to the local Bridge Host over loopback. It exposes fixed Android tools plus an explicit `run_shell` capability. The phone itself authorizes `run_shell`: SAFE mode denies it, while a pairing explicitly switched to TRUSTED may use it after the owned privileged helper is active. MCP still exposes no arbitrary HTTP client, arbitrary Android-intent transport, or arbitrary APK URL.
 
 ## Install
 
@@ -177,6 +177,14 @@ It is not a raw filesystem path. Both MCP and Android reject traversal markers, 
 ### `analyze_files(device_id, path_segments=[])`
 
 Maps only to `files.analyze` and is read-only. Android recursively analyzes only the granted SAF subtree with hard traversal/output limits and returns `truncated` when incomplete.
+
+## TRUSTED full-control tools
+
+### `run_shell(device_id, command, timeout_seconds=30)`
+
+Maps only to Android `shell.run`. The adapter validates the command size, NUL exclusion and a 1–300 second timeout before sending it. Android then enforces pairing-scoped trust: SAFE mode returns `policy_denied`; TRUSTED mode may execute through the TypedDroid-owned shell-UID helper.
+
+The helper is bootstrapped through Android Wireless Debugging but is reached afterward through an authenticated abstract local socket. Output is bounded and returned as `exitCode`, `stdout`, `stderr`, `stdoutTruncated`, and `stderrTruncated`. This is intentionally a broad capability: a user who enables TRUSTED is granting the agent the authority available to Android's shell UID.
 
 ## Mutating / privileged MCP tools
 

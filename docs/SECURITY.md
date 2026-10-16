@@ -26,14 +26,13 @@ Network authentication does not mitigate this.
 
 Mitigations:
 
-- typed tool surface;
-- default-deny registration;
-- local risk classification;
-- user approval for mutating/privileged/UI-control operations;
-- no raw shell;
-- no arbitrary intents/content URIs;
-- command schemas and limits;
-- local audit trail.
+- SAFE mode keeps the typed, default-deny tool surface;
+- TRUSTED mode is an explicit local grant for the broader full-control surface;
+- local risk classification and pairing-scoped trust state;
+- user approval for ordinary mutating/privileged/UI-control operations unless a separately granted trusted capability applies;
+- raw shell is denied in SAFE mode and available only after the user explicitly enables TRUSTED mode and the owned privileged helper is active;
+- command schemas, time/output limits and local audit remain in force around the transport;
+- lockscreen credential automation remains forbidden.
 
 ### Over-broad Android permission
 
@@ -56,9 +55,10 @@ A compromised AI agent, MCP process, or local Bridge Host attempts unrestricted 
 Mitigations:
 
 - Android-side policy is authoritative;
-- local approval for high-impact commands;
+- each pairing starts in SAFE mode and TRUSTED must be enabled explicitly on the phone;
+- local approval remains the default for high-impact typed commands;
+- raw shell is a named TRUSTED-only capability rather than an accidental passthrough;
 - per-device credential revocation;
-- no generic shell endpoint;
 - tool allowlist enforced on device;
 - relay-supplied error messages are treated as untrusted; Android surfaces only fixed local text selected from an allowlisted protocol error code;
 - Android command-result errors cross the phone→relay boundary only as a bounded protocol-style code plus deterministic local text selected at the top-level command router; arbitrary local exception messages, system stderr, paths, URLs and backend detail are not forwarded;
@@ -78,21 +78,19 @@ A future fully remote approval mechanism must remain independently verifiable wh
 | MUTATING | delete file, uninstall app | Require approval |
 | PRIVILEGED | install APK, force-stop, permission changes | Require approval |
 | UI_CONTROL | tap, swipe, input text | Require approval / explicit session |
+| RAW_SHELL | arbitrary shell command as Android shell UID | Deny in SAFE; allow only in explicit TRUSTED mode |
 
-The user may later create narrower trust rules, but the shipped default remains conservative.
+Every new pairing starts in SAFE mode. TRUSTED is a persistent, pairing-scoped local grant and can be revoked by returning to SAFE or unpairing the agent.
 
-## Explicitly forbidden tool surface
+## Always-forbidden / separately gated surfaces
 
-These must not be exposed to any agent in V1:
+Even TRUSTED does not mean TypedDroid should silently automate Android lockscreen credentials. The following remain forbidden or require a separate future capability design:
 
-- `run_shell`;
-- arbitrary Intent sender;
-- arbitrary ContentResolver/content-URI reader/writer;
-- lockscreen PIN/password tool;
-- unrestricted root command;
-- arbitrary filesystem path outside allowed storage roots.
+- lockscreen PIN/password entry or extraction;
+- hidden credential theft/bypass;
+- implicit root escalation when the user has not separately granted a root backend.
 
-If an upstream dependency exposes one of these, TypedDroid must omit it from registration rather than relying on model instructions.
+SAFE mode additionally denies raw shell, arbitrary Intent/content-URI passthroughs and other generic full-control surfaces.
 
 ## Screen-capture boundary
 
