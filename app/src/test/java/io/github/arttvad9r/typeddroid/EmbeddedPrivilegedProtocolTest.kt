@@ -26,4 +26,24 @@ class EmbeddedPrivilegedProtocolTest {
         val bytes = byteArrayOf(0x7f, 0xff.toByte(), 0xff.toByte(), 0xff.toByte())
         EmbeddedPrivilegedProtocol.readRequest(ByteArrayInputStream(bytes))
     }
+    @Test
+    fun `typed privileged request fields round trip`() {
+        val request = EmbeddedPrivilegedRequest(
+            id = "typed-1",
+            operation = EmbeddedPrivilegedProtocol.OP_INSTALL_APK,
+            packageName = "com.example.app",
+            permissionName = "android.permission.CAMERA",
+            userId = 10,
+            keepData = true,
+            artifactSizeBytes = 123456,
+            artifactSha256 = "a".repeat(64),
+            replace = false,
+        )
+        val bytes = ByteArrayOutputStream().also {
+            EmbeddedPrivilegedProtocol.writeRequest(it, request)
+        }.toByteArray()
+
+        assertEquals(request, EmbeddedPrivilegedProtocol.readRequest(ByteArrayInputStream(bytes)))
+    }
+
 }

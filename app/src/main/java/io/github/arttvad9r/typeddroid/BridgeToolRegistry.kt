@@ -26,7 +26,7 @@ class BridgeToolRegistry(
     private val privilegedAppsBackend: PrivilegedAppsBackend = DisabledPrivilegedAppsBackend,
     private val apkArtifactRepository: ApkArtifactRepository? = null,
     private val apkPackageInspector: ApkPackageInspector? = null,
-    private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = ShizukuBatteryDiagnosticsBackend(),
+    private val batteryDiagnosticsBackend: BatteryDiagnosticsBackend = DisabledBatteryDiagnosticsBackend,
     private val appUsageRepository: AppUsageRepository? = null,
     private val rawShellBackend: RawShellBackend = DisabledRawShellBackend,
     private val agentTrustMode: () -> AgentTrustMode = { AgentTrustMode.SAFE },

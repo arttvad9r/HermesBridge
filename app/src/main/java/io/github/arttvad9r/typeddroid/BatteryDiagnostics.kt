@@ -1,7 +1,11 @@
 package io.github.arttvad9r.typeddroid
 
+import android.content.Context
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import java.util.PriorityQueue
 
@@ -249,6 +253,70 @@ interface BatteryDiagnosticsBackend {
     suspend fun readUsage(): BatteryDiagnosticsResult
 }
 
+class EmbeddedBatteryDiagnosticsBackend(context: Context) : BatteryDiagnosticsBackend {
+    private val store = EmbeddedPrivilegedStore(context)
+
+    override fun readiness(): PrivilegedBackendReadiness = embeddedHelperReadiness(store)
+
+    override suspend fun readUsage(): BatteryDiagnosticsResult = withContext(Dispatchers.IO) {
+        val socketName = store.socketName()
+            ?: return@withContext unavailableBatteryResult()
+        try {
+            val transport = EmbeddedPrivilegedClient(socketName).batteryStats()
+            if (transport.exitCode != 0) {
+                return@withContext BatteryDiagnosticsResult(
+                    ok = false,
+                    code = "battery_stats_failed",
+                    message = "Android batterystats command failed.",
+                )
+            }
+            if (transport.stdoutTruncated) {
+                return@withContext BatteryDiagnosticsResult(
+                    ok = false,
+                    code = "battery_stats_too_large",
+                    message = "Battery diagnostics exceeded the ${MAX_BATTERY_STATS_OUTPUT_BYTES / (1024 * 1024)} MiB safety limit.",
+                )
+            }
+            val text = transport.stdout.toString(Charsets.UTF_8)
+            val snapshot = try {
+                BatteryStatsCheckinParser.parse(text)
+            } catch (error: BatteryStatsParseException) {
+                return@withContext BatteryDiagnosticsResult(
+                    ok = false,
+                    code = "battery_stats_parse_failed",
+                    message = error.message ?: "Battery diagnostics could not be parsed.",
+                )
+            }
+            BatteryDiagnosticsResult(ok = true, snapshot = snapshot)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            runCatching(store::clear)
+            unavailableBatteryResult()
+        }
+    }
+
+    private fun unavailableBatteryResult() = BatteryDiagnosticsResult(
+        ok = false,
+        code = "embedded_privileged_unavailable",
+        message = "Restore full device access in TypedDroid before using battery diagnostics.",
+    )
+}
+
+object DisabledBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
+    override fun readiness() = PrivilegedBackendReadiness(
+        ready = false,
+        code = "embedded_privileged_unavailable",
+        message = "Battery diagnostics backend is not configured.",
+    )
+
+    override suspend fun readUsage() = BatteryDiagnosticsResult(
+        ok = false,
+        code = "embedded_privileged_unavailable",
+        message = "Battery diagnostics backend is not configured.",
+    )
+}
+
 class ShizukuBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
     override fun readiness(): PrivilegedBackendReadiness =
         ShizukuPrivilegedUserServiceClient.readiness()
@@ -327,17 +395,3 @@ internal const val MAX_BATTERY_STATS_OUTPUT_BYTES = 4 * 1024 * 1024
 
 internal fun buildBatteryStatsCommand(): Array<String> =
     arrayOf("dumpsys", "batterystats", "-c", "--charged")
-
-object DisabledBatteryDiagnosticsBackend : BatteryDiagnosticsBackend {
-    override fun readiness() = PrivilegedBackendReadiness(
-        ready = false,
-        code = "shizuku_unavailable",
-        message = "Battery diagnostics backend is not configured.",
-    )
-
-    override suspend fun readUsage() = BatteryDiagnosticsResult(
-        ok = false,
-        code = "shizuku_unavailable",
-        message = "Battery diagnostics backend is not configured.",
-    )
-}

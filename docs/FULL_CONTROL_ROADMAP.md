@@ -49,9 +49,9 @@ Goal: privileged access without requiring Shizuku.
   - [x] mDNS/NSD discovery for `_adb-tls-pairing._tcp` and `_adb-tls-connect._tcp`.
   - [ ] physical reconnect/lifecycle verification across reboot and OEM variants.
 - [ ] Finish shell execution lifecycle: output/packet/socket-time bounds and helper-side draining exist; cancellation still needs wiring.
-- [ ] Reimplement current privileged app tools on the embedded ADB backend.
-- [ ] Reimplement Batterystats diagnostics on embedded ADB.
-- [ ] Keep Shizuku only as a temporary fallback until parity tests pass.
+- [x] Reimplement current privileged app tools on the embedded ADB backend (install/uninstall/force-stop/permission revoke through the owned shell-UID helper; physical verification remains).
+- [x] Reimplement Batterystats diagnostics on the embedded ADB helper (physical verification remains).
+- [x] Remove Shizuku from the default runtime path; keep its code/dependency temporarily for physical parity comparison only.
 - [ ] Remove Shizuku dependency/provider/UI/recovery code after parity.
 
 Acceptance: a fresh phone with only TypedDroid installed can pair once through Android Wireless Debugging and perform the current privileged tool set without the Shizuku app.

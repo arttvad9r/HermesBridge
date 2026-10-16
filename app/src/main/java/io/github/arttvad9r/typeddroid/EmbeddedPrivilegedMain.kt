@@ -5,7 +5,11 @@ import android.net.LocalServerSocket
 import android.net.LocalSocket
 import android.os.Process
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
@@ -63,6 +67,11 @@ object EmbeddedPrivilegedMain {
             )
 
             EmbeddedPrivilegedProtocol.OP_EXEC -> execute(request)
+            EmbeddedPrivilegedProtocol.OP_INSTALL_APK -> installApk(request, socket.inputStream)
+            EmbeddedPrivilegedProtocol.OP_UNINSTALL_APP -> uninstallApp(request)
+            EmbeddedPrivilegedProtocol.OP_FORCE_STOP_APP -> forceStopApp(request)
+            EmbeddedPrivilegedProtocol.OP_REVOKE_PERMISSION -> revokePermission(request)
+            EmbeddedPrivilegedProtocol.OP_BATTERY_STATS -> batteryStats(request)
 
             EmbeddedPrivilegedProtocol.OP_SHUTDOWN -> EmbeddedPrivilegedResponse(
                 id = request.id,
@@ -89,24 +98,135 @@ object EmbeddedPrivilegedMain {
         if (timeout !in 1..EmbeddedPrivilegedProtocol.MAX_TIMEOUT_MILLIS) {
             return EmbeddedPrivilegedResponse(request.id, false, error = "Shell timeout is invalid.")
         }
+        return executeProcess(
+            requestId = request.id,
+            argv = arrayOf("/system/bin/sh", "-c", command),
+            timeoutMillis = timeout,
+            stdoutLimit = MAX_RETAINED_STREAM_BYTES,
+            stderrLimit = MAX_RETAINED_STREAM_BYTES,
+        )
+    }
 
-        val process = try {
-            ProcessBuilder("/system/bin/sh", "-c", command).start()
+    private fun installApk(
+        request: EmbeddedPrivilegedRequest,
+        input: java.io.InputStream,
+    ): EmbeddedPrivilegedResponse {
+        val size = request.artifactSizeBytes
+            ?.takeIf { it in 1..MAX_APK_ARTIFACT_BYTES }
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "APK size is invalid.")
+        val expectedSha = request.artifactSha256
+            ?.takeIf { SHA256_REGEX.matches(it) }
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "APK SHA-256 is invalid.")
+        val replace = request.replace ?: true
+        val staged = File("/data/local/tmp/typed-droid-${UUID.randomUUID()}.apk")
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var remaining = size
+            FileOutputStream(staged).buffered().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                while (remaining > 0) {
+                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (read < 0) error("APK stream ended before the declared size.")
+                    if (read == 0) continue
+                    digest.update(buffer, 0, read)
+                    output.write(buffer, 0, read)
+                    remaining -= read
+                }
+            }
+            check(staged.length() == size) { "Staged APK size mismatch." }
+            check(digest.digest().toHex() == expectedSha) { "Staged APK SHA-256 mismatch." }
+            executeProcess(
+                requestId = request.id,
+                argv = buildPmInstallCommand(staged.absolutePath, replace),
+                timeoutMillis = APK_INSTALL_TIMEOUT_MILLIS,
+                stdoutLimit = TYPED_COMMAND_OUTPUT_BYTES,
+                stderrLimit = TYPED_COMMAND_OUTPUT_BYTES,
+            )
         } catch (error: Throwable) {
-            return EmbeddedPrivilegedResponse(request.id, false, error = safeError(error))
+            EmbeddedPrivilegedResponse(request.id, false, error = safeError(error))
+        } finally {
+            runCatching { staged.delete() }
+        }
+    }
+
+    private fun uninstallApp(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val packageName = request.packageName
+            ?.takeIf(::isValidAndroidQualifiedName)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Package name is invalid.")
+        return executeProcess(
+            request.id,
+            buildPmUninstallCommand(packageName, request.keepData ?: false),
+            TYPED_COMMAND_TIMEOUT_MILLIS,
+            TYPED_COMMAND_OUTPUT_BYTES,
+            TYPED_COMMAND_OUTPUT_BYTES,
+        )
+    }
+
+    private fun forceStopApp(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val packageName = request.packageName
+            ?.takeIf(::isValidAndroidQualifiedName)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Package name is invalid.")
+        return executeProcess(
+            request.id,
+            buildAmForceStopCommand(packageName),
+            TYPED_COMMAND_TIMEOUT_MILLIS,
+            TYPED_COMMAND_OUTPUT_BYTES,
+            TYPED_COMMAND_OUTPUT_BYTES,
+        )
+    }
+
+    private fun revokePermission(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
+        val packageName = request.packageName
+            ?.takeIf(::isValidAndroidQualifiedName)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Package name is invalid.")
+        val permissionName = request.permissionName
+            ?.takeIf(::isValidAndroidQualifiedName)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Permission name is invalid.")
+        val userId = request.userId
+            ?.takeIf(::isSupportedAndroidUserId)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Android user ID is invalid.")
+        return executeProcess(
+            request.id,
+            buildPmRevokePermissionCommand(packageName, permissionName, userId),
+            TYPED_COMMAND_TIMEOUT_MILLIS,
+            TYPED_COMMAND_OUTPUT_BYTES,
+            TYPED_COMMAND_OUTPUT_BYTES,
+        )
+    }
+
+    private fun batteryStats(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse =
+        executeProcess(
+            request.id,
+            buildBatteryStatsCommand(),
+            BATTERY_STATS_TIMEOUT_MILLIS,
+            MAX_BATTERY_STATS_OUTPUT_BYTES,
+            TYPED_COMMAND_OUTPUT_BYTES,
+        )
+
+    private fun executeProcess(
+        requestId: String,
+        argv: Array<String>,
+        timeoutMillis: Long,
+        stdoutLimit: Int,
+        stderrLimit: Int,
+    ): EmbeddedPrivilegedResponse {
+        val process = try {
+            ProcessBuilder(*argv).start()
+        } catch (error: Throwable) {
+            return EmbeddedPrivilegedResponse(requestId, false, error = safeError(error))
         }
         runCatching { process.outputStream.close() }
         val executor = Executors.newFixedThreadPool(2)
         return try {
-            val stdoutFuture = executor.submit<CapturedOutput> { process.inputStream.use(::readBounded) }
-            val stderrFuture = executor.submit<CapturedOutput> { process.errorStream.use(::readBounded) }
-            val finished = process.waitFor(timeout, TimeUnit.MILLISECONDS)
+            val stdoutFuture = executor.submit<CapturedOutput> { process.inputStream.use { readBounded(it, stdoutLimit) } }
+            val stderrFuture = executor.submit<CapturedOutput> { process.errorStream.use { readBounded(it, stderrLimit) } }
+            val finished = process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
             if (!finished) {
                 process.destroyForcibly()
                 stdoutFuture.cancel(true)
                 stderrFuture.cancel(true)
                 EmbeddedPrivilegedResponse(
-                    id = request.id,
+                    id = requestId,
                     ok = false,
                     timedOut = true,
                     error = "Privileged command timed out.",
@@ -115,7 +235,7 @@ object EmbeddedPrivilegedMain {
                 val stdout = stdoutFuture.get()
                 val stderr = stderrFuture.get()
                 EmbeddedPrivilegedResponse(
-                    id = request.id,
+                    id = requestId,
                     ok = true,
                     exitCode = process.exitValue(),
                     stdoutBase64 = Base64.getEncoder().encodeToString(stdout.bytes),
@@ -126,21 +246,22 @@ object EmbeddedPrivilegedMain {
             }
         } catch (error: Throwable) {
             runCatching { process.destroyForcibly() }
-            EmbeddedPrivilegedResponse(request.id, false, error = safeError(error))
+            EmbeddedPrivilegedResponse(requestId, false, error = safeError(error))
         } finally {
             executor.shutdownNow()
         }
     }
 
-    private fun readBounded(input: java.io.InputStream): CapturedOutput {
-        val output = ByteArrayOutputStream(MAX_RETAINED_STREAM_BYTES)
+    private fun readBounded(input: java.io.InputStream, limitBytes: Int): CapturedOutput {
+        require(limitBytes > 0)
+        val output = ByteArrayOutputStream(minOf(limitBytes, 64 * 1024))
         val buffer = ByteArray(16 * 1024)
         var retained = 0
         var truncated = false
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
-            val keep = minOf(count, MAX_RETAINED_STREAM_BYTES - retained)
+            val keep = minOf(count, limitBytes - retained)
             if (keep > 0) {
                 output.write(buffer, 0, keep)
                 retained += keep
@@ -173,8 +294,14 @@ object EmbeddedPrivilegedMain {
     private data class Config(val socketName: String, val appUid: Int)
 
     private const val DEFAULT_TIMEOUT_MILLIS = 30_000L
-    // Two base64-encoded streams at this cap remain below the 2 MiB RPC frame limit.
+    // Raw-shell stdout/stderr remain bounded well below the privileged RPC frame limit.
     private const val MAX_RETAINED_STREAM_BYTES = 384 * 1024
-    private const val MAX_COMMAND_OUTPUT_BYTES = 512 * 1024
+    private const val TYPED_COMMAND_OUTPUT_BYTES = 64 * 1024
+    private const val TYPED_COMMAND_TIMEOUT_MILLIS = 30_000L
+    private const val APK_INSTALL_TIMEOUT_MILLIS = 5 * 60 * 1000L
+    private const val BATTERY_STATS_TIMEOUT_MILLIS = 30_000L
+    private val SHA256_REGEX = Regex("^[0-9a-f]{64}$")
     private val SOCKET_NAME = Regex("^typeddroid-[a-f0-9]{32}$")
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+
 }

@@ -15,6 +15,13 @@ internal data class EmbeddedPrivilegedRequest(
     val operation: String,
     val command: String? = null,
     val timeoutMillis: Long? = null,
+    val packageName: String? = null,
+    val permissionName: String? = null,
+    val userId: Int? = null,
+    val keepData: Boolean? = null,
+    val artifactSizeBytes: Long? = null,
+    val artifactSha256: String? = null,
+    val replace: Boolean? = null,
 )
 
 @Serializable
@@ -34,7 +41,13 @@ internal object EmbeddedPrivilegedProtocol {
     const val OP_PING = "ping"
     const val OP_EXEC = "exec"
     const val OP_SHUTDOWN = "shutdown"
-    const val MAX_FRAME_BYTES = 2 * 1024 * 1024
+    const val OP_INSTALL_APK = "install_apk"
+    const val OP_UNINSTALL_APP = "uninstall_app"
+    const val OP_FORCE_STOP_APP = "force_stop_app"
+    const val OP_REVOKE_PERMISSION = "revoke_permission"
+    const val OP_BATTERY_STATS = "battery_stats"
+    // Batterystats may retain up to 4 MiB before base64 encoding into the response frame.
+    const val MAX_FRAME_BYTES = 8 * 1024 * 1024
     const val MAX_COMMAND_BYTES = 64 * 1024
     const val MAX_TIMEOUT_MILLIS = 5 * 60 * 1000L
 
