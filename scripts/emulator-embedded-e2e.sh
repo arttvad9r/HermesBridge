@@ -32,7 +32,7 @@ probe() {
 cleanup() {
   probe shutdown >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" uninstall "$FIXTURE" >/dev/null 2>&1 || true
-  rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt /tmp/typeddroid-e2e-setting.txt /tmp/typeddroid-e2e-appops.txt /tmp/typeddroid-e2e-processes.txt /tmp/typeddroid-e2e-logcat.txt
+  rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt /tmp/typeddroid-e2e-setting.txt /tmp/typeddroid-e2e-appops.txt /tmp/typeddroid-e2e-processes.txt /tmp/typeddroid-e2e-logcat.txt /tmp/typeddroid-e2e-fs-stat.txt /tmp/typeddroid-e2e-fs-list.txt /tmp/typeddroid-e2e-fs-read.txt
 }
 trap cleanup EXIT
 "$ADB" -s "$SERIAL" shell "pkill -f EmbeddedPrivilegedMain 2>/dev/null || true" >/dev/null 2>&1 || true
@@ -135,6 +135,33 @@ probe exec 10000 am start -W -n "$FIXTURE/.MainActivity" | grep -q '^exitCode=0$
 sleep .3
 [[ -n $("$ADB" -s "$SERIAL" shell pidof "$FIXTURE" || true) ]]
 echo "PASS structured activity start command"
+
+# Toybox primitives used by the TRUSTED typed fs.* layer.
+probe exec 5000 mkdir -p /data/local/tmp/typeddroid-fs-e2e/subdir | grep -q '^exitCode=0$'
+FS_PAYLOAD=$(printf 'TypedDroid file E2E' | base64 -w0)
+probe exec 5000 "printf '%s' '$FS_PAYLOAD' | base64 -d > '/data/local/tmp/typeddroid-fs-e2e/a file.txt'" | grep -q '^exitCode=0$'
+probe exec 5000 "stat -c '%F|%s|%Y' '/data/local/tmp/typeddroid-fs-e2e/a file.txt'" > /tmp/typeddroid-e2e-fs-stat.txt
+probe exec 5000 "find '/data/local/tmp/typeddroid-fs-e2e' -mindepth 1 -maxdepth 1 -print0" > /tmp/typeddroid-e2e-fs-list.txt
+probe exec 5000 "dd if='/data/local/tmp/typeddroid-fs-e2e/a file.txt' bs=1 skip=0 count=128" > /tmp/typeddroid-e2e-fs-read.txt
+python3 - <<'PYFS'
+import base64
+def read(path):
+    v={}
+    for line in open(path):
+        k, _, x=line.rstrip('\n').partition('='); v[k]=x
+    assert v['exitCode']=='0'
+    return base64.b64decode(v['stdoutBase64'])
+stat=read('/tmp/typeddroid-e2e-fs-stat.txt').decode().strip()
+assert stat.startswith('regular file|19|'), stat
+listing=read('/tmp/typeddroid-e2e-fs-list.txt')
+assert b'a file.txt\x00' in listing and b'subdir\x00' in listing
+assert read('/tmp/typeddroid-e2e-fs-read.txt') == b'TypedDroid file E2E'
+PYFS
+probe exec 5000 "cp -f '/data/local/tmp/typeddroid-fs-e2e/a file.txt' '/data/local/tmp/typeddroid-fs-e2e/copy.txt'" | grep -q '^exitCode=0$'
+probe exec 5000 "mv -f '/data/local/tmp/typeddroid-fs-e2e/copy.txt' '/data/local/tmp/typeddroid-fs-e2e/moved.txt'" | grep -q '^exitCode=0$'
+probe exec 5000 "rm -f '/data/local/tmp/typeddroid-fs-e2e/moved.txt'" | grep -q '^exitCode=0$'
+[[ -z $("$ADB" -s "$SERIAL" shell 'test -e /data/local/tmp/typeddroid-fs-e2e/moved.txt && echo exists' || true) ]]
+echo "PASS trusted filesystem primitives"
 
 probe open-app "$FIXTURE" | grep -q '^exitCode=0$'
 sleep .5

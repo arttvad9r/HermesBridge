@@ -21,6 +21,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import java.util.Base64
+import java.nio.file.Paths
 import kotlinx.serialization.json.put
 
 class BridgeToolRegistry(
@@ -57,6 +58,15 @@ class BridgeToolRegistry(
             APPOPS_SET -> executeAppOpsSet(request)
             PROCESS_LIST -> executeProcessList(request)
             LOGCAT_READ -> executeLogcatRead(request)
+            FS_STAT -> executeFsStat(request)
+            FS_LIST -> executeFsList(request)
+            FS_READ -> executeFsRead(request)
+            FS_WRITE -> executeFsWrite(request)
+            FS_MKDIR -> executeFsMkdir(request)
+            FS_COPY -> executeFsCopy(request)
+            FS_MOVE -> executeFsMove(request)
+            FS_DELETE -> executeFsDelete(request)
+            FS_SEARCH -> executeFsSearch(request)
             UI_HIERARCHY -> executeUiHierarchy(request)
             UI_SCREENSHOT -> executeUiScreenshot(request)
             UI_TAP -> executeUiTap(request)
@@ -127,7 +137,8 @@ class BridgeToolRegistry(
                     buildJsonArray {
                         listOf(
                             APPS_OPEN, ACTIVITY_START, SETTINGS_GET, SETTINGS_PUT, APPOPS_GET, APPOPS_SET,
-                            PROCESS_LIST, LOGCAT_READ, UI_HIERARCHY, UI_SCREENSHOT, UI_TAP, UI_SWIPE,
+                            PROCESS_LIST, LOGCAT_READ, FS_STAT, FS_LIST, FS_READ, FS_WRITE, FS_MKDIR,
+                            FS_COPY, FS_MOVE, FS_DELETE, FS_SEARCH, UI_HIERARCHY, UI_SCREENSHOT, UI_TAP, UI_SWIPE,
                             UI_LONG_PRESS, UI_WAIT_FOR_TEXT, UI_TEXT, UI_KEY, SHELL_RUN,
                         ).forEach { add(JsonPrimitive(it)) }
                     },
@@ -897,6 +908,271 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeFsStat(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(PATH)) {
+            return failure(request.requestId, "invalid_arguments", "fs.stat requires path.")
+        }
+        val path = trustedPath(request, PATH) ?: return trustedFileArgumentFailure(request)
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(listOf("stat", "-c", "%F|%s|%Y", path), TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "fs_stat_failed")?.let { return it }
+        val lines = result.stdout.decodeToString().trimEnd().split('|', limit = 3)
+        if (lines.size != 3) return failure(request.requestId, "fs_stat_failed", "Android returned malformed file metadata.")
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PATH, path)
+                put("type", lines[0])
+                put("sizeBytes", lines[1].toLongOrNull() ?: -1L)
+                put("modifiedEpochSeconds", lines[2].toLongOrNull() ?: -1L)
+            },
+        )
+    }
+
+    private suspend fun executeFsList(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(PATH)) {
+            return failure(request.requestId, "invalid_arguments", "fs.list requires path.")
+        }
+        val path = trustedPath(request, PATH) ?: return trustedFileArgumentFailure(request)
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(
+            listOf("find", path, "-mindepth", "1", "-maxdepth", "1", "-print0"),
+            TRUSTED_COMMAND_TIMEOUT_MILLIS,
+        )
+        trustedCommandFailure(request, result, "fs_list_failed")?.let { return it }
+        val paths = parseNullSeparatedPaths(result.stdout)
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PATH, path)
+                put("entries", buildJsonArray {
+                    paths.take(MAX_FS_RESULTS).forEach { child ->
+                        add(buildJsonObject {
+                            put("name", child.substringAfterLast('/'))
+                            put(PATH, child)
+                        })
+                    }
+                })
+                put("truncated", result.stdoutTruncated || paths.size > MAX_FS_RESULTS)
+            },
+        )
+    }
+
+    private suspend fun executeFsRead(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(PATH, OFFSET, MAX_BYTES)
+        if (request.arguments.keys.any { it !in allowed } || PATH !in request.arguments) {
+            return failure(request.requestId, "invalid_arguments", "fs.read requires path and optional offset/maxBytes.")
+        }
+        val path = trustedPath(request, PATH) ?: return trustedFileArgumentFailure(request)
+        val offset = parseLongArgument(request, OFFSET, 0L..MAX_FS_OFFSET) ?: if (OFFSET in request.arguments) return trustedFileArgumentFailure(request) else 0L
+        val maxBytes = parseIntArgument(request, MAX_BYTES, 1..MAX_FS_READ_BYTES)
+            ?: if (MAX_BYTES in request.arguments) return trustedFileArgumentFailure(request) else DEFAULT_FS_READ_BYTES
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(
+            listOf("dd", "if=$path", "bs=1", "skip=$offset", "count=$maxBytes"),
+            TRUSTED_COMMAND_TIMEOUT_MILLIS,
+        )
+        trustedCommandFailure(request, result, "fs_read_failed")?.let { return it }
+        val bytes = result.stdout.take(MAX_FS_READ_BYTES).toByteArray()
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PATH, path)
+                put(OFFSET, offset)
+                put("bytesRead", bytes.size)
+                put("nextOffset", offset + bytes.size)
+                put("base64", Base64.getEncoder().encodeToString(bytes))
+                put("morePossible", bytes.size == maxBytes || result.stdoutTruncated)
+            },
+        )
+    }
+
+    private suspend fun executeFsWrite(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(PATH, DATA_BASE64, OFFSET, TRUNCATE, CREATE_PARENTS)
+        if (request.arguments.keys.any { it !in allowed } || !request.arguments.keys.containsAll(setOf(PATH, DATA_BASE64))) {
+            return failure(request.requestId, "invalid_arguments", "fs.write requires path and dataBase64 with optional offset/truncate/createParents.")
+        }
+        val path = trustedPath(request, PATH, mutation = true) ?: return trustedFileArgumentFailure(request)
+        val encoded = stringArgument(request, DATA_BASE64, MAX_FS_WRITE_BASE64_BYTES, allowEmpty = true)
+            ?: return trustedFileArgumentFailure(request)
+        val bytes = runCatching { Base64.getDecoder().decode(encoded) }.getOrNull()
+            ?.takeIf { it.size <= MAX_FS_WRITE_BYTES }
+            ?: return trustedFileArgumentFailure(request)
+        val canonicalBase64 = Base64.getEncoder().encodeToString(bytes)
+        val offset = parseLongArgument(request, OFFSET, 0L..MAX_FS_OFFSET) ?: if (OFFSET in request.arguments) return trustedFileArgumentFailure(request) else 0L
+        val truncate = booleanArgument(request, TRUNCATE) ?: if (TRUNCATE in request.arguments) return trustedFileArgumentFailure(request) else offset == 0L
+        val createParents = booleanArgument(request, CREATE_PARENTS) ?: if (CREATE_PARENTS in request.arguments) return trustedFileArgumentFailure(request) else false
+        if (truncate && offset != 0L) return trustedFileArgumentFailure(request)
+        requireTrustedControl(request)?.let { return it }
+        val parent = Paths.get(path).parent?.toString()
+        val prefix = if (createParents && parent != null) "mkdir -p ${shellQuote(parent)} && " else ""
+        val decode = "printf '%s' ${shellQuote(canonicalBase64)} | base64 -d"
+        val command = if (truncate) {
+            "$prefix$decode > ${shellQuote(path)}"
+        } else {
+            "$prefix$decode | dd of=${shellQuote(path)} bs=1 seek=$offset conv=notrunc 2>/dev/null"
+        }
+        val result = rawShellBackend.execute(command, TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "fs_write_failed")?.let { return it }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PATH, path)
+                put("bytesWritten", bytes.size)
+                put(OFFSET, offset)
+                put(TRUNCATE, truncate)
+            },
+        )
+    }
+
+    private suspend fun executeFsMkdir(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(PATH, PARENTS)
+        if (request.arguments.keys.any { it !in allowed } || PATH !in request.arguments) {
+            return failure(request.requestId, "invalid_arguments", "fs.mkdir requires path and optional parents.")
+        }
+        val path = trustedPath(request, PATH, mutation = true) ?: return trustedFileArgumentFailure(request)
+        val parents = booleanArgument(request, PARENTS) ?: if (PARENTS in request.arguments) return trustedFileArgumentFailure(request) else true
+        requireTrustedControl(request)?.let { return it }
+        val argv = if (parents) listOf("mkdir", "-p", path) else listOf("mkdir", path)
+        val result = executeTrustedArgv(argv, TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "fs_mkdir_failed")?.let { return it }
+        return simpleFileActionResult(request, path, "created")
+    }
+
+    private suspend fun executeFsCopy(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(SOURCE_PATH, DESTINATION_PATH, RECURSIVE)
+        if (request.arguments.keys.any { it !in allowed } || !request.arguments.keys.containsAll(setOf(SOURCE_PATH, DESTINATION_PATH))) {
+            return failure(request.requestId, "invalid_arguments", "fs.copy requires sourcePath and destinationPath with optional recursive.")
+        }
+        val source = trustedPath(request, SOURCE_PATH) ?: return trustedFileArgumentFailure(request)
+        val destination = trustedPath(request, DESTINATION_PATH, mutation = true) ?: return trustedFileArgumentFailure(request)
+        val recursive = booleanArgument(request, RECURSIVE) ?: if (RECURSIVE in request.arguments) return trustedFileArgumentFailure(request) else false
+        requireTrustedControl(request)?.let { return it }
+        val argv = buildList { add("cp"); if (recursive) add("-R"); add("-f"); add(source); add(destination) }
+        val result = executeTrustedArgv(argv, TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "fs_copy_failed")?.let { return it }
+        return CommandResultPayload(requestId = request.requestId, ok = true, result = buildJsonObject {
+            put(SOURCE_PATH, source); put(DESTINATION_PATH, destination); put("copied", true)
+        })
+    }
+
+    private suspend fun executeFsMove(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(SOURCE_PATH, DESTINATION_PATH)) {
+            return failure(request.requestId, "invalid_arguments", "fs.move requires sourcePath and destinationPath.")
+        }
+        val source = trustedPath(request, SOURCE_PATH, mutation = true) ?: return trustedFileArgumentFailure(request)
+        val destination = trustedPath(request, DESTINATION_PATH, mutation = true) ?: return trustedFileArgumentFailure(request)
+        if (source in TRUSTED_MUTATION_ROOTS) {
+            return failure(request.requestId, "protected_path", "Typed fs.move refuses to move a mutation root itself.")
+        }
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(listOf("mv", "-f", source, destination), TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "fs_move_failed")?.let { return it }
+        return CommandResultPayload(requestId = request.requestId, ok = true, result = buildJsonObject {
+            put(SOURCE_PATH, source); put(DESTINATION_PATH, destination); put("moved", true)
+        })
+    }
+
+    private suspend fun executeFsDelete(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(PATH, RECURSIVE)
+        if (request.arguments.keys.any { it !in allowed } || PATH !in request.arguments) {
+            return failure(request.requestId, "invalid_arguments", "fs.delete requires path and optional recursive.")
+        }
+        val path = trustedPath(request, PATH, mutation = true) ?: return trustedFileArgumentFailure(request)
+        if (path in TRUSTED_MUTATION_ROOTS) {
+            return failure(request.requestId, "protected_path", "Typed fs.delete refuses to delete a mutation root itself.")
+        }
+        val recursive = booleanArgument(request, RECURSIVE) ?: if (RECURSIVE in request.arguments) return trustedFileArgumentFailure(request) else false
+        requireTrustedControl(request)?.let { return it }
+        val argv = if (recursive) listOf("rm", "-rf", path) else listOf("rm", "-f", path)
+        val result = executeTrustedArgv(argv, TRUSTED_COMMAND_TIMEOUT_MILLIS)
+        trustedCommandFailure(request, result, "fs_delete_failed")?.let { return it }
+        return simpleFileActionResult(request, path, "deleted")
+    }
+
+    private suspend fun executeFsSearch(request: CommandRequestPayload): CommandResultPayload {
+        val allowed = setOf(PATH, QUERY, MAX_DEPTH)
+        if (request.arguments.keys.any { it !in allowed } || !request.arguments.keys.containsAll(setOf(PATH, QUERY))) {
+            return failure(request.requestId, "invalid_arguments", "fs.search requires path and query with optional maxDepth.")
+        }
+        val path = trustedPath(request, PATH) ?: return trustedFileArgumentFailure(request)
+        val query = stringArgument(request, QUERY, MAX_FS_QUERY_BYTES) ?: return trustedFileArgumentFailure(request)
+        val depth = parseIntArgument(request, MAX_DEPTH, 1..MAX_FS_SEARCH_DEPTH)
+            ?: if (MAX_DEPTH in request.arguments) return trustedFileArgumentFailure(request) else DEFAULT_FS_SEARCH_DEPTH
+        requireTrustedControl(request)?.let { return it }
+        val result = executeTrustedArgv(
+            listOf("find", path, "-mindepth", "1", "-maxdepth", depth.toString(), "-print0"),
+            TRUSTED_COMMAND_TIMEOUT_MILLIS,
+        )
+        trustedCommandFailure(request, result, "fs_search_failed")?.let { return it }
+        val matches = parseNullSeparatedPaths(result.stdout).filter {
+            it.substringAfterLast('/').contains(query, ignoreCase = true)
+        }
+        return CommandResultPayload(
+            requestId = request.requestId,
+            ok = true,
+            result = buildJsonObject {
+                put(PATH, path)
+                put(QUERY, query)
+                put("matches", buildJsonArray {
+                    matches.take(MAX_FS_RESULTS).forEach { found ->
+                        add(buildJsonObject { put("name", found.substringAfterLast('/')); put(PATH, found) })
+                    }
+                })
+                put("truncated", result.stdoutTruncated || matches.size > MAX_FS_RESULTS)
+            },
+        )
+    }
+
+    private fun trustedPath(request: CommandRequestPayload, key: String, mutation: Boolean = false): String? {
+        val raw = stringArgument(request, key, MAX_FS_PATH_BYTES) ?: return null
+        if (!raw.startsWith('/') || '\n' in raw || '\r' in raw) return null
+        val normalized = runCatching { Paths.get(raw).normalize().toString() }.getOrNull() ?: return null
+        if (!normalized.startsWith('/')) return null
+        if (mutation && TRUSTED_MUTATION_ROOTS.none { normalized == it || normalized.startsWith("$it/") }) return null
+        return normalized
+    }
+
+    private fun parseNullSeparatedPaths(bytes: ByteArray): List<String> = bytes
+        .splitOnZero()
+        .mapNotNull { runCatching { it.decodeToString(throwOnInvalidSequence = true) }.getOrNull() }
+        .filter { it.startsWith('/') && it.encodeToByteArray().size <= MAX_FS_PATH_BYTES }
+
+    private fun ByteArray.splitOnZero(): List<ByteArray> {
+        if (isEmpty()) return emptyList()
+        val result = mutableListOf<ByteArray>()
+        var start = 0
+        for (index in indices) {
+            if (this[index].toInt() == 0) {
+                if (index > start) result += copyOfRange(start, index)
+                start = index + 1
+            }
+        }
+        if (start < size) result += copyOfRange(start, size)
+        return result
+    }
+
+    private fun parseLongArgument(request: CommandRequestPayload, key: String, range: LongRange): Long? =
+        (request.arguments[key] as? JsonPrimitive)?.longOrNull?.takeIf { it in range }
+
+    private fun parseIntArgument(request: CommandRequestPayload, key: String, range: IntRange): Int? =
+        (request.arguments[key] as? JsonPrimitive)?.intOrNull?.takeIf { it in range }
+
+    private fun booleanArgument(request: CommandRequestPayload, key: String): Boolean? =
+        (request.arguments[key] as? JsonPrimitive)?.booleanOrNull
+
+    private fun trustedFileArgumentFailure(request: CommandRequestPayload) =
+        failure(request.requestId, "invalid_arguments", "Trusted filesystem arguments are invalid or outside supported bounds.")
+
+    private fun simpleFileActionResult(request: CommandRequestPayload, path: String, flag: String) =
+        CommandResultPayload(requestId = request.requestId, ok = true, result = buildJsonObject {
+            put(PATH, path); put(flag, true)
+        })
+
     private suspend fun executeUiHierarchy(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.isNotEmpty()) {
             return failure(request.requestId, "invalid_arguments", "ui.hierarchy does not accept arguments.")
@@ -1381,6 +1657,15 @@ class BridgeToolRegistry(
         const val APPOPS_SET = "appops.set"
         const val PROCESS_LIST = "process.list"
         const val LOGCAT_READ = "logcat.read"
+        const val FS_STAT = "fs.stat"
+        const val FS_LIST = "fs.list"
+        const val FS_READ = "fs.read"
+        const val FS_WRITE = "fs.write"
+        const val FS_MKDIR = "fs.mkdir"
+        const val FS_COPY = "fs.copy"
+        const val FS_MOVE = "fs.move"
+        const val FS_DELETE = "fs.delete"
+        const val FS_SEARCH = "fs.search"
         const val UI_HIERARCHY = "ui.hierarchy"
         const val UI_SCREENSHOT = "ui.screenshot"
         const val UI_TAP = "ui.tap"
@@ -1428,6 +1713,18 @@ class BridgeToolRegistry(
         private const val LINES = "lines"
         private const val BUFFER = "buffer"
         private const val CASE_SENSITIVE = "caseSensitive"
+        private const val PATH = "path"
+        private const val SOURCE_PATH = "sourcePath"
+        private const val DESTINATION_PATH = "destinationPath"
+        private const val DATA_BASE64 = "dataBase64"
+        private const val OFFSET = "offset"
+        private const val MAX_BYTES = "maxBytes"
+        private const val TRUNCATE = "truncate"
+        private const val CREATE_PARENTS = "createParents"
+        private const val PARENTS = "parents"
+        private const val RECURSIVE = "recursive"
+        private const val QUERY = "query"
+        private const val MAX_DEPTH = "maxDepth"
         private const val PATH_SEGMENTS = "pathSegments"
         private const val PACKAGE_NAME = "packageName"
         private const val KEEP_DATA = "keepData"
@@ -1454,6 +1751,17 @@ class BridgeToolRegistry(
         private const val MAX_APP_OP_NAME_BYTES = 80
         private const val MAX_TRUSTED_ERROR_CHARS = 300
         private const val MAX_TRUSTED_TEXT_RESULT_CHARS = 4_000
+        private const val MAX_FS_PATH_BYTES = 512
+        private const val MAX_FS_READ_BYTES = 128 * 1024
+        private const val DEFAULT_FS_READ_BYTES = 64 * 1024
+        private const val MAX_FS_WRITE_BYTES = 32 * 1024
+        private const val MAX_FS_WRITE_BASE64_BYTES = 44 * 1024
+        private const val MAX_FS_QUERY_BYTES = 256
+        private const val MAX_FS_RESULTS = 100
+        private const val MAX_FS_SEARCH_DEPTH = 10
+        private const val DEFAULT_FS_SEARCH_DEPTH = 4
+        private const val MAX_FS_OFFSET = 1L shl 40
+        private val TRUSTED_MUTATION_ROOTS = setOf("/sdcard", "/storage/emulated/0", "/data/local/tmp")
         private val SETTINGS_NAMESPACES = setOf("system", "secure", "global")
         private val APP_OP_MODES = setOf("allow", "ignore", "deny", "default", "foreground")
         private val LOGCAT_BUFFERS = setOf("main", "system", "events", "crash", "radio", "all")

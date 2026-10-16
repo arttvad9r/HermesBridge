@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import posixpath
 import http.client
 import json
 import os
@@ -50,6 +52,14 @@ MAX_DATA_URI_BYTES = 2 * 1024
 MAX_APP_OP_NAME_BYTES = 80
 MAX_LOGCAT_LINES = 500
 DEFAULT_LOGCAT_LINES = 100
+MAX_FS_PATH_BYTES = 512
+MAX_FS_READ_BYTES = 128 * 1024
+DEFAULT_FS_READ_BYTES = 64 * 1024
+MAX_FS_WRITE_BYTES = 32 * 1024
+MAX_FS_SEARCH_DEPTH = 10
+DEFAULT_FS_SEARCH_DEPTH = 4
+MAX_FS_QUERY_BYTES = 256
+MAX_FS_OFFSET = 1 << 40
 SETTINGS_NAMESPACES = {"system", "secure", "global"}
 APP_OP_MODES = {"allow", "ignore", "deny", "default", "foreground"}
 LOGCAT_BUFFERS = {"main", "system", "events", "crash", "radio", "all"}
@@ -694,6 +704,170 @@ def logcat_read(device_id: str, lines: int = DEFAULT_LOGCAT_LINES, buffer: str =
         "logcat.read",
         {"lines": line_count, "buffer": buffer.lower()},
         timeout=45,
+    )
+
+
+def _fs_path(path: str) -> str:
+    value = _bounded_string("path", path, MAX_FS_PATH_BYTES)
+    if not value.startswith("/") or "\n" in value or "\r" in value:
+        raise ValueError("path must be an absolute Android path without control characters.")
+    normalized = posixpath.normpath(value)
+    if not normalized.startswith("/"):
+        raise ValueError("path must remain absolute after normalization.")
+    return normalized
+
+
+@mcp.tool()
+def fs_stat(device_id: str, path: str) -> dict[str, Any]:
+    """Read metadata for one shell-visible absolute Android path on a Trusted phone."""
+    return _device_command(device_id, "fs.stat", {"path": _fs_path(path)})
+
+
+@mcp.tool()
+def fs_list(device_id: str, path: str) -> dict[str, Any]:
+    """List bounded direct children of one shell-visible Android directory on a Trusted phone."""
+    return _device_command(device_id, "fs.list", {"path": _fs_path(path)}, timeout=30)
+
+
+@mcp.tool()
+def fs_read(
+    device_id: str,
+    path: str,
+    offset: int = 0,
+    max_bytes: int = DEFAULT_FS_READ_BYTES,
+) -> dict[str, Any]:
+    """Read a bounded binary chunk from a shell-visible Android file. Data is returned as base64."""
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= MAX_FS_OFFSET:
+        raise ValueError("offset is outside the supported range.")
+    size = _ui_int("max_bytes", max_bytes, 1, MAX_FS_READ_BYTES)
+    return _device_command(
+        device_id,
+        "fs.read",
+        {"path": _fs_path(path), "offset": offset, "maxBytes": size},
+        timeout=45,
+    )
+
+
+@mcp.tool()
+def fs_write(
+    device_id: str,
+    path: str,
+    data_base64: str,
+    offset: int = 0,
+    truncate: bool | None = None,
+    create_parents: bool = False,
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Write one <=32 KiB binary chunk to trusted mutable Android storage. Reuse idempotency_key for exact retries."""
+    if not isinstance(data_base64, str):
+        raise ValueError("data_base64 must be a string.")
+    try:
+        decoded = base64.b64decode(data_base64, validate=True)
+    except Exception as exc:
+        raise ValueError("data_base64 is not valid base64.") from exc
+    if len(decoded) > MAX_FS_WRITE_BYTES:
+        raise ValueError(f"decoded data must be at most {MAX_FS_WRITE_BYTES} bytes.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= MAX_FS_OFFSET:
+        raise ValueError("offset is outside the supported range.")
+    if truncate is not None and not isinstance(truncate, bool):
+        raise ValueError("truncate must be a boolean or null.")
+    if truncate is True and offset != 0:
+        raise ValueError("truncate=true requires offset=0.")
+    if not isinstance(create_parents, bool):
+        raise ValueError("create_parents must be a boolean.")
+    args: dict[str, Any] = {
+        "path": _fs_path(path),
+        "dataBase64": base64.b64encode(decoded).decode("ascii"),
+        "offset": offset,
+        "createParents": create_parents,
+    }
+    if truncate is not None:
+        args["truncate"] = truncate
+    return _device_command(device_id, "fs.write", args, timeout=45, **_idempotency_kwargs(idempotency_key))
+
+
+@mcp.tool()
+def fs_mkdir(
+    device_id: str,
+    path: str,
+    parents: bool = True,
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Create a directory in trusted mutable Android storage."""
+    if not isinstance(parents, bool):
+        raise ValueError("parents must be a boolean.")
+    return _device_command(
+        device_id, "fs.mkdir", {"path": _fs_path(path), "parents": parents},
+        **_idempotency_kwargs(idempotency_key),
+    )
+
+
+@mcp.tool()
+def fs_copy(
+    device_id: str,
+    source_path: str,
+    destination_path: str,
+    recursive: bool = False,
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Copy a shell-visible file/directory into trusted mutable Android storage."""
+    if not isinstance(recursive, bool):
+        raise ValueError("recursive must be a boolean.")
+    return _device_command(
+        device_id, "fs.copy",
+        {"sourcePath": _fs_path(source_path), "destinationPath": _fs_path(destination_path), "recursive": recursive},
+        timeout=75, **_idempotency_kwargs(idempotency_key),
+    )
+
+
+@mcp.tool()
+def fs_move(
+    device_id: str,
+    source_path: str,
+    destination_path: str,
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Move/rename a path inside trusted mutable Android storage."""
+    return _device_command(
+        device_id, "fs.move",
+        {"sourcePath": _fs_path(source_path), "destinationPath": _fs_path(destination_path)},
+        timeout=75, **_idempotency_kwargs(idempotency_key),
+    )
+
+
+@mcp.tool()
+def fs_delete(
+    device_id: str,
+    path: str,
+    recursive: bool = False,
+    *,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Delete a path from trusted mutable Android storage. Mutation roots themselves are protected."""
+    if not isinstance(recursive, bool):
+        raise ValueError("recursive must be a boolean.")
+    return _device_command(
+        device_id, "fs.delete", {"path": _fs_path(path), "recursive": recursive},
+        timeout=75, **_idempotency_kwargs(idempotency_key),
+    )
+
+
+@mcp.tool()
+def fs_search(
+    device_id: str,
+    path: str,
+    query: str,
+    max_depth: int = DEFAULT_FS_SEARCH_DEPTH,
+) -> dict[str, Any]:
+    """Search bounded shell-visible paths by case-insensitive file name on a Trusted phone."""
+    search = _bounded_string("query", query, MAX_FS_QUERY_BYTES)
+    depth = _ui_int("max_depth", max_depth, 1, MAX_FS_SEARCH_DEPTH)
+    return _device_command(
+        device_id, "fs.search", {"path": _fs_path(path), "query": search, "maxDepth": depth}, timeout=45,
     )
 
 

@@ -194,13 +194,17 @@ The same TRUSTED boundary also exposes structured convenience tools so agents do
 - `appops_get(...)` / `appops_set(...)` → `appops.get` / `appops.set`;
 - `process_list(device_id)` → `process.list`;
 - `logcat_read(device_id, lines=100, buffer="main")` → `logcat.read`;
+- `fs_stat` / `fs_list` / `fs_read` / `fs_search` for shell-visible absolute paths;
+- `fs_write` / `fs_mkdir` / `fs_copy` / `fs_move` / `fs_delete` for trusted mutable roots (`/sdcard`, `/storage/emulated/0`, `/data/local/tmp`);
 - `open_app(...)` → `apps.open`;
 - `ui_hierarchy(...)` / `ui_screenshot(...)`;
 - `ui_tap(...)` / `ui_swipe(...)` / `ui_long_press(...)`;
 - `ui_wait_for_text(...)`;
 - `ui_text(...)` / `ui_key(...)`.
 
-These tools validate names, bounds and enums on both MCP/Android boundaries and then use the same owned shell-UID helper. They are convenience and audit surfaces, not a reduction of the authority already granted by `run_shell`. `appops_set` also protects the TypedDroid package itself.
+Filesystem reads are bounded to 128 KiB per call and writes to 32 KiB per call, with explicit offsets so larger files can be transferred in chunks without exceeding the 256 KiB control-channel frame ceiling. Typed destructive file operations refuse to delete or move the mutable roots themselves.
+
+These tools validate names, paths, bounds and enums on both MCP/Android boundaries and then use the same owned shell-UID helper. They are convenience and audit surfaces, not a reduction of the authority already granted by `run_shell`. `appops_set` also protects the TypedDroid package itself.
 
 ## Mutating / privileged MCP tools
 

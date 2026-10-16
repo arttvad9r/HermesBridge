@@ -86,6 +86,8 @@ Full-control (all denied in SAFE and available only to a pairing explicitly swit
 - `settings_get` / `settings_put` — Android system/secure/global settings;
 - `appops_get` / `appops_set` — package AppOps inspection/control;
 - `process_list` / `logcat_read` — bounded process and Android log diagnostics;
+- `fs_stat` / `fs_list` / `fs_read` / `fs_search` — shell-visible filesystem inspection;
+- `fs_write` / `fs_mkdir` / `fs_copy` / `fs_move` / `fs_delete` — chunked mutation in `/sdcard`, `/storage/emulated/0`, and `/data/local/tmp`;
 - `ui_hierarchy` / `ui_screenshot` — bounded UI perception;
 - `ui_tap` / `ui_swipe` / `ui_long_press` — coordinate input;
 - `ui_wait_for_text` — wait for a text signal in the UI hierarchy;

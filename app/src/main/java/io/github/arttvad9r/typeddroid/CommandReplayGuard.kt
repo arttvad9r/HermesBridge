@@ -183,6 +183,21 @@ internal class CommandReplayGuard {
             "apps.uninstall",
             "apps.forceStop",
             "apps.revokePermission",
+            "apps.open",
+            "activity.start",
+            "settings.put",
+            "appops.set",
+            "ui.tap",
+            "ui.swipe",
+            "ui.longPress",
+            "ui.text",
+            "ui.key",
+            "shell.run",
+            "fs.write",
+            "fs.mkdir",
+            "fs.copy",
+            "fs.move",
+            "fs.delete",
         )
     }
 }
