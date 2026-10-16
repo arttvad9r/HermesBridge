@@ -46,12 +46,20 @@ if [[ ! -f "$service_source" ]]; then
     exit 1
 fi
 
-for command in tar systemctl groupadd useradd install mktemp grep od tr cp mv rm chmod chown sleep; do
+for command in tar systemctl groupadd useradd install mktemp grep od tr cp mv rm chmod chown sleep curl java; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "error: required command is missing: $command" >&2
         exit 1
     fi
 done
+
+java_spec_line=$(java -XshowSettings:properties -version 2>&1 | grep -m1 'java.specification.version = ' || true)
+java_spec_version=${java_spec_line##*= }
+java_major=${java_spec_version%%.*}
+if [[ ! "$java_major" =~ ^[0-9]+$ || "$java_major" -lt 17 ]]; then
+    echo "error: Java 17 or newer is required to run the relay (found: ${java_spec_version:-unknown})." >&2
+    exit 1
+fi
 
 # The Gradle application distribution is expected to contain one top-level
 # `relay/` directory. Reject absolute paths, parent traversal and unexpected
@@ -169,6 +177,33 @@ fi
 sleep 1
 if ! systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "error: new relay did not remain active; attempting rollback" >&2
+    rollback_binary
+    exit 1
+fi
+
+health_port=$DEFAULT_PORT
+while IFS='=' read -r key value; do
+    if [[ "$key" == "PORT" ]]; then
+        health_port=$value
+        break
+    fi
+done <"$env_file"
+if [[ ! "$health_port" =~ ^[0-9]+$ || "$health_port" -lt 1 || "$health_port" -gt 65535 ]]; then
+    echo "error: invalid PORT in $env_file; attempting rollback" >&2
+    rollback_binary
+    exit 1
+fi
+
+healthy=false
+for _ in {1..20}; do
+    if curl --fail --silent --max-time 1 "http://127.0.0.1:$health_port/health" >/dev/null 2>&1; then
+        healthy=true
+        break
+    fi
+    sleep 0.5
+done
+if [[ "$healthy" != true ]]; then
+    echo "error: relay health endpoint did not become ready; attempting rollback" >&2
     rollback_binary
     exit 1
 fi

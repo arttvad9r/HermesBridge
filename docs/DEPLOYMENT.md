@@ -24,6 +24,8 @@ The Android app also supports authenticated **self-revocation** over its existin
 
 ## 1. Install the relay distribution
 
+The relay requires a Java 17+ runtime on the VPS. Java 21 LTS is also supported for running the Java 17 bytecode produced by the build.
+
 Build with:
 
 ```bash
@@ -88,7 +90,7 @@ Local health check:
 curl --fail http://127.0.0.1:8080/health
 ```
 
-As a deployment check, verify that the listener is loopback-only (for example with `ss -ltnp`) and still keep the host firewall closed to TCP/8080.
+The bundled installer also waits for this health endpoint before declaring an install successful and rolls back a failed upgrade. As a deployment check, verify that the listener is loopback-only (for example with `ss -ltnp`) and still keep the host firewall closed to TCP/8080.
 
 ## 4. TLS reverse proxy
 
