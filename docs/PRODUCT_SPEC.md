@@ -2,11 +2,11 @@
 
 ## Product statement
 
-Hermes Bridge is an Android companion that lets a user securely delegate phone tasks to a Hermes agent without keeping a laptop nearby.
+Hermes Bridge is an Android companion that lets a user securely delegate typed phone tasks to any compatible AI agent through a local agent-neutral bridge.
 
 The product is successful when daily use feels like:
 
-> Install the app, pair Hermes, grant capabilities, then ask Hermes to do things.
+> Install the app, pair the phone with Bridge Host, grant capabilities, then use the AI agent normally.
 
 Technical concepts such as ADB, MCP servers, ports, addresses and Termux must not be part of normal operation.
 
@@ -16,17 +16,17 @@ Technical concepts such as ADB, MCP servers, ports, addresses and Termux must no
 
 1. Install Hermes Bridge APK.
 2. Open the app.
-3. Tap **Connect Hermes**.
-4. Scan a QR code or enter a one-time pairing code produced by the Hermes-side relay.
+3. Tap **Connect Bridge**.
+4. Scan a QR code or enter a one-time pairing code produced by the local Bridge Host.
 5. Complete a guided capability wizard.
 6. Optional: enable Advanced access through Shizuku.
-7. Land on one status screen showing that Hermes is connected.
+7. Land on one status screen showing that the bridge is connected.
 
 UI control is not part of the standard V1 setup. If a future policy-compatible UI-control backend is enabled, it is a separate explicit capability/session rather than an Accessibility permission bundled into first-run setup.
 
 ### Daily use
 
-The app normally stays closed. The user talks to Hermes:
+The app normally stays closed. The user talks to their AI agent:
 
 - "Why is my battery draining?"
 - "Find the largest files I can remove."
@@ -55,10 +55,8 @@ Read-only tasks run silently. Mutating or high-risk tasks follow the configured 
 - install APK;
 - uninstall application;
 - force-stop application;
-- enable/disable supported application state;
 - delete selected shared files;
-- grant/revoke supported permissions through the privileged backend;
-- launch/open applications.
+- revoke one supported dangerous runtime permission through the privileged backend;
 
 ### Future optional UI automation
 
@@ -68,7 +66,7 @@ Read-only tasks run silently. Mutating or high-risk tasks follow the configured 
 - input text;
 - open app/settings surface.
 
-UI automation is not the primary control plane. Prefer typed Android operations whenever they exist. The standard build does not use `AccessibilityService` for autonomous Hermes actions. Future UI-control work follows [ADR 0003](decisions/0003-ui-control-policy.md): narrow typed operations plus an explicit short-lived user-consented capture/control session where screen pixels are required.
+UI automation is not the primary control plane. Prefer typed Android operations whenever they exist. The standard build does not use `AccessibilityService` for autonomous agent actions. Future UI-control work follows [ADR 0003](decisions/0003-ui-control-policy.md): narrow typed operations plus an explicit short-lived user-consented capture/control session where screen pixels are required.
 
 ## Non-goals
 
@@ -97,15 +95,15 @@ V1 will not provide:
   - any future active UI-control session.
 - After reboot, if Shizuku is inactive, basic access stays online and the app shows one actionable notification to restore advanced access.
 - Screen capture/UI-control must never be silently restored after reboot.
-- No fake success: pairing is only shown as connected after authenticated relay registration succeeds.
+- No fake success: pairing is only shown as connected after authenticated device registration succeeds.
 
 ## Success criteria for first usable release
 
 - APK installs and runs on Android 11+.
 - Pairing works over cellular or unrelated Wi-Fi networks.
-- Laptop is not part of the runtime path.
+- The user's agent machine runs Bridge Host locally; no separate always-on server is required.
 - Device can reconnect after network changes.
-- Basic read-only health/app/file queries work remotely.
+- Basic read-only health/app/file queries work through the generic MCP adapter.
 - At least install APK, uninstall and force-stop work through Shizuku.
 - Destructive actions can require approval.
 - Audit history identifies tool, timestamp, decision and outcome.

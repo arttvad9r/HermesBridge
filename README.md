@@ -1,174 +1,198 @@
 # Hermes Bridge
 
-Security-first remote Android tools for AI agents — no root and no unrestricted shell.
+Security-first Android tools for AI agents — no root, no unrestricted shell, no agent lock-in.
 
-The current reference integration is Hermes through a local MCP adapter; the Android/relay trust boundary is intentionally independent of agent-side shell access.
+Hermes Bridge lets an AI agent work with an Android phone through a deliberately small typed tool surface. The canonical agent interface is **local MCP over stdio**, so the same bridge can be used by Codex, Claude Code, OpenCode, Cursor, Hermes Agent, or another MCP-capable host.
 
-The intended UX is deliberately simple:
+Hermes Agent is only an optional adapter; the runtime architecture is local and agent-neutral.
 
-1. Install one APK.
-2. Pair it with Hermes using a one-time code.
-3. Grant only the capabilities you want through the guided setup.
-4. Close the app and give tasks to Hermes normally.
+> Status: release-candidate development. Core typed tools, Android approvals, pairing/authentication, local Bridge Host, generic MCP adapter, Shizuku UserService backend, idempotent mutation retries, R8 release builds and reproducible APK checks are implemented. Physical-device E2E and battery-impact gates are still required before a stable public release.
 
-Hermes Bridge is **not** intended to expose a general-purpose remote shell. The agent gets a small typed tool surface, read-only by default, with exact-argument approvals for mutating/privileged actions.
+## Why this exists
 
-> Status: functional development prototype. Authenticated outbound relay pairing, automatic reconnect, guided setup, local bounded audit history, Android 13+ notification setup, Shizuku reboot-restoration UX, Hermes MCP integration, read-only diagnostics/app metadata/files, bounded permission and storage audits, approved dangerous-permission revocation, SAF deletion and Shizuku-backed install/uninstall/force-stop operations are implemented. Physical phone/VPS end-to-end validation is still required before treating privileged and reboot-recovery behavior as production-ready.
+Most Android agent bridges become powerful by exposing shell, arbitrary commands, Accessibility automation, or broad package access. Hermes Bridge takes the opposite approach:
 
-## Current capabilities
-
-- P-256 device identity stored in Android Keystore.
-- One-time pairing and challenge/response reconnect authentication.
-- Persistent outbound WSS connection from Android to the relay.
-- Strict canonical relay endpoint validation: `wss://HOST[:PORT]/ws/device`, with no user info, query or fragment; APK artifact HTTPS URLs are derived from the same validated endpoint.
-- Android Network Security Config denies cleartext traffic and trusts system certificate authorities only.
-- Foreground service with reboot/package-update recovery.
-- Android 13+ notification-permission setup is explicit and optional; denying it does not disable the Hermes relay connection.
-- Guided first-run setup instead of exposing all technical settings at once.
-- Confirmed phone-side self-revoke plus localhost admin revoke; clean re-pair without reinstalling the APK.
-- Relay deployment examples for systemd + TLS reverse proxy.
-- Local stdio MCP adapter for Hermes.
-- `device_health` — battery percentage plus memory and storage totals.
-- `battery_usage` — bounded read-only Android Batterystats data since the last charge, parsed locally from fixed `dumpsys batterystats -c --charged`; raw dumpsys is never returned to Hermes.
-- `list_apps` — launcher-visible apps without `QUERY_ALL_PACKAGES`.
-- `app_usage` — bounded UsageStats for launcher-visible apps after the user enables Android Usage Access.
-- `app_permissions` — requested/granted permission metadata for one launcher-visible app.
-- `permissions_audit` — bounded launcher-only scan returning permissions that are both granted and classified by Android as `dangerous`, with explicit truncation state.
-- `revoke_app_permission` — revoke one currently granted Android-`dangerous` runtime permission from one launcher-visible app after exact one-use local approval; Android user ID is derived on-device and Hermes cannot provide `pm` flags.
-- `list_files` — directory browsing only inside a folder explicitly selected through Android Storage Access Framework.
-- `analyze_files` — bounded recursive SAF analysis with total size, counts, truncation status and largest-file summaries.
-- `delete_path` — deletion of one validated SAF file/directory after local approval bound to the target's current metadata; the granted root itself is protected.
-- Explicit local revoke/change control for the SAF folder grant.
-- Shizuku detection/authorization status in the Android app.
-- Hermes Bridge remembers whether Shizuku has successfully reached READY. After a real reboot it reconnects the base relay first, then performs a delayed Shizuku check and can notify the user that advanced access needs restoration.
-- The Shizuku restoration notification links back to Hermes Bridge and, when the official Shizuku app is installed, offers a direct `Открыть Shizuku` action. Package visibility remains narrow; there is no `QUERY_ALL_PACKAGES`.
-- One-use, expiring approvals bound to canonical tool arguments.
-- `install_apk` — APK from a dedicated VPS staging directory, streamed through a short-lived relay artifact, then verified on Android by size/SHA-256/package/version/signing certificates before approval and Shizuku installation.
-- `uninstall_app` — Shizuku-backed package uninstall after local approval.
-- `force_stop_app` — Shizuku-backed force-stop after local approval.
-- Hermes Bridge protects its own package from install replacement, uninstall, force-stop and agent-driven permission changes.
-- Local `История Hermes` screen stores at most 200 sanitized command/approval events on-device. Raw command arguments, auth tokens, file contents and raw error messages are not stored.
-- The history screen is internal (`exported=false`) and is reachable from the foreground-service notification.
-
-## Goals
-
-- Work when the phone and laptop are on different networks.
-- No laptop required after setup.
-- Phone initiates an outbound encrypted connection to the Hermes-side relay.
-- No routine ADB, IP, port, Termux or raw shell workflow.
-- Read-only diagnostics without prompts.
-- Mutating and privileged actions require explicit policy/approval.
-- Shizuku is the optional privileged backend; root is not required.
-- Build on existing Android/MCP components where they fit instead of reimplementing everything.
+- no agent-facing `run_shell` or arbitrary argv;
+- no arbitrary Android intents/content URIs;
+- no arbitrary APK URL;
+- no `QUERY_ALL_PACKAGES`;
+- no root requirement;
+- fixed typed operations with bounded results;
+- Android-side exact-argument approval for mutating/privileged actions;
+- P-256 device identity in Android Keystore;
+- local bounded audit history;
+- optional Shizuku through a typed Binder/UserService boundary.
 
 ## Architecture
 
 ```text
-Telegram / user
-      |
-      v
-Hermes on VPS
-      |
-      +-- local stdio MCP adapter
-      |          |
-      |          v
-      +----> Hermes Bridge relay
-                   ^
-                   | outbound WSS + tokenized artifact HTTPS
-                   |
-             Android app
-                   |
-                   +-- Android APIs
-                   +-- PackageManager (launcher-scoped visibility)
-                   +-- UsageStats (optional special access)
-                   +-- Storage Access Framework (user-selected tree)
-                   +-- approval policy
-                   +-- local bounded audit history
-                   +-- Shizuku (optional typed privileged/read-only commands)
+Any MCP-capable agent
+Codex / Claude / OpenCode / Cursor / Hermes / ...
+                 |
+                 | local MCP stdio
+                 v
+        Generic MCP adapter
+                 |
+                 | loopback HTTP
+                 v
+        Local Bridge Host
+                 ^
+                 | authenticated Android channel
+                 |
+          Android app
+                 |
+        +--------+---------+
+        |                  |
+   Android APIs      Optional Shizuku
+   SAF / UsageStats  typed privileged ops
 ```
 
-The relay admin API is intended to remain on localhost beside Hermes. The public TLS surface is limited to health, the device WebSocket, and short-lived token-authenticated artifact downloads used for APK installation.
+The agent never receives the Bridge Host admin API directly. The admin API stays on loopback, and Android remains the final policy authority even if the agent or host is compromised.
 
-See:
+See [Architecture](docs/ARCHITECTURE.md), [Security model](docs/SECURITY.md), [MCP integration](docs/MCP.md), and [Bridge Host](docs/HOST.md).
 
-- [Product specification](docs/PRODUCT_SPEC.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Security model](docs/SECURITY.md)
-- [Dependency/security audit](docs/DEPENDENCY_AUDIT.md)
-- [Relay protocol](docs/PROTOCOL.md)
-- [Permissions and setup](docs/PERMISSIONS.md)
-- [Relay deployment](docs/DEPLOYMENT.md)
-- [Hermes MCP integration](docs/HERMES_MCP.md)
-- [Implementation roadmap](TODO.md)
-- [Third-party notices](THIRD_PARTY_NOTICES.md)
+## Current tools
 
-## Security baseline
+Read-only:
 
-The project keeps these non-negotiable rules:
+- `list_devices`
+- `pending_approvals`
+- `create_pairing_code`
+- `device_health`
+- `battery_usage`
+- `list_apps`
+- `app_usage`
+- `app_permissions`
+- `permissions_audit`
+- `list_files`
+- `analyze_files`
 
-- no raw `run_shell` exposed to the agent;
-- no generic command passthrough in the Hermes MCP surface;
-- no arbitrary Android intents or arbitrary content URIs;
-- no arbitrary APK URL or arbitrary VPS/device filesystem path for installation;
-- no arbitrary arguments for Batterystats diagnostics;
-- no PIN/password capture or unlock automation;
-- no root requirement;
-- default-deny tool routing/registration;
-- read-only tools are narrowly typed, argument-validated and output-bounded;
-- app metadata/audits stay launcher-scoped and do not request `QUERY_ALL_PACKAGES`;
-- the only additional explicit package visibility used for recovery UX is the official Shizuku package;
-- permission audit uses Android's own `dangerous` protection classification rather than an invented risk score;
-- agent-driven permission changes are revoke-only, launcher-scoped, limited to currently granted Android-`dangerous` permissions and exact locally approved targets;
-- privileged/mutating commands require one-use exact-argument approval;
-- APK install approval is bound to verified content/package/signing metadata rather than transport tokens;
-- SAF deletion approval is bound to the validated target path and current metadata;
-- audit history stores bounded sanitized metadata rather than raw tool arguments or secret-bearing error text;
-- long-term device credentials are stored in Android Keystore;
-- production device transport requires the canonical WSS relay endpoint;
-- Android cleartext traffic is disabled and the app network security configuration trusts system CAs only;
-- the Hermes-side admin token stays local to the VPS process boundary where possible;
-- SAF file access is limited to a directory explicitly chosen by the user;
-- privileged package operations validate package names and protect Hermes Bridge itself;
-- Shizuku diagnostics return bounded parsed structures rather than unrestricted command output.
+Mutating/privileged, with Android-side approval:
 
-More detail: [docs/SECURITY.md](docs/SECURITY.md).
+- `revoke_app_permission`
+- `delete_path`
+- `install_apk`
+- `uninstall_app`
+- `force_stop_app`
 
-## Technology baseline
+Mutation retries can use explicit idempotency keys. Reusing a key for changed arguments fails closed.
 
-- Kotlin 2.4.20
-- Android Gradle Plugin 8.9.1
-- Gradle 8.14.4 via checksum-pinned Gradle Wrapper
-- compile/target SDK 35
-- min SDK 30
-- Jetpack Compose + Material 3
-- Java/Kotlin target 17
-- Ktor WebSockets 3.1.2
-- kotlinx.serialization 1.11.0
-- AndroidX DocumentFile 1.1.0 for SAF tree traversal
-- Shizuku API/provider 13.1.5
-- Python MCP SDK v2 adapter for Hermes
+## Android security boundary
 
-The narrow Shizuku process-execution pattern is adapted from Apache-2.0 `droid-mcp` source pinned in `THIRD_PARTY_NOTICES.md`; no JitPack runtime/build dependency is used. Batterystats parsing is Hermes Bridge code based on Android's checkin-format output.
+Hermes Bridge protects its own package from agent-driven replacement, uninstall, force-stop, and permission mutation.
 
-## Build
+Package enumeration is launcher-scoped. File access is restricted to the Storage Access Framework tree selected by the user. Usage data requires Android Usage Access. Privileged operations require Shizuku and use fixed typed operations only.
+
+The standard release does **not** expose autonomous tap/swipe/screenshot/general UI automation. MediaProjection/UI-control experiments are a separate explicit security boundary and are not part of the agent tool surface.
+
+## Local setup
+
+### 1. Install and start Bridge Host
+
+Requirements: Java 17+ and Python 3.10+.
+
+For regular use:
+
+```bash
+./host/install-local.sh
+hermesbridge-host
+```
+
+For development directly from the checkout, use `./host/run-local-host.sh`.
+
+This creates user-local state and a random admin token:
+
+```text
+~/.config/hermesbridge/admin-token
+~/.local/state/hermesbridge/
+~/.local/share/hermesbridge/apks/
+```
+
+No root, systemd, or machine-wide installation is required.
+
+### 2. Connect the generic MCP adapter
+
+`install-local.sh` installs the adapter automatically. Primary executable:
+
+```text
+~/.local/bin/android-bridge-mcp
+```
+
+The adapter reads the Bridge Host token file automatically. Agent-specific examples are in [docs/MCP.md](docs/MCP.md). Hermes-specific configuration lives under [adapters/hermes](adapters/hermes/README.md).
+
+### 3. Connect Android
+
+The current production Android transport requires a trusted canonical endpoint:
+
+```text
+wss://HOST[:PORT]/ws/device
+```
+
+How that device-facing WSS endpoint reaches the local Bridge Host is intentionally independent of the agent and core architecture. A user-controlled LAN reverse proxy, private overlay network, or tunnel can provide reachability. The Bridge Host admin routes under `/api/v1/*` must remain loopback-only.
+
+## Build and test
+
+Android/debug build:
 
 ```bash
 ./gradlew :app:assembleDebug
 ```
 
-The repository contains the standard Gradle Wrapper pinned to Gradle 8.14.4 and the official binary distribution SHA-256. CI validates the wrapper and uses `./gradlew` for all Gradle tasks.
+Core verification:
 
-CI runs:
+```bash
+./gradlew --no-daemon \
+  :protocol:test \
+  :relay:test \
+  :app:testDebugUnitTest \
+  :app:lintDebug \
+  :e2e-fixture:lintDebug \
+  :app:assembleDebug \
+  :e2e-fixture:assembleDebug
+```
 
-- protocol/relay/app unit tests;
-- Hermes MCP adapter tests;
-- Android lint;
-- debug APK build;
-- relay distribution build;
-- artifact upload.
+MCP adapter tests:
 
-Weekly Dependabot monitoring covers Gradle/Maven, Python and GitHub Actions dependencies. Updates are reviewed and tested; there is no automatic merge policy.
+```bash
+python -m unittest discover -s mcp_adapter/tests -v
+```
 
-## Repository policy
+Release reproducibility:
 
-Hermes Bridge is licensed under the Apache License 2.0. Third-party adapted code retains its upstream attribution and license notices; see `THIRD_PARTY_NOTICES.md`.
+```bash
+release/verify-reproducible-unsigned-apk.sh
+```
+
+## Technology baseline
+
+- Kotlin 2.4.20
+- Android Gradle Plugin 8.9.1
+- Gradle 8.14.4
+- Java/Kotlin target 17
+- compile/target SDK 35, min SDK 30
+- Jetpack Compose + Material 3
+- Ktor WebSockets 3.1.2
+- kotlinx.serialization 1.11.0
+- AndroidX DocumentFile 1.1.0
+- Shizuku API/provider 13.1.5
+- Python MCP SDK v2
+
+The narrow Shizuku process-execution pattern is adapted from Apache-2.0 `droid-mcp` source pinned in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The upstream generic shell surface is not exposed.
+
+## Documentation
+
+- [Product specification](docs/PRODUCT_SPEC.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Security model](docs/SECURITY.md)
+- [Generic MCP integration](docs/MCP.md)
+- [Local Bridge Host](docs/HOST.md)
+- [Protocol](docs/PROTOCOL.md)
+- [Permissions and setup](docs/PERMISSIONS.md)
+- [Idempotency](docs/IDEMPOTENCY.md)
+- [Physical-device E2E](docs/PHYSICAL_E2E.md)
+- [Roadmap](TODO.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

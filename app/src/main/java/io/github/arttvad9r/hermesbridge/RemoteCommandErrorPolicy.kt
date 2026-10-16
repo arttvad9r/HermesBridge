@@ -5,7 +5,7 @@ import io.github.arttvad9r.hermesbridge.protocol.ProtocolError
 
 /**
  * Removes arbitrary local exception/backend text before a command result crosses the Android→relay
- * boundary. Structured error codes remain useful to Hermes, while messages are selected only from
+ * boundary. Structured error codes remain useful to the agent, while messages are selected only from
  * this local deterministic table. Envelopes are canonicalized so malformed success/failure objects
  * cannot leak fields that do not belong to their declared outcome.
  */

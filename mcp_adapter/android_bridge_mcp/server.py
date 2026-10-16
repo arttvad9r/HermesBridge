@@ -21,8 +21,7 @@ ARTIFACT_ID_RE = re.compile(r"^apk_[0-9a-fA-F-]{36}$")
 ARTIFACT_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-DEFAULT_RELAY_URL = "http://127.0.0.1:8080"
-DEFAULT_APK_DIR = "/opt/HermesBridge/apks"
+DEFAULT_HOST_URL = "http://127.0.0.1:8080"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 MAX_PATH_DEPTH = 32
 MAX_PATH_SEGMENT_LENGTH = 255
@@ -35,21 +34,25 @@ HERMES_BRIDGE_PACKAGE = "io.github.arttvad9r.hermesbridge"
 APK_NAME_HEADER = "X-Hermes-Apk-Name"
 APK_STAGING_KEY_HEADER = "X-Hermes-Apk-Staging-Key"
 
-mcp = MCPServer("Hermes Bridge")
+mcp = MCPServer("Android Bridge")
 
 
-def _relay_url() -> str:
-    value = os.environ.get("HERMES_BRIDGE_RELAY_URL", DEFAULT_RELAY_URL).rstrip("/")
+def _host_url() -> str:
+    value = (
+        os.environ.get("HERMES_BRIDGE_HOST_URL", "").strip()
+        or os.environ.get("HERMES_BRIDGE_RELAY_URL", "").strip()
+        or DEFAULT_HOST_URL
+    ).rstrip("/")
     parsed = urlsplit(value)
 
     if parsed.username is not None or parsed.password is not None:
-        raise RuntimeError("HERMES_BRIDGE_RELAY_URL must not contain user info.")
+        raise RuntimeError("HERMES_BRIDGE_HOST_URL must not contain user info.")
     if parsed.query or parsed.fragment:
-        raise RuntimeError("HERMES_BRIDGE_RELAY_URL must not contain query or fragment data.")
+        raise RuntimeError("HERMES_BRIDGE_HOST_URL must not contain query or fragment data.")
     if parsed.path not in ("", "/"):
-        raise RuntimeError("HERMES_BRIDGE_RELAY_URL must not contain a path.")
+        raise RuntimeError("HERMES_BRIDGE_HOST_URL must not contain a path.")
     if parsed.hostname is None:
-        raise RuntimeError("HERMES_BRIDGE_RELAY_URL has no valid hostname.")
+        raise RuntimeError("HERMES_BRIDGE_HOST_URL has no valid hostname.")
 
     if parsed.scheme == "http":
         if parsed.hostname.lower() not in LOOPBACK_HOSTS:
@@ -62,20 +65,46 @@ def _relay_url() -> str:
     return value
 
 
+
+def _relay_url() -> str:
+    """Backward-compatible alias for the pre agent-neutral adapter name."""
+    return _host_url()
+
+def _config_home() -> Path:
+    value = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    return Path(value).expanduser() if value else Path.home() / ".config"
+
+
+def _data_home() -> Path:
+    value = os.environ.get("XDG_DATA_HOME", "").strip()
+    return Path(value).expanduser() if value else Path.home() / ".local" / "share"
+
+
 def _admin_token() -> str:
     token = os.environ.get("HERMES_BRIDGE_ADMIN_TOKEN", "").strip()
-    if len(token) < 24:
-        raise RuntimeError(
-            "HERMES_BRIDGE_ADMIN_TOKEN is missing or shorter than 24 characters."
+    if not token:
+        token_file_value = os.environ.get("HERMES_BRIDGE_ADMIN_TOKEN_FILE", "").strip()
+        token_file = (
+            Path(token_file_value).expanduser()
+            if token_file_value
+            else _config_home() / "hermesbridge" / "admin-token"
         )
+        try:
+            token = token_file.read_text(encoding="utf-8").strip()
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Bridge Host admin token is unavailable. Start the local host first or set "
+                "HERMES_BRIDGE_ADMIN_TOKEN/HERMES_BRIDGE_ADMIN_TOKEN_FILE."
+            ) from exc
+    if len(token) < 24:
+        raise RuntimeError("Bridge Host admin token is shorter than 24 characters.")
     return token
 
 
 def _apk_directory() -> Path:
-    value = os.environ.get("HERMES_BRIDGE_APK_DIR", DEFAULT_APK_DIR).strip()
-    if not value:
-        raise RuntimeError("HERMES_BRIDGE_APK_DIR must not be empty.")
-    return Path(value).expanduser().resolve()
+    value = os.environ.get("HERMES_BRIDGE_APK_DIR", "").strip()
+    path = Path(value).expanduser() if value else _data_home() / "hermesbridge" / "apks"
+    return path.resolve()
 
 
 def _request_json(
@@ -95,7 +124,7 @@ def _request_json(
         headers["Content-Type"] = "application/json"
 
     request = Request(
-        f"{_relay_url()}{path}",
+        f"{_host_url()}{path}",
         data=body,
         headers=headers,
         method=method,
@@ -221,7 +250,7 @@ def _resolve_apk_file(apk_name: str) -> Path:
 def _stage_apk(apk_name: str, *, staging_key: str | None = None) -> dict[str, Any]:
     apk_path = _resolve_apk_file(apk_name)
     size_bytes = apk_path.stat().st_size
-    parsed = urlsplit(_relay_url())
+    parsed = urlsplit(_host_url())
     connection_type = (
         http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
     )
@@ -279,7 +308,7 @@ def _stage_apk(apk_name: str, *, staging_key: str | None = None) -> dict[str, An
 
 @mcp.tool()
 def list_devices() -> list[dict[str, Any]]:
-    """List phones paired with Hermes Bridge and whether each is currently connected."""
+    """List phones paired with the local Android Bridge host and whether each is currently connected."""
     result = _request_json("GET", "/api/v1/devices")
     if not isinstance(result, list):
         raise RuntimeError("Relay returned an invalid device list.")

@@ -170,7 +170,7 @@ private fun BridgeScreen(
             title = { Text("Отвязать телефон?") },
             text = {
                 Text(
-                    "Hermes потеряет доступ к этому телефону. Чтобы подключить его снова, понадобится новый одноразовый код привязки."
+                    "Bridge Host потеряет доступ к этому телефону. Чтобы подключить его снова, понадобится новый одноразовый код привязки."
                 )
             },
             dismissButton = {
@@ -207,7 +207,7 @@ private fun BridgeScreen(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Безопасный доступ Hermes к этому телефону.",
+                text = "Безопасный доступ ИИ-агентов к этому телефону.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -359,7 +359,7 @@ private fun SetupHeaderCard(connected: Boolean) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             Text(
-                if (connected) "Выберите, что Hermes сможет делать" else "Подключите телефон к Hermes",
+                if (connected) "Выберите, что агент сможет делать" else "Подключите телефон к Bridge Host",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -367,7 +367,7 @@ private fun SetupHeaderCard(connected: Boolean) {
                 if (connected) {
                     "Дополнительные права можно выдать сейчас или позже. Изменяющие данные действия всё равно требуют отдельного подтверждения."
                 } else {
-                    "Получите одноразовый код у Hermes и введите его ниже. После этого телефон будет переподключаться автоматически."
+                    "Получите одноразовый код через Bridge Host или подключённого агента и введите его ниже. После этого телефон будет переподключаться автоматически."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -419,10 +419,10 @@ private fun StatusCard(
     onRevokePairing: () -> Unit,
 ) {
     val (title, detail) = when (connectionState) {
-        ConnectionState.DISCONNECTED -> "Не подключён" to "Введите одноразовый код Hermes."
+        ConnectionState.DISCONNECTED -> "Не подключён" to "Введите одноразовый код привязки."
         ConnectionState.PAIRING -> "Подключение…" to "Проверяем код и сервер."
         ConnectionState.RECONNECTING -> "Переподключение…" to "Связь с relay потеряна, соединение восстановится автоматически."
-        ConnectionState.CONNECTED -> "Hermes подключён" to "Телефон доступен агенту в рамках выданных прав."
+        ConnectionState.CONNECTED -> "Bridge Host подключён" to "Телефон доступен агенту в рамках выданных прав."
         ConnectionState.ERROR -> "Не подключён" to "Соединение не установлено."
     }
 
@@ -523,7 +523,7 @@ private fun PairingCard(
         ) {
             Text("Подключение", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Код выдаётся Hermes и используется только для первой привязки устройства.",
+                "Код создаётся Bridge Host и используется только для первой привязки устройства.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -543,7 +543,7 @@ private fun PairingCard(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = enabled,
             ) {
-                Text("Подключить Hermes")
+                Text("Подключить Bridge Host")
             }
         }
     }
@@ -611,7 +611,7 @@ private fun NotificationAccessCard(
                 if (granted) {
                     "Hermes Bridge может показывать статус фонового соединения, быстрый доступ к истории и напоминание восстановить Shizuku после перезагрузки."
                 } else {
-                    "Базовое соединение работает и без них, но Android не покажет постоянный статус Hermes и напоминание восстановить Shizuku после перезагрузки."
+                    "Базовое соединение работает и без них, но Android не покажет постоянный статус Bridge Host и напоминание восстановить Shizuku после перезагрузки."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -649,9 +649,9 @@ private fun FileAccessCard(
             )
             Text(
                 if (configured) {
-                    "Hermes может просматривать и анализировать выбранную папку. Удаление конкретного файла или папки требует отдельного подтверждения."
+                    "Агент может просматривать и анализировать выбранную папку. Удаление конкретного файла или папки требует отдельного подтверждения."
                 } else {
-                    "Выберите папку, содержимое которой Hermes сможет просматривать и анализировать. Остальное хранилище останется недоступно."
+                    "Выберите папку, содержимое которой агент сможет просматривать и анализировать. Остальное хранилище останется недоступно."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -701,7 +701,7 @@ private fun UsageAccessCard(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                "Нужен только для чтения времени последнего использования и времени на переднем плане у приложений, уже видимых Hermes. Разрешение включается вручную в Android.",
+                "Нужен только для чтения времени последнего использования и времени на переднем плане у приложений, уже видимых Bridge Host. Разрешение включается вручную в Android.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -733,7 +733,7 @@ private fun ShizukuCard(
         ShizukuAccessStatus.READY -> "Shizuku подключён"
     }
     val message = if (wasConfigured && state.status == ShizukuAccessStatus.UNAVAILABLE) {
-        "После перезагрузки Android запустите Shizuku снова. Базовое соединение Hermes уже работает; восстановить нужно только расширенные команды."
+        "После перезагрузки Android запустите Shizuku снова. Базовое соединение Bridge Host уже работает; восстановить нужно только расширенные команды."
     } else {
         state.message
     }
@@ -817,9 +817,9 @@ private fun UiCaptureCard(
             Text(status, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(
                 if (state.status == UiCaptureSessionStatus.ACTIVE) {
-                    "Сессия действует не более пяти минут и может быть остановлена здесь в любой момент. Hermes пока не получает изображение."
+                    "Сессия действует не более пяти минут и может быть остановлена здесь в любой момент. Агент пока не получает изображение."
                 } else {
-                    "Каждая новая сессия требует системного подтверждения Android. Hermes пока не получает изображение: передача скриншотов ещё не включена."
+                    "Каждая новая сессия требует системного подтверждения Android. Агент пока не получает изображение: передача скриншотов ещё не включена."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

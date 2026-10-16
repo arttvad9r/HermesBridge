@@ -44,7 +44,7 @@ data class PrivilegedOperationResult(
  *
  * Package mutations are executed in a typed Shizuku UserService. The Binder
  * contract has one method per supported operation and does not expose shell,
- * argv, or a generic command passthrough to the app process or Hermes agent.
+ * argv, or a generic command passthrough to the app process or AI agent.
  * See THIRD_PARTY_NOTICES.md for attribution.
  */
 class DroidMcpShizukuAppsBackend : PrivilegedAppsBackend {

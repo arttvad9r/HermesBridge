@@ -51,7 +51,7 @@ Remediation:
 - `settings.gradle.kts` pins `com.android.tools:r8:9.1.29` on the Android build classpath instead of accepting an older bundled R8 for minification.
 - The additional R8 repository is scoped to `pluginManagement.buildscript.repositories` and content-filtered to `com.android.tools:r8`; it cannot resolve application/runtime dependencies through `dependencyResolutionManagement`.
 - CI captures the reproducible unsigned minified release log and fails if the Kotlin-metadata parsing warning returns.
-- The Kotlin/R8 combination must pass protocol/relay/app unit tests, Hermes MCP tests, Android lint, debug APK, signed release verification, reproducible unsigned minified release APK and relay distribution builds before adoption.
+- The Kotlin/R8 combination must pass protocol/relay/app unit tests, generic MCP tests, Android lint, debug APK, signed release verification, reproducible unsigned minified release APK and relay distribution builds before adoption.
 
 References:
 
@@ -103,7 +103,7 @@ No actionable security advisory requiring an immediate version change was identi
 
 ## Python MCP adapter
 
-The adapter intentionally has a narrow direct dependency surface (`mcp>=2,<3`). Dependabot monitors `/hermes_mcp`. Major MCP SDK changes must be reviewed for tool registration, transport, schema and authorization behavior before adoption.
+The adapter intentionally has a narrow direct dependency surface (`mcp>=2,<3`). Dependabot monitors `/mcp_adapter`. Major MCP SDK changes must be reviewed for tool registration, transport, schema and authorization behavior before adoption.
 
 ## GitHub Actions
 
@@ -126,6 +126,6 @@ References:
 2. Avoid unrelated bulk upgrades in the same change as a security fix.
 3. Keep dependency repositories narrow and centralized.
 4. Keep the Gradle Wrapper distribution checksum pinned.
-5. Run unit tests, Hermes MCP tests, Android lint, APK build and relay distribution build after build-tool/dependency changes.
+5. Run unit tests, generic MCP tests, Android lint, APK build and relay distribution build after build-tool/dependency changes.
 6. Re-audit the Hermes Android tool allowlist after any Shizuku, Android privilege or MCP SDK change.
 7. Do not enable dependency-update auto-merge for security-sensitive tooling without a separate policy decision.

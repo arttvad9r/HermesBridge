@@ -130,7 +130,7 @@ class RelayAgentTransport(
         }
         if (mutableConnectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(
-                IllegalStateException("Connect to Hermes before revoking this device pairing.")
+                IllegalStateException("Connect to Bridge Host before revoking this device pairing.")
             )
         }
         val session = activeSession

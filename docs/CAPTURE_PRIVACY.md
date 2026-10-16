@@ -34,4 +34,4 @@ The capture display is deliberately non-secure. Android remains responsible for 
 
 ## Remote boundary
 
-The standard Hermes tool registry does not register screenshot or capture commands. MediaProjection consent can only be initiated locally on the phone. A future remote pixel consumer must not inherit permission merely because the local one-frame primitive exists; it requires a separate reviewed design, explicit session policy, bounded transport, and an updated threat model.
+The standard agent tool registry does not register screenshot or capture commands. MediaProjection consent can only be initiated locally on the phone. A future remote pixel consumer must not inherit permission merely because the local one-frame primitive exists; it requires a separate reviewed design, explicit session policy, bounded transport, and an updated threat model.

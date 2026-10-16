@@ -200,7 +200,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun revokePairing() {
         if (_state.value.connectionState != ConnectionState.CONNECTED) {
-            _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с Hermes.") }
+            _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с Bridge Host.") }
             return
         }
         runCatching { BridgeForegroundService.revokePairing(app) }
@@ -214,7 +214,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun finishSetup() {
         if (_state.value.connectionState != ConnectionState.CONNECTED) {
-            _state.update { it.copy(message = "Сначала подключите Hermes.") }
+            _state.update { it.copy(message = "Сначала подключите Bridge Host.") }
             return
         }
         setupStore.markCompleted()

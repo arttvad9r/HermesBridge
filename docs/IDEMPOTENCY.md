@@ -28,7 +28,7 @@ The pending correlation is owned by a relay coroutine rather than by whichever H
 
 After the shared relay deadline the pending correlation entry is removed. A caller may retry the exact same keyed command; if the original command is still in flight on Android, the Android replay guard coalesces it, and if Android already retained a terminal result, that retained result is returned. This is why the same key must never be reused for a different action.
 
-The Hermes MCP adapter exposes optional `idempotency_key` parameters for the current mutating tools:
+The generic MCP adapter exposes optional `idempotency_key` parameters for the current mutating tools:
 
 - `force_stop_app`;
 - `uninstall_app`;

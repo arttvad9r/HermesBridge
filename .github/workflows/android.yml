@@ -28,15 +28,15 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
-          cache-dependency-path: hermes_mcp/pyproject.toml
+          cache-dependency-path: mcp_adapter/pyproject.toml
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - name: Validate deployment, release, and workflow scripts
+      - name: Validate host, release, and workflow scripts
         run: |
-          bash -n deploy/install-relay.sh
-          bash deploy/install-relay.sh --help >/dev/null
+          bash -n host/run-local-host.sh
+          bash -n host/install-local.sh
           bash -n release/build-signed-apk.sh
           bash -n release/verify-reproducible-unsigned-apk.sh
           bash -n ci/verify-actions-pinned.sh
@@ -60,10 +60,32 @@ jobs:
       - name: Unit tests
         run: ./gradlew --no-daemon :protocol:test :relay:test :app:testDebugUnitTest
 
-      - name: Test Hermes MCP adapter
+      - name: Smoke local Bridge Host
         run: |
-          python -m pip install ./hermes_mcp
-          python -m unittest discover -s hermes_mcp/tests -v
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/hermesbridge-config"
+          export XDG_STATE_HOME="$RUNNER_TEMP/hermesbridge-state"
+          export XDG_DATA_HOME="$RUNNER_TEMP/hermesbridge-data"
+          export PORT=18080
+          ./host/run-local-host.sh >"$RUNNER_TEMP/bridge-host.log" 2>&1 &
+          host_pid=$!
+          trap 'kill "$host_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:18080/health | grep -qx ok; then
+              break
+            fi
+            if ! kill -0 "$host_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/bridge-host.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18080/health | grep -qx ok
+          test "$(stat -c '%a' "$XDG_CONFIG_HOME/hermesbridge/admin-token")" = 600
+
+      - name: Test generic MCP adapter
+        run: |
+          python -m pip install ./mcp_adapter
+          python -m unittest discover -s mcp_adapter/tests -v
 
       - name: Lint
         run: ./gradlew --no-daemon :app:lintDebug :e2e-fixture:lintDebug
@@ -151,7 +173,7 @@ jobs:
             "$apk" >/dev/null
           grep -Fqx "$user_service -> $user_service:" "$mapping"
 
-      - name: Build relay distribution
+      - name: Build Bridge Host runtime distribution
         run: |
           ./gradlew --no-daemon :relay:distTar
           relay_tar=$(find relay/build/distributions -maxdepth 1 -type f -name '*.tar' -print -quit)
@@ -169,7 +191,8 @@ jobs:
       - name: Upload relay distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: hermes-bridge-relay
+          name: hermes-bridge-host-runtime
           path: |
             relay/build/distributions/*.tar
-            deploy/**
+            host/**
+            adapters/**

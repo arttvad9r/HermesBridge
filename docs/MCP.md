@@ -1,52 +1,79 @@
-# Hermes MCP integration
+# MCP integration
 
-Hermes Bridge exposes a deliberately narrow local stdio MCP server for Hermes Agent. The MCP process talks to the relay admin API over loopback and never exposes a generic Android command selector.
+Hermes Bridge exposes one canonical, agent-neutral MCP server over local stdio. The same executable works with Codex, Claude Code, OpenCode, Cursor, Hermes Agent, and other MCP hosts.
 
-## Install on the Hermes VPS
+The MCP process talks only to the local Bridge Host over loopback. It never exposes a generic Android command selector, raw shell, arbitrary HTTP client, arbitrary Android intent, or arbitrary APK URL.
 
-Use a dedicated virtual environment or `uv` environment:
-
-```bash
-cd /opt/HermesBridge/hermes_mcp
-python -m venv .venv
-. .venv/bin/activate
-pip install .
-```
-
-This installs `hermes-bridge-mcp`. The adapter requires MCP Python SDK v2 (`mcp>=2,<3`).
-
-Create the APK staging directory used only by `install_apk`:
+## Install
 
 ```bash
-sudo mkdir -p /opt/HermesBridge/apks
+python3 -m venv ~/.local/share/hermesbridge/mcp-venv
+~/.local/share/hermesbridge/mcp-venv/bin/pip install ./mcp_adapter
 ```
 
-## Required environment
+The primary executable is:
 
 ```text
-HERMES_BRIDGE_RELAY_URL=http://127.0.0.1:8080
-HERMES_BRIDGE_ADMIN_TOKEN=<relay admin token>
-HERMES_BRIDGE_APK_DIR=/opt/HermesBridge/apks
+~/.local/bin/android-bridge-mcp
 ```
 
-Plain HTTP is accepted only for exact loopback hosts (`127.0.0.1`, `::1`, `localhost`). Any non-loopback relay URL must use HTTPS. URLs containing user info, a path, query or fragment are rejected.
+The old `hermes-bridge-mcp` name remains as a compatibility alias only.
 
-## Hermes configuration
+Start the local Bridge Host separately with `./host/run-local-host.sh`. By default the adapter uses `http://127.0.0.1:8080`, reads `~/.config/hermesbridge/admin-token`, and stages APKs from `~/.local/share/hermesbridge/apks`.
 
-Example `~/.hermes/config.yaml` entry:
+## Agent configuration examples
 
-```yaml
-mcp_servers:
-  hermes_bridge:
-    command: "/opt/HermesBridge/hermes_mcp/.venv/bin/hermes-bridge-mcp"
-    env:
-      HERMES_BRIDGE_RELAY_URL: "http://127.0.0.1:8080"
-      HERMES_BRIDGE_ADMIN_TOKEN: "<relay admin token>"
-      HERMES_BRIDGE_APK_DIR: "/opt/HermesBridge/apks"
-    enabled: true
+### Codex
+
+Add a local stdio MCP server in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.android_bridge]
+command = "/home/USER/.local/bin/android-bridge-mcp"
 ```
 
-Reload MCP servers in Hermes after configuration changes.
+### Claude Code
+
+```bash
+claude mcp add --scope user android_bridge -- \
+  /home/USER/.local/bin/android-bridge-mcp
+```
+
+### OpenCode
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "android_bridge": {
+        "type": "local",
+        "command": [
+          "/home/USER/.local/bin/android-bridge-mcp"
+        ]
+      }
+    }
+  }
+}
+```
+
+### Cursor
+
+```json
+{
+  "mcpServers": {
+    "android_bridge": {
+      "command": "/home/USER/.local/bin/android-bridge-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### Hermes Agent
+
+Hermes is only an adapter/configuration over the same generic MCP server. See `../adapters/hermes/README.md`.
+
+No agent-specific configuration should contain the Bridge Host admin token unless the default local token-file mechanism is intentionally overridden.
 
 ## Read-only MCP tools
 
@@ -66,9 +93,9 @@ Each notification contains only:
 - its expected `MUTATING` or `PRIVILEGED` risk class;
 - relay-local expiry time.
 
-No package name, permission name, SAF path, APK filename, raw command argument or Android approval display summary is sent to the VPS through this notification path.
+No package name, permission name, SAF path, APK filename, raw command argument or Android approval display summary is sent to the host through this notification path.
 
-This tool cannot approve, deny or execute anything. There is intentionally no MCP approval tool in the current design: the threat model includes a compromised VPS, so the relay admin token, Hermes process or a Telegram bot callback on that VPS cannot be treated as an approval authority. Approval still happens locally on Android; after approval Hermes retries the same typed operation and Android performs its normal exact-argument, expiry and one-use checks.
+This tool cannot approve, deny or execute anything. There is intentionally no MCP approval tool in the current design: the threat model includes a compromised host, so the relay admin token, agent process or a Telegram bot callback on that host cannot be treated as an approval authority. Approval still happens locally on Android; after approval the agent retries the same typed operation and Android performs its normal exact-argument, expiry and one-use checks.
 
 ### `create_pairing_code()`
 
@@ -76,11 +103,11 @@ Creates a short-lived one-time pairing code for the Android app.
 
 ### `device_health(device_id)`
 
-Maps only to Android tool `device.health`. Returns current battery percentage plus memory/storage totals.
+Maps only to the Android tool `device.health`. Returns current battery percentage plus memory/storage totals.
 
 ### `battery_usage(device_id)`
 
-Maps only to Android tool `battery.usage`. It accepts no diagnostic or shell arguments.
+Maps only to the Android tool `battery.usage`. It accepts no diagnostic or shell arguments.
 
 Android runs exactly:
 
@@ -155,7 +182,7 @@ Maps only to `files.analyze` and is read-only. Android recursively analyzes only
 
 ### `revoke_app_permission(device_id, package_name, permission_name)`
 
-Maps only to Android tool `apps.revokePermission`.
+Maps only to the Android tool `apps.revokePermission`.
 
 This is deliberately a revoke-only tool. It cannot grant permissions, revoke all permissions, choose an Android user, add `pm` flags or run another package-manager command.
 
@@ -167,7 +194,7 @@ Before approval Android verifies that:
 - the permission is currently granted;
 - the target is not Hermes Bridge itself.
 
-The Android user ID is derived locally from the bridge process UID; Hermes cannot supply it. Approval is bound to canonical `packageName + permissionName + userId` and is one-use. After approval Hermes retries the same logical call. Shizuku receives only the internally built command:
+The Android user ID is derived locally from the bridge process UID; the agent cannot supply it. Approval is bound to canonical `packageName + permissionName + userId` and is one-use. After approval the agent retries the same logical call. Shizuku receives only the internally built command:
 
 ```text
 pm revoke --user <derived-user-id> <package> <permission>
@@ -183,7 +210,7 @@ Maps only to `files.delete`. The target must be below the SAF root; the granted 
 
 Maps only to `apps.install` and requires Shizuku plus explicit Android-side approval.
 
-`apk_name` must be a simple `.apk` filename directly inside `HERMES_BRIDGE_APK_DIR`; arbitrary VPS paths and URLs are rejected.
+`apk_name` must be a simple `.apk` filename directly inside `HERMES_BRIDGE_APK_DIR`; arbitrary host paths and URLs are rejected.
 
 The flow is:
 
@@ -192,7 +219,7 @@ The flow is:
 3. Android derives the artifact URL only from its configured relay origin and downloads over HTTPS without redirects.
 4. Android verifies exact size and SHA-256, then parses package/version/signing certificates.
 5. Approval is bound to verified content/package/signing metadata plus `replace`.
-6. After approval Hermes retries the same logical install.
+6. After approval the agent retries the same logical install.
 7. The typed Shizuku UserService copies exactly the verified byte count into a service-generated staging path, then receives only an internally constructed `pm install [-r] <staging-path>` command. The staging path is not agent-controlled and is deleted after the attempt.
 
 Hermes Bridge refuses to replace itself through this tool.
@@ -221,7 +248,7 @@ Android may emit a best-effort `approval.request` notification after creating a 
 
 When pairing identity is revoked, missing or invalidated for repair, Android clears both pending local approvals and unsent approval notifications before a future re-pair can occur.
 
-Fully remote approval is not implemented. It would require a separate user-controlled signing mechanism independently verifiable by Android; a credential available to the same VPS is insufficient under the compromised-VPS threat model.
+Fully remote approval is not implemented. It would require a separate user-controlled signing mechanism independently verifiable by Android; a credential available to the same host is insufficient under the compromised-host threat model.
 
 ## Security boundary
 

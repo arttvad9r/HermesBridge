@@ -40,10 +40,10 @@ object ShizukuRestorationNotifier {
         val builder = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
             .setContentTitle("Расширенный доступ нужно восстановить")
-            .setContentText("Запустите Shizuku после перезагрузки, чтобы вернуть расширенные команды Hermes.")
+            .setContentText("Запустите Shizuku после перезагрузки, чтобы вернуть расширенные команды агента.")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    "Shizuku был настроен раньше, но сейчас недоступен. Базовое соединение Hermes продолжает работать. Запустите Shizuku, чтобы снова разрешить установку и удаление приложений, force-stop и другие расширенные действия."
+                    "Shizuku был настроен раньше, но сейчас недоступен. Базовое соединение Bridge Host продолжает работать. Запустите Shizuku, чтобы снова разрешить установку и удаление приложений, force-stop и другие расширенные действия."
                 )
             )
             .setContentIntent(contentIntent)

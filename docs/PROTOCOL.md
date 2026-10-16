@@ -1,16 +1,16 @@
-# Relay protocol draft
+# Device channel protocol
 
-Status: design draft for V1. This is intentionally small and should be implemented only after threat-model review.
+Status: implemented V1 protocol with release hardening still gated by physical-device E2E.
 
 ## Transport
 
-Android opens an outbound `wss://` connection to the Hermes Bridge relay.
+Android opens an outbound `wss://` connection to the configured Bridge Host device ingress.
 
 The relay does not initiate a network connection to the phone. This allows the phone to work behind carrier NAT, on mobile data and while changing networks.
 
 Both Android and the relay enforce a 256 KiB WebSocket frame limit. Oversized application data must use a dedicated bounded transfer mechanism rather than increasing the control-channel frame size.
 
-List-like Android results are bounded independently of that transport ceiling. `apps.list` and `apps.usage` return at most 128 app entries per command result, bound remote label/version strings, and expose `count`, `totalVisibleCount` and `truncated` so Hermes can distinguish a complete result from a bounded projection. The larger launcher-visible repository remains available locally for package-visibility policy checks; remote truncation must not widen or redefine that security boundary.
+List-like Android results are bounded independently of that transport ceiling. `apps.list` and `apps.usage` return at most 128 app entries per command result, bound remote label/version strings, and expose `count`, `totalVisibleCount` and `truncated` so the agent can distinguish a complete result from a bounded projection. The larger launcher-visible repository remains available locally for package-visibility policy checks; remote truncation must not widen or redefine that security boundary.
 
 As a final shared backstop, Android also limits every serialized `command.result` payload to 224 KiB, reserving 32 KiB for the surrounding control-channel envelope. Tool-specific truncation remains preferred because it preserves useful data. If a handler still produces a larger result, the router fails closed with a small `result_too_large` error instead of sending an oversized frame and entering a reconnect/retry loop.
 
@@ -42,7 +42,7 @@ Unknown versions/types are rejected.
 
 ## Pairing
 
-1. User requests pairing from Hermes/relay.
+1. User requests a pairing code from Bridge Host, directly or through an MCP agent.
 2. Relay creates a short-lived one-time code.
 3. User enters/scans it in Hermes Bridge.
 4. Android creates or loads a P-256 signing key in Android Keystore.
@@ -119,7 +119,7 @@ The relay HTTP command request accepts an optional retry identity alongside the 
 
 If `idempotencyKey` is omitted, the relay preserves the original behavior and allocates a fresh UUID for the protocol `requestId`. If it is supplied, the relay validates the same 1–128 character request-ID alphabet and propagates the key as the protocol `requestId`. While that keyed command is pending, an exact concurrent duplicate shares the same in-flight result and sends no second WebSocket command; the same key with another tool or JSON argument object fails closed with `request_id_conflict` and cannot replace the original waiter.
 
-The Hermes MCP adapter exposes optional `idempotency_key` parameters for `force_stop_app`, `uninstall_app`, `revoke_app_permission`, `delete_path` and `install_apk`. For retry-safe use, the caller chooses a key before the first invocation and reuses the exact same key with the exact same action arguments after `approval_required` or after a lost/unknown MCP or HTTP response. Calls without a key retain the fresh-ID behavior and are not safe retries of an unknown mutation outcome.
+The generic MCP adapter exposes optional `idempotency_key` parameters for `force_stop_app`, `uninstall_app`, `revoke_app_permission`, `delete_path` and `install_apk`. For retry-safe use, the caller chooses a key before the first invocation and reuses the exact same key with the exact same action arguments after `approval_required` or after a lost/unknown MCP or HTTP response. Calls without a key retain the fresh-ID behavior and are not safe retries of an unknown mutation outcome.
 
 ### APK install staging identity
 
@@ -131,13 +131,13 @@ Unkeyed staging remains fresh and always creates a new descriptor. This prevents
 
 The relay does not remove `artifactId` or `downloadToken` from Android's replay fingerprint. Relay restart loses staging correlation and therefore terminates the install retry guarantee; durable exactly-once install semantics are not claimed.
 
-All current mutating/privileged tools still require an exact, one-use Android approval before their actual mutation. Therefore process death cannot silently turn a replayed destructive request into a second mutation: after approval state is lost, a retry must obtain a new local approval. The previous operation's outcome can nevertheless be unknown after a crash, so Hermes must not automatically approve/retry such a request merely because the transport reconnected.
+All current mutating/privileged tools still require an exact, one-use Android approval before their actual mutation. Therefore process death cannot silently turn a replayed destructive request into a second mutation: after approval state is lost, a retry must obtain a new local approval. The previous operation's outcome can nevertheless be unknown after a crash, so the agent must not automatically approve/retry such a request merely because the transport reconnected.
 
 The relay keyed waiter table, APK staging table and Android replay table are all process-local. A relay restart loses relay-side in-flight/staging correlation; a stable-argument retry can still benefit from Android replay protection if its raw protocol arguments remain identical, while install cannot reconstruct the old descriptor after relay restart. Android process death removes the replay proof entirely, so the key does not provide durable exactly-once semantics across Android process recreation.
 
 ## Approval notifications
 
-Android remains the only authority for V1 approval state. A relay or Hermes process must not be able to turn a pending local ticket into an approved one because the threat model includes a compromised VPS.
+Android remains the only authority for V1 approval state. A relay or agent process must not be able to turn a pending local ticket into an approved one because the threat model includes a compromised host.
 
 When a typed command requires approval:
 
@@ -150,13 +150,13 @@ When a typed command requires approval:
    - relative `expiresInMillis`, capped at 10 minutes.
 4. Package names, permission names, SAF paths, APK filenames, raw arguments and the Android approval-card display summary do not cross this notification boundary.
 5. Relay validates the authenticated `deviceId`, approval ID, exact allowlisted `tool↔risk` pair and TTL, then stores at most 200 notification records in memory. Relay computes its own local expiry from the relative TTL.
-6. The authenticated admin/Hermes side can read unexpired notification records with `GET /api/v1/devices/{deviceId}/approvals` or the MCP `pending_approvals` tool. These records are not authoritative ticket state and can remain until TTL expiry after local resolution.
+6. The authenticated local admin/MCP side can read unexpired notification records with `GET /api/v1/devices/{deviceId}/approvals` or the MCP `pending_approvals` tool. These records are not authoritative ticket state and can remain until TTL expiry after local resolution.
 7. Approval still happens locally on Android. The existing exact-argument fingerprint, expiry and one-use consume rules remain authoritative.
-8. After local approval, Hermes retries the same typed tool call and arguments. A caller that supplied an idempotency key reuses that same key; for install, the same live staging identity must also resolve to the same staged descriptor. Otherwise the relay assigns a fresh protocol `requestId`. In every case the approval remains applicable because it is bound to the normalized action fingerprint rather than the transport ID. Changed action arguments require another ticket.
+8. After local approval, the agent retries the same typed tool call and arguments. A caller that supplied an idempotency key reuses that same key; for install, the same live staging identity must also resolve to the same staged descriptor. Otherwise the relay assigns a fresh protocol `requestId`. In every case the approval remains applicable because it is bound to the normalized action fingerprint rather than the transport ID. Changed action arguments require another ticket.
 
 Current notification tools are limited to `files.delete`, `apps.install`, `apps.uninstall`, `apps.forceStop` and `apps.revokePermission`. Unknown tools or mismatched risk classifications remain local and are not queued for remote notification.
 
-There is deliberately **no** `approval.result`, relay `approve` endpoint or MCP approval tool in this phase. A normal Telegram callback, relay admin token or other credential available on the same VPS cannot be trusted as an approval authority under the compromised-VPS model. Fully remote approval requires a separate design with an independently verifiable user-controlled signature whose private key is not available to the VPS.
+There is deliberately **no** `approval.result`, relay `approve` endpoint or MCP approval tool in this phase. A normal Telegram callback, relay admin token or other credential available on the same host cannot be trusted as an approval authority under the compromised-host model. Fully remote approval requires a separate design with an independently verifiable user-controlled signature whose private key is not available to the host.
 
 When the device pairing identity is revoked, missing or invalidated for repair, Android clears its local pending approvals and unsent remote-notification queue so stale tickets cannot be associated with a future `deviceId`.
 
@@ -181,4 +181,4 @@ When the device pairing identity is revoked, missing or invalidated for repair, 
 - general shell transport;
 - custom end-to-end encryption layered over TLS;
 - offline destructive command queue without explicit expiry;
-- VPS-authoritative remote approval.
+- host-authoritative remote approval.

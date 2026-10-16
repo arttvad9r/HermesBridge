@@ -371,7 +371,7 @@ class UiCaptureForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_bridge_notification)
             .setContentTitle("Hermes Bridge · захват экрана")
-            .setContentText("Захватывается один локальный кадр. Системные края и видимая клавиатура скрываются; кадр не сохраняется и не передаётся Hermes.")
+            .setContentText("Захватывается один локальный кадр. Системные края и видимая клавиатура скрываются; кадр не сохраняется и не передаётся агенту.")
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -384,7 +384,7 @@ class UiCaptureForegroundService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Захват экрана Hermes",
+            "Локальный захват экрана",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
             description = "Показывает активную временную сессию MediaProjection"
