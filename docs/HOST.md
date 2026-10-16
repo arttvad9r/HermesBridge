@@ -33,9 +33,9 @@ Requirements: Java 17+ and Python 3.10+.
 The launcher creates user-owned state only:
 
 ```text
-~/.config/hermesbridge/admin-token
-~/.local/state/hermesbridge/
-~/.local/share/hermesbridge/apks/
+~/.config/typeddroid/admin-token
+~/.local/state/typeddroid/
+~/.local/share/typeddroid/apks/
 ```
 
 It builds the relay distribution from source when necessary and runs it as the current user. No root, systemd, `/opt`, or machine-wide secret is required.

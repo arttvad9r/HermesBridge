@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from android_bridge_mcp import server
+from typeddroid_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
@@ -54,7 +54,7 @@ class RevokePermissionMcpTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "protected"):
                 server.revoke_app_permission(
                     DEVICE_ID,
-                    server.HERMES_BRIDGE_PACKAGE,
+                    server.TYPED_DROID_PACKAGE,
                     "android.permission.CAMERA",
                 )
             command.assert_not_called()

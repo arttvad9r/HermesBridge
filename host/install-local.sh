@@ -3,8 +3,8 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
-bin_dir=${HERMES_BRIDGE_BIN_DIR:-"$HOME/.local/bin"}
-install_root=${HERMES_BRIDGE_INSTALL_ROOT:-"$data_home/hermesbridge"}
+bin_dir=${TYPED_DROID_BIN_DIR:-"$HOME/.local/bin"}
+install_root=${TYPED_DROID_INSTALL_ROOT:-"$data_home/typeddroid"}
 runtime_dir="$install_root/host-runtime"
 venv_dir="$install_root/mcp-venv"
 scripts_dir="$install_root/scripts"
@@ -53,33 +53,25 @@ rm -rf -- "$venv_dir"
 python3 -m venv "$venv_dir"
 "$venv_dir/bin/python" -m pip install --quiet "$repo_root/mcp_adapter"
 
-host_launcher="$bin_dir/hermesbridge-host"
+host_launcher="$bin_dir/typeddroid-host"
 cat >"$host_launcher" <<EOF_LAUNCHER
 #!/usr/bin/env bash
 set -euo pipefail
-export HERMES_BRIDGE_RELAY_BIN="$runtime_dir/bin/relay"
+export TYPED_DROID_RELAY_BIN="$runtime_dir/bin/relay"
 exec "$scripts_dir/run-local-host.sh" "\$@"
 EOF_LAUNCHER
 chmod 0755 "$host_launcher"
 
-mcp_launcher="$bin_dir/android-bridge-mcp"
+mcp_launcher="$bin_dir/typeddroid-mcp"
 cat >"$mcp_launcher" <<EOF_MCP
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$venv_dir/bin/python" -m android_bridge_mcp.server "\$@"
+exec "$venv_dir/bin/python" -m typeddroid_mcp.server "\$@"
 EOF_MCP
 chmod 0755 "$mcp_launcher"
 
-legacy_mcp_launcher="$bin_dir/hermes-bridge-mcp"
-cat >"$legacy_mcp_launcher" <<EOF_LEGACY
-#!/usr/bin/env bash
-set -euo pipefail
-exec "$mcp_launcher" "\$@"
-EOF_LEGACY
-chmod 0755 "$legacy_mcp_launcher"
-
 cat <<EOF_SUMMARY
-Installed Hermes Bridge local components:
+Installed TypedDroid local components:
   Bridge Host: $host_launcher
   Generic MCP: $mcp_launcher
 

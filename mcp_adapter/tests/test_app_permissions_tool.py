@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from android_bridge_mcp import server
+from typeddroid_mcp import server
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
@@ -48,17 +48,17 @@ class AppPermissionsMcpTest(unittest.TestCase):
             "_device_command",
             return_value={"ok": True},
         ) as command:
-            server.app_permissions(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
+            server.app_permissions(DEVICE_ID, server.TYPED_DROID_PACKAGE)
 
         command.assert_called_once_with(
             DEVICE_ID,
             "apps.permissions",
-            {"packageName": server.HERMES_BRIDGE_PACKAGE},
+            {"packageName": server.TYPED_DROID_PACKAGE},
         )
 
     def test_mutating_package_tools_still_protect_bridge_package(self) -> None:
         with self.assertRaisesRegex(ValueError, "protected"):
-            server.force_stop_app(DEVICE_ID, server.HERMES_BRIDGE_PACKAGE)
+            server.force_stop_app(DEVICE_ID, server.TYPED_DROID_PACKAGE)
 
     def test_app_permissions_rejects_invalid_package_name(self) -> None:
         with patch.object(server, "_device_command") as command:

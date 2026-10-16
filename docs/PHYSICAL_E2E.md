@@ -106,7 +106,7 @@ Measure an idle baseline and a representative connected period with the foregrou
 
 Repeat the physical smoke test with the minified signed RC, not only debug builds. Confirm:
 
-- `HermesBridgeUserService` survives R8;
+- `TypedDroidUserService` survives R8;
 - pairing/reconnect still works;
 - all tool schemas match debug behavior;
 - no debug-only test surface is present.

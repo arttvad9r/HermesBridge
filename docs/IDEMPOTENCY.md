@@ -1,6 +1,6 @@
 # Command replay and idempotency boundaries
 
-Hermes Bridge uses the protocol `requestId` as the identity of a command request on the Android control channel. The Android replay guard treats an exact duplicate as the same replay entry only when both the `requestId` and the canonical tool arguments are unchanged.
+TypedDroid uses the protocol `requestId` as the identity of a command request on the Android control channel. The Android replay guard treats an exact duplicate as the same replay entry only when both the `requestId` and the canonical tool arguments are unchanged.
 
 ## Android in-process replay protection
 
@@ -42,7 +42,7 @@ For retry-safe use, the caller chooses the key before the first invocation and r
 
 `apps.install` has raw protocol arguments that include a relay-created `artifactId` and `downloadToken`. Command-key reuse is therefore safe only when an exact retry gets the exact same staged descriptor. Those artifact credentials remain part of Android's replay fingerprint.
 
-For a keyed `install_apk`, the MCP adapter first validates the caller's install `idempotency_key`, then derives a staging identity as SHA-256 of `(device_id, idempotency_key)`. The derived value is sent only to the relay staging endpoint as `X-Hermes-Apk-Staging-Key`; the original caller key remains the Android protocol `requestId`. Device scoping means the same caller key used independently for two phones does not collide in the staging table.
+For a keyed `install_apk`, the MCP adapter first validates the caller's install `idempotency_key`, then derives a staging identity as SHA-256 of `(device_id, idempotency_key)`. The derived value is sent only to the relay staging endpoint as `X-TypedDroid-Apk-Staging-Key`; the original caller key remains the Android protocol `requestId`. Device scoping means the same caller key used independently for two phones does not collide in the staging table.
 
 The relay reads and hashes every uploaded APK before deciding whether a keyed stage is an exact retry. The first use of one staging identity is bound to the relay-verified tuple `(sanitized file name, byte length, SHA-256)` and to one staged descriptor. Re-uploading the same verified content with that same staging identity while its artifact is still live returns the identical `artifactId`, `downloadToken`, size, hash and expiry without extending the expiry. Reusing the staging identity with a changed file name, length or bytes fails closed with HTTP 409 `apk_staging_conflict` before any Android command is dispatched.
 

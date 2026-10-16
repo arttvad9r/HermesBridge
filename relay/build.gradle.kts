@@ -11,7 +11,7 @@ kotlin {
 }
 
 application {
-    mainClass.set("io.github.arttvad9r.hermesbridge.relay.RelayServerKt")
+    mainClass.set("io.github.arttvad9r.typeddroid.relay.RelayServerKt")
 }
 
 dependencies {

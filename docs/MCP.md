@@ -1,25 +1,25 @@
 # MCP integration
 
-Hermes Bridge exposes one canonical, agent-neutral MCP server over local stdio. The same executable works with Codex, Claude Code, OpenCode, Cursor, Hermes Agent, and other MCP hosts.
+TypedDroid exposes one canonical, agent-neutral MCP server over local stdio. The same executable works with Codex, Claude Code, OpenCode, Cursor, Hermes Agent, and other MCP hosts.
 
 The MCP process talks only to the local Bridge Host over loopback. It never exposes a generic Android command selector, raw shell, arbitrary HTTP client, arbitrary Android intent, or arbitrary APK URL.
 
 ## Install
 
 ```bash
-python3 -m venv ~/.local/share/hermesbridge/mcp-venv
-~/.local/share/hermesbridge/mcp-venv/bin/pip install ./mcp_adapter
+python3 -m venv ~/.local/share/typeddroid/mcp-venv
+~/.local/share/typeddroid/mcp-venv/bin/pip install ./mcp_adapter
 ```
 
 The primary executable is:
 
 ```text
-~/.local/bin/android-bridge-mcp
+~/.local/bin/typeddroid-mcp
 ```
 
-The old `hermes-bridge-mcp` name remains as a compatibility alias only.
+The old `typed-droid-mcp` name remains as a compatibility alias only.
 
-Start the local Bridge Host separately with `./host/run-local-host.sh`. By default the adapter uses `http://127.0.0.1:8080`, reads `~/.config/hermesbridge/admin-token`, and stages APKs from `~/.local/share/hermesbridge/apks`.
+Start the local Bridge Host separately with `./host/run-local-host.sh`. By default the adapter uses `http://127.0.0.1:8080`, reads `~/.config/typeddroid/admin-token`, and stages APKs from `~/.local/share/typeddroid/apks`.
 
 ## Agent configuration examples
 
@@ -29,14 +29,14 @@ Add a local stdio MCP server in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.android_bridge]
-command = "/home/USER/.local/bin/android-bridge-mcp"
+command = "/home/USER/.local/bin/typeddroid-mcp"
 ```
 
 ### Claude Code
 
 ```bash
 claude mcp add --scope user android_bridge -- \
-  /home/USER/.local/bin/android-bridge-mcp
+  /home/USER/.local/bin/typeddroid-mcp
 ```
 
 ### OpenCode
@@ -48,7 +48,7 @@ claude mcp add --scope user android_bridge -- \
       "android_bridge": {
         "type": "local",
         "command": [
-          "/home/USER/.local/bin/android-bridge-mcp"
+          "/home/USER/.local/bin/typeddroid-mcp"
         ]
       }
     }
@@ -62,7 +62,7 @@ claude mcp add --scope user android_bridge -- \
 {
   "mcpServers": {
     "android_bridge": {
-      "command": "/home/USER/.local/bin/android-bridge-mcp",
+      "command": "/home/USER/.local/bin/typeddroid-mcp",
       "args": []
     }
   }
@@ -129,13 +129,13 @@ This is accumulated Batterystats data, not instantaneous current/wattage. The to
 
 ### `list_apps(device_id)`
 
-Maps only to `apps.list`. Android keeps its larger launcher-visible set locally for package/policy checks, but the remote result returns at most 128 apps so a control-channel result stays below the WebSocket frame ceiling. `count` is the number actually returned, `totalVisibleCount` is the locally observed launcher-visible count before remote projection, and `truncated=true` means the result must not be treated as a complete list. Labels and version names are also length-bounded and control characters are normalized. Hermes Bridge does not request `QUERY_ALL_PACKAGES`.
+Maps only to `apps.list`. Android keeps its larger launcher-visible set locally for package/policy checks, but the remote result returns at most 128 apps so a control-channel result stays below the WebSocket frame ceiling. `count` is the number actually returned, `totalVisibleCount` is the locally observed launcher-visible count before remote projection, and `truncated=true` means the result must not be treated as a complete list. Labels and version names are also length-bounded and control characters are normalized. TypedDroid does not request `QUERY_ALL_PACKAGES`.
 
 ### `app_usage(device_id, days=30)`
 
 Maps only to `apps.usage`. `days` must be an integer from 1 to 365 and defaults to 30.
 
-The phone must have Android Usage Access enabled for Hermes Bridge. Results are intersected with the same launcher-visible set used by `list_apps`, so Usage Access does not expand the agent's package visibility. The remote projection uses the same 128-app/text bounds and `count`/`totalVisibleCount`/`truncated` contract. When truncation is necessary, the most recently used apps are retained first.
+The phone must have Android Usage Access enabled for TypedDroid. Results are intersected with the same launcher-visible set used by `list_apps`, so Usage Access does not expand the agent's package visibility. The remote projection uses the same 128-app/text bounds and `count`/`totalVisibleCount`/`truncated` contract. When truncation is necessary, the most recently used apps are retained first.
 
 ### `app_permissions(device_id, package_name)`
 
@@ -143,7 +143,7 @@ Maps only to `apps.permissions`.
 
 The Android side first verifies that `package_name` is already present in the launcher-visible app set. Only then does it read `PackageInfo` permission metadata. Returned fields include requested permissions, current granted state, Android protection classification, permission group and relevant request flags.
 
-`dangerous=true` means Android itself classifies the permission with the `dangerous` base protection level. Hermes Bridge does not invent a custom risk score or claim that a granted permission is unnecessary.
+`dangerous=true` means Android itself classifies the permission with the `dangerous` base protection level. TypedDroid does not invent a custom risk score or claim that a granted permission is unnecessary.
 
 ### `permissions_audit(device_id)`
 
@@ -192,7 +192,7 @@ Before approval Android verifies that:
 - the app currently requests `permission_name`;
 - Android classifies that permission with the `dangerous` base protection level;
 - the permission is currently granted;
-- the target is not Hermes Bridge itself.
+- the target is not TypedDroid itself.
 
 The Android user ID is derived locally from the bridge process UID; the agent cannot supply it. Approval is bound to canonical `packageName + permissionName + userId` and is one-use. After approval the agent retries the same logical call. Shizuku receives only the internally built command:
 
@@ -210,7 +210,7 @@ Maps only to `files.delete`. The target must be below the SAF root; the granted 
 
 Maps only to `apps.install` and requires Shizuku plus explicit Android-side approval.
 
-`apk_name` must be a simple `.apk` filename directly inside `HERMES_BRIDGE_APK_DIR`; arbitrary host paths and URLs are rejected.
+`apk_name` must be a simple `.apk` filename directly inside `TYPED_DROID_APK_DIR`; arbitrary host paths and URLs are rejected.
 
 The flow is:
 
@@ -222,15 +222,15 @@ The flow is:
 6. After approval the agent retries the same logical install.
 7. The typed Shizuku UserService copies exactly the verified byte count into a service-generated staging path, then receives only an internally constructed `pm install [-r] <staging-path>` command. The staging path is not agent-controlled and is deleted after the attempt.
 
-Hermes Bridge refuses to replace itself through this tool.
+TypedDroid refuses to replace itself through this tool.
 
 ### `uninstall_app(device_id, package_name, keep_data=false)`
 
-Maps only to `apps.uninstall`. It requires Shizuku and a one-use Android-side approval bound to normalized `packageName + keepData`. Hermes Bridge cannot uninstall itself.
+Maps only to `apps.uninstall`. It requires Shizuku and a one-use Android-side approval bound to normalized `packageName + keepData`. TypedDroid cannot uninstall itself.
 
 ### `force_stop_app(device_id, package_name)`
 
-Maps only to `apps.forceStop`. It requires Shizuku and exact-argument approval. Hermes Bridge cannot force-stop itself because that would terminate the active bridge process.
+Maps only to `apps.forceStop`. It requires Shizuku and exact-argument approval. TypedDroid cannot force-stop itself because that would terminate the active bridge process.
 
 ## Approval behavior
 
@@ -244,7 +244,7 @@ tool name + canonical normalized arguments
 
 Additionally, APK install approval binds verified content/package/signing metadata, SAF deletion binds current target metadata, and permission revoke binds package + permission + derived Android user. Approved tickets expire and are one-use only.
 
-Android may emit a best-effort `approval.request` notification after creating a local ticket. The relay validates the authenticated device, exact allowlisted tool/risk pair and a relative TTL, then keeps only target-free metadata in bounded memory. `pending_approvals` exposes those notification records read-only to Hermes. Loss, duplication, staleness or forgery of a relay notification cannot approve an Android ticket and does not alter the local state machine.
+Android may emit a best-effort `approval.request` notification after creating a local ticket. The relay validates the authenticated device, exact allowlisted tool/risk pair and a relative TTL, then keeps only target-free metadata in bounded memory. `pending_approvals` exposes those notification records read-only to the connected agent. Loss, duplication, staleness or forgery of a relay notification cannot approve an Android ticket and does not alter the local state machine.
 
 When pairing identity is revoked, missing or invalidated for repair, Android clears both pending local approvals and unsent approval notifications before a future re-pair can occur.
 
@@ -269,7 +269,7 @@ Each public MCP function hardcodes one Android tool name. Android applies anothe
 
 Keep these properties:
 
-- MCP runs locally beside Hermes;
+- MCP runs locally beside the agent;
 - relay admin API stays loopback-only;
 - Android transport uses WSS through the public reverse proxy;
 - only tokenized `/device-artifacts/*` downloads are additionally exposed for APK transfer;
@@ -282,9 +282,9 @@ Keep these properties:
 
 ## Smoke test
 
-After relay and MCP are configured:
+After Bridge Host and MCP are configured:
 
-1. Reload MCP in Hermes and call `list_devices`.
+1. Reload MCP in the chosen agent and call `list_devices`.
 2. If needed, call `create_pairing_code` and finish pairing in the Android app.
 3. Call `device_health` and `list_apps`; if `truncated=true`, treat the returned list as a bounded projection rather than the full launcher-visible set.
 4. Call `app_permissions` for one returned package and verify only that app is inspected.

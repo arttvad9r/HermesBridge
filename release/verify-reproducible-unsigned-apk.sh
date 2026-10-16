@@ -5,10 +5,10 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 cd "$repo_root"
 
 signing_variables=(
-  HERMES_BRIDGE_SIGNING_STORE_FILE
-  HERMES_BRIDGE_SIGNING_STORE_PASSWORD
-  HERMES_BRIDGE_SIGNING_KEY_ALIAS
-  HERMES_BRIDGE_SIGNING_KEY_PASSWORD
+  TYPED_DROID_SIGNING_STORE_FILE
+  TYPED_DROID_SIGNING_STORE_PASSWORD
+  TYPED_DROID_SIGNING_KEY_ALIAS
+  TYPED_DROID_SIGNING_KEY_PASSWORD
 )
 for name in "${signing_variables[@]}"; do
   if [[ -n "${!name:-}" ]]; then

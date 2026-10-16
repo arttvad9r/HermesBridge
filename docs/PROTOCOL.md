@@ -44,7 +44,7 @@ Unknown versions/types are rejected.
 
 1. User requests a pairing code from Bridge Host, directly or through an MCP agent.
 2. Relay creates a short-lived one-time code.
-3. User enters/scans it in Hermes Bridge.
+3. User enters/scans it in TypedDroid.
 4. Android creates or loads a P-256 signing key in Android Keystore.
 5. Phone opens TLS connection and submits:
    - pairing code;
@@ -123,7 +123,7 @@ The generic MCP adapter exposes optional `idempotency_key` parameters for `force
 
 ### APK install staging identity
 
-`apps.install` additionally depends on stable relay-created artifact credentials. For a keyed MCP install, the adapter validates the command idempotency key before upload and derives a separate staging identity as SHA-256 of `(device_id, idempotency_key)`. It sends the derived value in the bounded `X-Hermes-Apk-Staging-Key` header to `POST /api/v1/apk-artifacts`; the original idempotency key is still used as the Android protocol `requestId`.
+`apps.install` additionally depends on stable relay-created artifact credentials. For a keyed MCP install, the adapter validates the command idempotency key before upload and derives a separate staging identity as SHA-256 of `(device_id, idempotency_key)`. It sends the derived value in the bounded `X-TypedDroid-Apk-Staging-Key` header to `POST /api/v1/apk-artifacts`; the original idempotency key is still used as the Android protocol `requestId`.
 
 The relay reads and hashes every upload. The first use of one staging identity is bound to the relay-verified sanitized file name, byte length and SHA-256 plus the resulting staged descriptor. An exact retry with that same identity and verified content while the artifact remains live returns the identical `artifactId`, `downloadToken`, size, hash and expiry without extending TTL. Reuse of the same staging identity with changed name, length or bytes fails before command dispatch with HTTP 409 `apk_staging_conflict`.
 

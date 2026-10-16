@@ -1,6 +1,6 @@
 # Security model
 
-Hermes Bridge gives an AI agent the ability to observe and potentially mutate a personal phone. This makes the local policy boundary more important than ordinary remote-control authentication.
+TypedDroid gives an AI agent the ability to observe and potentially mutate a personal phone. This makes the local policy boundary more important than ordinary remote-control authentication.
 
 ## Threats considered
 
@@ -92,18 +92,18 @@ These must not be exposed to any agent in V1:
 - unrestricted root command;
 - arbitrary filesystem path outside allowed storage roots.
 
-If an upstream dependency exposes one of these, Hermes Bridge must omit it from registration rather than relying on model instructions.
+If an upstream dependency exposes one of these, TypedDroid must omit it from registration rather than relying on model instructions.
 
 ## Screen-capture boundary
 
 MediaProjection is an explicit local capability, not an implicit extension of the relay connection. The current pixel path is intentionally narrower than a screenshot tool:
 
 - each Android consent grant is used for at most one `MediaProjection.createVirtualDisplay()` call;
-- the virtual display is non-secure, so Android continues to blank `FLAG_SECURE` / protected window content instead of Hermes Bridge attempting to capture it;
+- the virtual display is non-secure, so Android continues to blank `FLAG_SECURE` / protected window content instead of TypedDroid attempting to capture it;
 - the capture surface is aspect-ratio preserving and bounded to at most 1,600 pixels on either axis and 1,500,000 total pixels;
 - the process-local copied RGBA frame is therefore bounded to 6,000,000 bytes;
 - exactly one frame is acquired;
-- before that temporary RGBA copy is erased, Hermes Bridge masks locally derived system-bar and display-cutout edge regions with opaque black pixels;
+- before that temporary RGBA copy is erased, TypedDroid masks locally derived system-bar and display-cutout edge regions with opaque black pixels;
 - when the software keyboard is visible, its visibility-sensitive IME inset is read from a fresh `WindowInsets` snapshot after the frame arrives and unioned with the system-edge mask; `getInsetsIgnoringVisibility(Type.ime())` is not used;
 - if the maximum-window source geometry changed between capture setup and frame redaction, the redaction path fails closed rather than applying fresh insets in a stale coordinate system;
 - after local masking, the copied byte array is overwritten immediately, and the `Image`, `ImageReader`, `VirtualDisplay`, and `MediaProjection` resources are released;
@@ -162,9 +162,9 @@ The history screen is an internal non-exported activity and can be cleared local
 
 The base relay and Shizuku are separate security/capability layers. Losing Shizuku after reboot must not silently widen access, weaken authentication, or be represented as loss of the base Android device connection.
 
-Hermes Bridge stores only a boolean that Shizuku previously reached `READY`; it does not persist a Shizuku credential or shell capability. After `BOOT_COMPLETED`, the base authenticated relay reconnect starts independently. A delayed check may show a local restoration notification only when Shizuku had previously been configured and notification permission is currently granted.
+TypedDroid stores only a boolean that Shizuku previously reached `READY`; it does not persist a Shizuku credential or shell capability. After `BOOT_COMPLETED`, the base authenticated relay reconnect starts independently. A delayed check may show a local restoration notification only when Shizuku had previously been configured and notification permission is currently granted.
 
-The restoration notification contains no pairing code, relay token, raw command argument, file content or package data. It can open Hermes Bridge and may launch only the exact official Shizuku package declared in package visibility. `MY_PACKAGE_REPLACED` does not trigger the reboot reminder. When Shizuku returns to `READY`, the reminder is cancelled.
+The restoration notification contains no pairing code, relay token, raw command argument, file content or package data. It can open TypedDroid and may launch only the exact official Shizuku package declared in package visibility. `MY_PACKAGE_REPLACED` does not trigger the reboot reminder. When Shizuku returns to `READY`, the reminder is cancelled.
 
 ## Android component exposure
 

@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from android_bridge_mcp import telegram_approvals as notifier
+from typeddroid_mcp import telegram_approvals as notifier
 
 
 DEVICE_ID = "device_123e4567-e89b-12d3-a456-426614174000"
@@ -179,10 +179,10 @@ class TelegramApprovalNotifierTest(unittest.TestCase):
 
     def test_config_rejects_unsafe_values_before_network_use(self):
         base_env = {
-            "HERMES_BRIDGE_TELEGRAM_BOT_TOKEN": BOT_TOKEN,
-            "HERMES_BRIDGE_TELEGRAM_CHAT_ID": str(CHAT_ID),
-            "HERMES_BRIDGE_TELEGRAM_DEVICE_ID": DEVICE_ID,
-            "HERMES_BRIDGE_TELEGRAM_POLL_SECONDS": "10",
+            "TYPED_DROID_TELEGRAM_BOT_TOKEN": BOT_TOKEN,
+            "TYPED_DROID_TELEGRAM_CHAT_ID": str(CHAT_ID),
+            "TYPED_DROID_TELEGRAM_DEVICE_ID": DEVICE_ID,
+            "TYPED_DROID_TELEGRAM_POLL_SECONDS": "10",
         }
         with patch.dict(os.environ, base_env, clear=True):
             config = notifier.TelegramApprovalNotifierConfig.from_env()
@@ -190,16 +190,16 @@ class TelegramApprovalNotifierTest(unittest.TestCase):
             self.assertEqual(10, config.poll_seconds)
 
         for key, value in (
-            ("HERMES_BRIDGE_TELEGRAM_BOT_TOKEN", BOT_TOKEN + "/x"),
-            ("HERMES_BRIDGE_TELEGRAM_CHAT_ID", "bad chat"),
-            ("HERMES_BRIDGE_TELEGRAM_CHAT_ID", "@public_channel"),
-            ("HERMES_BRIDGE_TELEGRAM_CHAT_ID", "0"),
+            ("TYPED_DROID_TELEGRAM_BOT_TOKEN", BOT_TOKEN + "/x"),
+            ("TYPED_DROID_TELEGRAM_CHAT_ID", "bad chat"),
+            ("TYPED_DROID_TELEGRAM_CHAT_ID", "@public_channel"),
+            ("TYPED_DROID_TELEGRAM_CHAT_ID", "0"),
             (
-                "HERMES_BRIDGE_TELEGRAM_CHAT_ID",
+                "TYPED_DROID_TELEGRAM_CHAT_ID",
                 str(notifier.MAX_TELEGRAM_CHAT_ID_ABS + 1),
             ),
-            ("HERMES_BRIDGE_TELEGRAM_DEVICE_ID", "../device"),
-            ("HERMES_BRIDGE_TELEGRAM_POLL_SECONDS", "1"),
+            ("TYPED_DROID_TELEGRAM_DEVICE_ID", "../device"),
+            ("TYPED_DROID_TELEGRAM_POLL_SECONDS", "1"),
         ):
             env = dict(base_env)
             env[key] = value

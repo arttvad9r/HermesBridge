@@ -45,7 +45,7 @@ jobs:
       - name: Reject partial release signing configuration
         run: |
           log="$RUNNER_TEMP/partial-release-signing.log"
-          if HERMES_BRIDGE_SIGNING_STORE_FILE="$RUNNER_TEMP/incomplete.jks" \
+          if TYPED_DROID_SIGNING_STORE_FILE="$RUNNER_TEMP/incomplete.jks" \
             ./gradlew --no-daemon :app:tasks >"$log" 2>&1; then
             cat "$log"
             echo "Gradle accepted a partial release-signing configuration." >&2
@@ -62,9 +62,9 @@ jobs:
 
       - name: Smoke local Bridge Host
         run: |
-          export XDG_CONFIG_HOME="$RUNNER_TEMP/hermesbridge-config"
-          export XDG_STATE_HOME="$RUNNER_TEMP/hermesbridge-state"
-          export XDG_DATA_HOME="$RUNNER_TEMP/hermesbridge-data"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/typeddroid-config"
+          export XDG_STATE_HOME="$RUNNER_TEMP/typeddroid-state"
+          export XDG_DATA_HOME="$RUNNER_TEMP/typeddroid-data"
           export PORT=18080
           ./host/run-local-host.sh >"$RUNNER_TEMP/bridge-host.log" 2>&1 &
           host_pid=$!
@@ -80,7 +80,7 @@ jobs:
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:18080/health | grep -qx ok
-          test "$(stat -c '%a' "$XDG_CONFIG_HOME/hermesbridge/admin-token")" = 600
+          test "$(stat -c '%a' "$XDG_CONFIG_HOME/typeddroid/admin-token")" = 600
 
       - name: Test generic MCP adapter
         run: |
@@ -105,25 +105,25 @@ jobs:
           test -x "$apkanalyzer_bin"
 
           test "$("$apkanalyzer_bin" manifest application-id "$apk")" = \
-            "io.github.arttvad9r.hermesbridge.fixture"
+            "io.github.arttvad9r.typeddroid.fixture"
           permissions="$("$apkanalyzer_bin" manifest permissions "$apk")"
           test "$permissions" = "android.permission.CAMERA"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: hermes-bridge-debug
+          name: typed-droid-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload physical E2E fixture APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: hermes-bridge-e2e-fixture
+          name: typed-droid-e2e-fixture
           path: e2e-fixture/build/outputs/apk/debug/e2e-fixture-debug.apk
 
       - name: Verify signed release path
         run: |
-          test_keystore="$RUNNER_TEMP/hermes-bridge-ci-release.jks"
+          test_keystore="$RUNNER_TEMP/typed-droid-ci-release.jks"
           keytool -genkeypair -noprompt \
             -keystore "$test_keystore" \
             -storepass ci-test-only \
@@ -132,14 +132,14 @@ jobs:
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -dname "CN=Hermes Bridge CI,O=Hermes Bridge,C=US"
+            -dname "CN=TypedDroid CI,O=TypedDroid,C=US"
           apksigner_path=$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)
           test -x "$apksigner_path"
-          export HERMES_BRIDGE_APKSIGNER="$apksigner_path"
-          export HERMES_BRIDGE_SIGNING_STORE_FILE="$test_keystore"
-          export HERMES_BRIDGE_SIGNING_STORE_PASSWORD=ci-test-only
-          export HERMES_BRIDGE_SIGNING_KEY_ALIAS=ci-release
-          export HERMES_BRIDGE_SIGNING_KEY_PASSWORD=ci-test-only
+          export TYPED_DROID_APKSIGNER="$apksigner_path"
+          export TYPED_DROID_SIGNING_STORE_FILE="$test_keystore"
+          export TYPED_DROID_SIGNING_STORE_PASSWORD=ci-test-only
+          export TYPED_DROID_SIGNING_KEY_ALIAS=ci-release
+          export TYPED_DROID_SIGNING_KEY_PASSWORD=ci-test-only
           release/build-signed-apk.sh
 
       - name: Verify reproducible unsigned release APK
@@ -156,7 +156,7 @@ jobs:
         run: |
           apk=app/build/outputs/apk/release/app-release-unsigned.apk
           mapping=app/build/outputs/mapping/release/mapping.txt
-          user_service=io.github.arttvad9r.hermesbridge.HermesBridgeUserService
+          user_service=io.github.arttvad9r.typeddroid.TypedDroidUserService
 
           test -s "$apk"
           test -s "$mapping"
@@ -183,7 +183,7 @@ jobs:
       - name: Upload release APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: hermes-bridge-release-unsigned
+          name: typed-droid-release-unsigned
           path: |
             app/build/outputs/apk/release/app-release-unsigned.apk
             app/build/outputs/apk/release/app-release-unsigned.apk.sha256
@@ -191,7 +191,7 @@ jobs:
       - name: Upload relay distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: hermes-bridge-host-runtime
+          name: typed-droid-host-runtime
           path: |
             relay/build/distributions/*.tar
             host/**

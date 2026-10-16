@@ -31,5 +31,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "HermesBridge"
+rootProject.name = "TypedDroid"
 include(":app", ":protocol", ":relay", ":e2e-fixture")
