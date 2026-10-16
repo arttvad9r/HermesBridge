@@ -89,9 +89,26 @@ This is not a normal runtime permission dialog. TypedDroid currently provides an
 
 `apps.usage` intersects UsageStats results with the same launcher-visible package set used by `apps.list`, so granting Usage Access does not widen package visibility for the agent.
 
-## Advanced access: Shizuku
+## Advanced access: embedded ADB + owned helper
 
-Shizuku is optional and is the implemented privileged backend. Root is not required.
+The target privileged backend does not require a second Android app. TypedDroid owns a persistent RSA ADB identity in Android Keystore and uses Android 11+ Wireless Debugging only to pair and bootstrap a helper process from the installed TypedDroid APK.
+
+The Android UI now provides an **Встроенный ADB** setup card. Initial setup is:
+
+1. enable Developer options and Wireless debugging;
+2. open **Pair device with pairing code**;
+3. keep that short-lived pairing dialog alive (split-screen with TypedDroid is the current compatible flow on devices that close it when Settings loses foreground);
+4. enter the six-digit code in TypedDroid;
+5. TypedDroid discovers `_adb-tls-pairing._tcp` and `_adb-tls-connect._tcp` with Android NSD, performs SPAKE2/TLS pairing, and starts its own `app_process` helper as Android shell UID;
+6. the app verifies the helper over an abstract local Unix socket and stores only the local helper endpoint plus the fact that its ADB identity has been paired.
+
+The helper accepts connections only from the exact TypedDroid app UID, while the app verifies that the peer is Android shell UID. No TCP listener is created for helper RPC. Raw shell is still denied to SAFE agent pairings; it is exposed only after the user explicitly changes that agent pairing to TRUSTED.
+
+The helper is designed to remain usable after the Wireless Debugging transport used for bootstrap is closed, until Android kills the helper process or the phone reboots. This lifecycle still requires physical-device/OEM verification before stable release. After reboot, the stored ADB identity can normally bootstrap a new helper without another six-digit code as long as Android has not revoked the paired key; Wireless debugging must temporarily be available again for that restore step.
+
+## Legacy advanced access: Shizuku
+
+Shizuku is optional and remains the legacy privileged backend while typed install/uninstall/force-stop/permission/battery operations are migrated to the owned helper. Root is not required.
 
 Current typed uses include:
 

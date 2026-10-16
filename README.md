@@ -1,27 +1,28 @@
 # TypedDroid
 
-Security-first Android tools for AI agents — no root, no unrestricted shell, no agent lock-in.
+Full-control Android bridge for AI agents with explicit SAFE/TRUSTED modes — one Android app, an agent-neutral MCP interface, and no mandatory Shizuku or root runtime.
 
-TypedDroid lets an AI agent work with an Android phone through a deliberately small typed tool surface. The canonical agent interface is **local MCP over stdio**, so the same bridge can be used by Codex, Claude Code, OpenCode, Cursor, Hermes Agent, or another MCP-capable host.
+TypedDroid lets an MCP-capable agent use an Android phone through a local, user-controlled capability layer. Common operations remain structured tools, while a pairing explicitly switched to **TRUSTED** may use raw Android shell access through a TypedDroid-owned privileged helper. The same MCP server can be used by Codex, Claude Code, OpenCode, Cursor, Hermes Agent, or another MCP-capable host.
 
-Hermes Agent is only an optional adapter; the runtime architecture is local and agent-neutral.
+Hermes Agent is only an optional adapter; the protocol and privilege model are agent-neutral.
 
-> Status: release-candidate development. Core typed tools, Android approvals, pairing/authentication, local Bridge Host, generic MCP adapter, Shizuku UserService backend, idempotent mutation retries, R8 release builds and reproducible APK checks are implemented. Physical-device E2E and battery-impact gates are still required before a stable public release.
+> Status: active full-control development on the dedicated development branch. SAFE/TRUSTED policy, generic MCP, repository-owned Android 11+ ADB pairing/transport, shell-v2, a shell-UID `app_process` helper, and TRUSTED `run_shell` are implemented and covered by automated gates. Wireless-Debugging onboarding and helper bootstrap are now present in the Android UI, but physical-device interoperability/reboot/OEM tests are still required before this architecture can replace the legacy Shizuku backend in a stable release.
 
 ## Why this exists
 
-Most Android agent bridges become powerful by exposing shell, arbitrary commands, Accessibility automation, or broad package access. TypedDroid takes the opposite approach:
+Giving an autonomous agent ordinary `adb shell` is powerful but coarse. TypedDroid aims to keep that power while making the grant explicit and reusable:
 
-- SAFE mode exposes no raw shell; TRUSTED mode can opt into `run_shell` once the owned privileged helper is bootstrapped;
-- no arbitrary Android intents/content URIs;
-- no arbitrary APK URL;
-- no `QUERY_ALL_PACKAGES`;
-- no root requirement;
-- fixed typed operations with bounded results;
-- Android-side exact-argument approval for mutating/privileged actions;
-- P-256 device identity in Android Keystore;
-- local bounded audit history;
-- optional Shizuku through a typed Binder/UserService boundary.
+- every new agent pairing starts in **SAFE** mode;
+- SAFE exposes structured, bounded capabilities and denies raw shell;
+- the user may explicitly switch that pairing to **TRUSTED** for the full-control surface;
+- `run_shell` is then a named capability rather than an accidental arbitrary-command escape hatch;
+- the Android app owns the ADB identity, pairing, policy, audit and privileged-helper lifecycle;
+- the new privileged path requires no Shizuku/Termux/Tasker companion app;
+- root is optional and is not required for the normal shell-UID backend;
+- lockscreen credential automation remains outside the trusted grant;
+- the agent-facing protocol is MCP rather than a vendor-specific integration.
+
+Shizuku remains temporarily as a legacy fallback while existing typed privileged tools are migrated to the owned backend.
 
 ## Architecture
 
@@ -31,29 +32,33 @@ Codex / Claude / OpenCode / Cursor / Hermes / ...
                  |
                  | local MCP stdio
                  v
-        Generic MCP adapter
+          typeddroid-mcp
                  |
-                 | loopback HTTP
+                 | local Bridge Host / device transport
                  v
-        Local Bridge Host
-                 ^
-                 | authenticated Android channel
+          TypedDroid Android app
                  |
-          Android app
-                 |
-        +--------+---------+
-        |                  |
-   Android APIs      Optional Shizuku
-   SAF / UsageStats  typed privileged ops
+        +--------+-------------------+
+        |                            |
+   Android APIs                owned privileged path
+ SAF / UsageStats             Wireless ADB bootstrap
+                                     |
+                                     v
+                            TypedDroid app_process helper
+                                (Android shell UID)
+                                     |
+                           abstract local Unix socket
+
+Legacy fallback: TypedDroid -> Shizuku typed UserService
 ```
 
-The agent never receives the Bridge Host admin API directly. The admin API stays on loopback, and Android remains the final policy authority even if the agent or host is compromised.
+Wireless Debugging is used to establish/restore the shell-UID helper, not as the intended long-lived agent transport. The normal agent↔phone connection remains TypedDroid's authenticated device channel, so future Wi-Fi↔mobile-network handover is independent of ADB networking.
 
-See [Architecture](docs/ARCHITECTURE.md), [Security model](docs/SECURITY.md), [MCP integration](docs/MCP.md), and [Bridge Host](docs/HOST.md).
+See [Architecture](docs/ARCHITECTURE.md), [Security model](docs/SECURITY.md), [MCP integration](docs/MCP.md), and [full-control roadmap](docs/FULL_CONTROL_ROADMAP.md).
 
-## Current tools
+## Current MCP tools
 
-Read-only:
+Read-only / structured:
 
 - `list_devices`
 - `pending_approvals`
@@ -67,7 +72,7 @@ Read-only:
 - `list_files`
 - `analyze_files`
 
-Mutating/privileged, with Android-side approval:
+Mutating/privileged typed tools, currently using the existing approval model:
 
 - `revoke_app_permission`
 - `delete_path`
@@ -75,15 +80,19 @@ Mutating/privileged, with Android-side approval:
 - `uninstall_app`
 - `force_stop_app`
 
+Full-control:
+
+- `run_shell` — denied by the phone in SAFE mode; available only to a pairing explicitly switched to TRUSTED and only while the owned privileged helper is active.
+
 Mutation retries can use explicit idempotency keys. Reusing a key for changed arguments fails closed.
 
-## Android security boundary
+## Android authority model
 
-TypedDroid protects its own package from agent-driven replacement, uninstall, force-stop, and permission mutation.
+Agent trust and Android privilege are separate axes. A TRUSTED agent does not create shell authority by itself: the phone must also have an active privileged backend. Conversely, an active shell-UID helper does not give a SAFE agent raw shell access.
 
-Package enumeration is launcher-scoped. File access is restricted to the Storage Access Framework tree selected by the user. Usage data requires Android Usage Access. Privileged operations require Shizuku and use fixed typed operations only.
+Typed operations continue to protect the TypedDroid package and keep their existing validation/approval behavior. The TRUSTED raw-shell capability is intentionally broader: once granted, it has the authority Android gives the `shell` UID, so restrictions such as launcher-only package enumeration or SAF-only paths do not describe the maximum authority of that specific capability.
 
-The standard release does **not** expose autonomous tap/swipe/screenshot/general UI automation. MediaProjection/UI-control experiments are a separate explicit security boundary and are not part of the agent tool surface.
+The current full-control work does not claim root, lockscreen bypass, or access that Android's shell UID itself does not have. UI perception/control is a separate upcoming capability group.
 
 ## Local setup
 

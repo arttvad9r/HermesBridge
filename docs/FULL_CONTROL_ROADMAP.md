@@ -39,14 +39,15 @@ Goal: privileged access without requiring Shizuku.
   - [x] repository-owned SPAKE2 shared-secret authentication.
   - [x] AES-GCM pairing channel and ADB RSA/Device GUID PeerInfo exchange.
   - [x] pairing code validation and in-memory protocol E2E tests.
-  - [ ] production onboarding that keeps Android's short-lived pairing dialog alive.
-- [ ] Discover/connect to the device's local `adbd` endpoint.
+  - [x] in-app pairing onboarding with explicit split-screen guidance for Android's short-lived pairing dialog; physical OEM verification remains.
+- [x] Discover/connect to the device's local `adbd` endpoint through Android NSD.
 - [x] Add an owned shell-UID `app_process` helper with authenticated abstract-local-socket RPC, bootstrapped through ADB.
 - [ ] Complete the minimum ADB host protocol required by TypedDroid.
   - [x] CNXN/STLS negotiation and TLS 1.3 secure-connect client.
   - [x] OPEN/OKAY/WRTE/CLSE stream multiplexer.
   - [x] `shell,v2` framing and stdout/stderr/exit parsing.
-  - [ ] mDNS discovery and reconnect lifecycle for `_adb-tls-connect._tcp`.
+  - [x] mDNS/NSD discovery for `_adb-tls-pairing._tcp` and `_adb-tls-connect._tcp`.
+  - [ ] physical reconnect/lifecycle verification across reboot and OEM variants.
 - [ ] Finish shell execution lifecycle: output/packet/socket-time bounds and helper-side draining exist; cancellation still needs wiring.
 - [ ] Reimplement current privileged app tools on the embedded ADB backend.
 - [ ] Reimplement Batterystats diagnostics on embedded ADB.

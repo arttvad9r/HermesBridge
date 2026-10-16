@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.arttvad9r.typeddroid.security.AgentTrustMode
@@ -106,6 +107,13 @@ class MainActivity : ComponentActivity() {
                     onApprove = vm::approveAction,
                     onDeny = vm::denyAction,
                     onSetAgentTrustMode = vm::setAgentTrustMode,
+                    onPairEmbeddedAdb = vm::pairEmbeddedAdb,
+                    onRestoreEmbeddedAdb = vm::restoreEmbeddedAdb,
+                    onRefreshEmbeddedAdb = vm::refreshEmbeddedAdb,
+                    onForgetEmbeddedAdb = vm::forgetEmbeddedAdb,
+                    onOpenDeveloperSettings = {
+                        runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
+                    },
                     onRequestShizukuPermission = vm::requestShizukuPermission,
                     onRefreshShizuku = vm::refreshShizuku,
                     onOpenShizuku = {
@@ -159,6 +167,11 @@ private fun BridgeScreen(
     onApprove: (String) -> Unit,
     onDeny: (String) -> Unit,
     onSetAgentTrustMode: (AgentTrustMode) -> Unit,
+    onPairEmbeddedAdb: (String) -> Unit,
+    onRestoreEmbeddedAdb: () -> Unit,
+    onRefreshEmbeddedAdb: () -> Unit,
+    onForgetEmbeddedAdb: () -> Unit,
+    onOpenDeveloperSettings: () -> Unit,
     onRequestShizukuPermission: () -> Unit,
     onRefreshShizuku: () -> Unit,
     onOpenShizuku: () -> Unit,
@@ -210,7 +223,7 @@ private fun BridgeScreen(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Безопасный доступ ИИ-агентов к этому телефону.",
+                text = "Управление этим Android для подключённых ИИ-агентов.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -278,6 +291,7 @@ private fun BridgeScreen(
                         notificationsGranted = state.notificationsGranted,
                         fileAccessConfigured = state.fileAccessConfigured,
                         usageAccessGranted = state.usageAccessGranted,
+                        embeddedAdbReady = state.embeddedAdb.ready,
                         shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
                         onFinish = onFinishSetup,
                     )
@@ -324,6 +338,15 @@ private fun BridgeScreen(
                     onChange = onSetAgentTrustMode,
                 )
 
+                EmbeddedAdbCard(
+                    state = state.embeddedAdb,
+                    onPair = onPairEmbeddedAdb,
+                    onRestore = onRestoreEmbeddedAdb,
+                    onRefresh = onRefreshEmbeddedAdb,
+                    onForget = onForgetEmbeddedAdb,
+                    onOpenDeveloperSettings = onOpenDeveloperSettings,
+                )
+
                 ShizukuCard(
                     state = state.shizuku,
                     wasConfigured = state.shizukuWasConfigured,
@@ -341,6 +364,7 @@ private fun BridgeScreen(
                 CapabilitiesCard(
                     fileAccessConfigured = state.fileAccessConfigured,
                     usageAccessGranted = state.usageAccessGranted,
+                    embeddedAdbReady = state.embeddedAdb.ready,
                     shizukuReady = state.shizuku.status == ShizukuAccessStatus.READY,
                     agentTrustMode = state.agentTrustMode,
                 )
@@ -395,6 +419,7 @@ private fun FinishSetupCard(
     notificationsGranted: Boolean,
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
+    embeddedAdbReady: Boolean,
     shizukuReady: Boolean,
     onFinish: () -> Unit,
 ) {
@@ -411,7 +436,8 @@ private fun FinishSetupCard(
             }
             CapabilityRow("Файлы", if (fileAccessConfigured) "Настроено" else "Можно позже")
             CapabilityRow("Статистика приложений", if (usageAccessGranted) "Настроено" else "Можно позже")
-            CapabilityRow("Shizuku", if (shizukuReady) "Настроено" else "Можно позже")
+            CapabilityRow("Встроенный ADB", if (embeddedAdbReady) "Готово" else "Можно позже")
+            CapabilityRow("Shizuku (legacy)", if (shizukuReady) "Настроено" else "Можно позже")
             Text(
                 "Нажмите «Завершить», чтобы перейти к обычной панели. Все эти разрешения можно изменить позже.",
                 style = MaterialTheme.typography.bodySmall,
@@ -807,6 +833,106 @@ private fun TrustModeCard(
 }
 
 @Composable
+private fun EmbeddedAdbCard(
+    state: EmbeddedAdbUiState,
+    onPair: (String) -> Unit,
+    onRestore: () -> Unit,
+    onRefresh: () -> Unit,
+    onForget: () -> Unit,
+    onOpenDeveloperSettings: () -> Unit,
+) {
+    var pairingCode by remember { mutableStateOf("") }
+    val status = when (state.status) {
+        EmbeddedAdbSetupStatus.NOT_PAIRED -> "Не настроен"
+        EmbeddedAdbSetupStatus.DISCOVERING_PAIRING -> "Ищем pairing service…"
+        EmbeddedAdbSetupStatus.PAIRING -> "Выполняется pairing…"
+        EmbeddedAdbSetupStatus.DISCOVERING_CONNECT -> "Ищем secure ADB…"
+        EmbeddedAdbSetupStatus.BOOTSTRAPPING -> "Запускаем helper…"
+        EmbeddedAdbSetupStatus.READY -> "Готов · shell UID"
+        EmbeddedAdbSetupStatus.RESTORE_REQUIRED -> "Нужно восстановить"
+        EmbeddedAdbSetupStatus.ERROR -> "Ошибка настройки"
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "Встроенный ADB",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(onClick = onRefresh, enabled = !state.busy) {
+                    Text("Проверить")
+                }
+            }
+            Text(status, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            Text(
+                when {
+                    state.ready -> "TypedDroid использует собственный shell-UID helper. Shizuku для полного режима не нужен; helper продолжает работать после закрытия Wireless Debugging, пока Android не завершит процесс или телефон не перезагрузится."
+                    state.wasPaired -> "ADB-ключ уже спарен. Включите Wireless debugging и нажмите «Восстановить», чтобы снова запустить helper после перезагрузки или остановки процесса."
+                    else -> "Для первичной настройки откройте Wireless debugging → Pair device with pairing code. Pairing-окно должно оставаться открытым; на телефонах, где переключение приложения его закрывает, используйте split-screen с Settings и TypedDroid."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            state.message?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (!state.ready) {
+                TextButton(
+                    onClick = onOpenDeveloperSettings,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.busy,
+                ) {
+                    Text("Открыть настройки разработчика")
+                }
+            }
+
+            if (!state.wasPaired) {
+                OutlinedTextField(
+                    value = pairingCode,
+                    onValueChange = { value -> pairingCode = value.filter(Char::isDigit).take(6) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.busy,
+                    singleLine = true,
+                    label = { Text("6-значный код Wireless Debugging") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                Button(
+                    onClick = { onPair(pairingCode) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.busy && pairingCode.length == 6,
+                ) {
+                    Text("Найти и подключить")
+                }
+            } else if (!state.ready) {
+                Button(
+                    onClick = onRestore,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.busy,
+                ) {
+                    Text("Восстановить полный доступ")
+                }
+            }
+
+            if (state.wasPaired) {
+                TextButton(
+                    onClick = onForget,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.busy,
+                ) {
+                    Text("Сбросить встроенную ADB-привязку")
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ShizukuCard(
     state: ShizukuAccessState,
     wasConfigured: Boolean,
@@ -952,6 +1078,7 @@ private fun MetricRow(label: String, value: String) {
 private fun CapabilitiesCard(
     fileAccessConfigured: Boolean,
     usageAccessGranted: Boolean,
+    embeddedAdbReady: Boolean,
     shizukuReady: Boolean,
     agentTrustMode: AgentTrustMode,
 ) {
@@ -963,11 +1090,12 @@ private fun CapabilitiesCard(
             CapabilityRow("Статистика использования", if (usageAccessGranted) "Доступно" else "Не настроено")
             CapabilityRow("Файлы", if (fileAccessConfigured) "Доступно" else "Не настроено")
             CapabilityRow("Подтверждение действий", "Готово")
+            CapabilityRow("Встроенный ADB", if (embeddedAdbReady) "Готово" else "Не настроено")
             CapabilityRow(
                 "Доверие агенту",
                 if (agentTrustMode == AgentTrustMode.TRUSTED) "Полный доступ" else "Безопасный режим",
             )
-            CapabilityRow("Расширенный доступ Shizuku", if (shizukuReady) "Готово" else "Не настроено")
+            CapabilityRow("Shizuku (legacy)", if (shizukuReady) "Готово" else "Не настроено")
             CapabilityRow("Управление интерфейсом", "Опционально")
         }
     }

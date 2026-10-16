@@ -36,33 +36,33 @@ internal class EmbeddedAdbAccessManager(context: Context) {
 
     fun wasPaired(): Boolean = store.wasAdbPaired()
 
+    suspend fun pair(
+        pairing: AdbTcpEndpoint,
+        pairingCode: String,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val result = AdbPairingClient().pair(
+                host = pairing.host,
+                port = pairing.port,
+                pairingCode = pairingCode,
+                identity = identityStore.getOrCreate(),
+            )
+            store.markAdbPaired()
+            Result.success(result.deviceGuid)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            Result.failure(error)
+        }
+    }
+
     suspend fun pairAndBootstrap(
         pairing: AdbTcpEndpoint,
         connect: AdbTcpEndpoint,
         pairingCode: String,
-    ): Result<EmbeddedAdbAccessResult> = withContext(Dispatchers.IO) {
-        try {
-            val identity = identityStore.getOrCreate()
-            val pairingResult = AdbPairingClient().pair(
-                host = pairing.host,
-                port = pairing.port,
-                pairingCode = pairingCode,
-                identity = identity,
-            )
-            store.markAdbPaired()
-            val bootstrap = connectAndBootstrap(connect, identity)
-            Result.success(
-                EmbeddedAdbAccessResult(
-                    socketName = bootstrap.socketName,
-                    deviceGuid = pairingResult.deviceGuid,
-                )
-            )
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            runCatching(store::clear)
-            Result.failure(error)
-        }
+    ): Result<EmbeddedAdbAccessResult> {
+        val deviceGuid = pair(pairing, pairingCode).getOrElse { return Result.failure(it) }
+        return restoreAfterReboot(connect).map { it.copy(deviceGuid = deviceGuid) }
     }
 
     suspend fun restoreAfterReboot(
