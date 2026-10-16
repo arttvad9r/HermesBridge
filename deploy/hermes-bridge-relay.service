@@ -20,8 +20,15 @@ StateDirectoryMode=0700
 
 # Basic service hardening. Network access is required for HTTPS/WSS proxying.
 NoNewPrivileges=true
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+RemoveIPC=true
 PrivateTmp=true
 PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
 ProtectSystem=strict
 ProtectHome=true
 ProtectKernelTunables=true
