@@ -94,6 +94,8 @@ The bundled installer also waits for this health endpoint before declaring an in
 
 ## 4. TLS reverse proxy
 
+A production-oriented Nginx example is included at `deploy/nginx-hermes-bridge.conf.example`. It exposes only `/health`, `/ws/device`, and `/device-artifacts/*`; all other HTTPS paths fail closed with 404.
+
 Example Caddy configuration:
 
 ```caddyfile
