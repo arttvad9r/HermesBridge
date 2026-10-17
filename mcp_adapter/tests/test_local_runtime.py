@@ -58,6 +58,45 @@ def free_port() -> int:
 
 
 class LocalRuntimeTest(unittest.TestCase):
+    def test_direct_ip_policy_accepts_private_and_cgnat_but_not_public_or_linklocal_v6(self) -> None:
+        self.assertTrue(local_runtime._allowed_direct_ip("192.168.1.20"))
+        self.assertTrue(local_runtime._allowed_direct_ip("10.10.0.4"))
+        self.assertTrue(local_runtime._allowed_direct_ip("100.100.10.20"))
+        self.assertTrue(local_runtime._allowed_direct_ip("fd00::1234"))
+        self.assertFalse(local_runtime._allowed_direct_ip("8.8.8.8"))
+        self.assertFalse(local_runtime._allowed_direct_ip("127.0.0.1"))
+        self.assertFalse(local_runtime._allowed_direct_ip("fe80::1234"))
+
+    def test_direct_runtime_environment_is_optional_and_fails_open(self) -> None:
+        with patch.dict(os.environ, {"TYPED_DROID_DIRECT_ENABLED": "0"}, clear=True):
+            self.assertEqual(local_runtime._direct_runtime_environment(), {})
+        with (
+            patch.dict(os.environ, {"TYPED_DROID_DIRECT_ENABLED": "1"}, clear=True),
+            patch.object(local_runtime, "_discover_direct_hosts", return_value=[]),
+        ):
+            self.assertEqual(local_runtime._direct_runtime_environment(), {})
+
+    def test_direct_runtime_environment_uses_private_material_without_exposing_admin_port(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            keystore = Path(directory) / "direct.p12"
+            keystore.write_bytes(b"test")
+            with (
+                patch.dict(
+                    os.environ,
+                    {"TYPED_DROID_DIRECT_ENABLED": "1", "TYPED_DROID_DIRECT_PORT": "18443"},
+                    clear=True,
+                ),
+                patch.object(local_runtime, "_discover_direct_hosts", return_value=["192.168.1.20", "100.64.1.2"]),
+                patch.object(local_runtime, "_port_is_available", return_value=True),
+                patch.object(local_runtime, "_ensure_direct_keystore", return_value=(keystore, "secret-password")),
+            ):
+                env = local_runtime._direct_runtime_environment()
+        self.assertEqual(env["TYPED_DROID_DIRECT_PORT"], "18443")
+        self.assertEqual(env["TYPED_DROID_DIRECT_HOSTS"], "192.168.1.20,100.64.1.2")
+        self.assertEqual(env["TYPED_DROID_DIRECT_KEY_ALIAS"], local_runtime.DIRECT_KEY_ALIAS)
+        self.assertNotIn("PORT", env)
+        self.assertNotIn("TYPED_DROID_ADMIN_TOKEN", env)
+
     def test_generic_port_environment_does_not_reconfigure_managed_runtime(self) -> None:
         with patch.dict(os.environ, {"PORT": "9999"}, clear=True):
             self.assertEqual(local_runtime._port(), local_runtime.DEFAULT_PORT)
@@ -84,6 +123,7 @@ class LocalRuntimeTest(unittest.TestCase):
                 "XDG_DATA_HOME": str(root / "data"),
                 "TYPED_DROID_RELAY_BIN": str(relay),
                 "TYPED_DROID_LOCAL_PORT": str(port),
+                "TYPED_DROID_DIRECT_ENABLED": "0",
             }
             with patch.dict(os.environ, env, clear=True):
                 lease = local_runtime.LocalRuntimeLease()
@@ -116,6 +156,7 @@ class LocalRuntimeTest(unittest.TestCase):
                 "XDG_DATA_HOME": str(root / "data"),
                 "TYPED_DROID_RELAY_BIN": str(relay),
                 "TYPED_DROID_LOCAL_PORT": str(port),
+                "TYPED_DROID_DIRECT_ENABLED": "0",
             }
             with patch.dict(os.environ, env, clear=True):
                 token = "different-token-that-is-long-enough"
@@ -150,6 +191,7 @@ class LocalRuntimeTest(unittest.TestCase):
                 "XDG_DATA_HOME": str(root / "data"),
                 "TYPED_DROID_RELAY_BIN": str(relay),
                 "TYPED_DROID_LOCAL_PORT": str(port),
+                "TYPED_DROID_DIRECT_ENABLED": "0",
                 "PYTHONPATH": str(Path(__file__).resolve().parents[1]),
             }
             ready = root / "child-ready"

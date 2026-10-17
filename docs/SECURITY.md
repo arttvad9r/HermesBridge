@@ -184,3 +184,7 @@ Before upgrading privileged/tooling dependencies:
 3. run tests/build;
 4. re-run the allowlist audit;
 5. never auto-enable newly added upstream tools.
+
+## Direct/LAN transport
+
+The optional direct ingress is not an admin listener. `/api/v1/*` stays restricted to the loopback connector and returns 404 on the direct TLS port. Direct device candidates are accepted only as private literal addresses and require WSS with a SHA-256 leaf-certificate pin delivered after authenticated device login. The self-signed direct certificate therefore does not depend on the local network's DNS or CA trust. A wrong pin fails closed. Device challenge/response, SAFE/TRUSTED state, approvals and audit remain unchanged across direct and Internet routes.

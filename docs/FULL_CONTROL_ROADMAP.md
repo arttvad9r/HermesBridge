@@ -107,12 +107,12 @@ Goal: keep the local relay as an implementation detail of `typeddroid-mcp`, not 
 
 ## Phase 6 — network independence
 
-- [ ] make device transport reconnect across Wi-Fi/mobile-network changes.
-- [ ] support LAN/direct connection when reachable.
-- [ ] define an optional Internet traversal/relay mode without making a user-managed VPS mandatory.
-- [ ] retain end-to-end device identity/authentication independent of transport.
+- [x] network-aware reconnect loop: Android `NetworkCallback` interrupts exponential backoff and forces a fresh authenticated session after the default network changes. Emulator/pure-policy coverage is green; physical Wi-Fi ↔ cellular handover remains a release test.
+- [x] LAN/direct path: the managed relay can expose a separate WSS device-ingress listener, advertises private literal endpoints only after device authentication, and Android prefers persisted certificate-pinned direct candidates before the configured Internet endpoint. Emulator TLS/pin E2E is green.
+- [ ] optional hosted Internet rendezvous/relay that requires no user-managed VPS. The existing configured Internet WSS endpoint remains the bootstrap/fallback today; arbitrary NAT traversal is not claimed.
+- [x] device identity/authentication remains transport-independent: direct and Internet WSS use the same persisted device key, challenge/response and Android pairing/trust state.
 
-Important: NAT traversal across arbitrary networks cannot be guaranteed by "no server at all". The architecture must keep relay/rendezvous optional and replaceable, not pretend the networking constraint does not exist.
+The direct listener never exposes `/api/v1/*`; those routes remain bound to the loopback admin connector. Direct candidates use self-signed TLS with a SHA-256 certificate pin learned only from the post-authentication `transport.hints` message. NAT traversal across arbitrary networks still requires a rendezvous/relay service; that service must remain optional and replaceable rather than becoming a new privileged trust boundary.
 
 ## Phase 7 — root backend (optional)
 

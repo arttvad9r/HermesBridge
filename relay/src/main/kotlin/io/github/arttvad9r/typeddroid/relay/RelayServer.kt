@@ -15,6 +15,8 @@ import io.github.arttvad9r.typeddroid.protocol.PairOkPayload
 import io.github.arttvad9r.typeddroid.protocol.PairRequestPayload
 import io.github.arttvad9r.typeddroid.protocol.ProtocolError
 import io.github.arttvad9r.typeddroid.protocol.SessionHelloPayload
+import io.github.arttvad9r.typeddroid.protocol.TransportEndpointHint
+import io.github.arttvad9r.typeddroid.protocol.TransportHintsPayload
 import io.github.arttvad9r.typeddroid.protocol.WireEnvelope
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -23,7 +25,9 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.application.install
+import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.engine.sslConnector
 import io.ktor.server.netty.Netty
 import io.ktor.server.request.receiveStream
 import io.ktor.server.request.receiveText
@@ -41,7 +45,11 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import java.io.FileInputStream
 import java.nio.file.Path
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.security.cert.X509Certificate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
@@ -206,6 +214,7 @@ private class RelayRuntime(
     deviceRegistryPath: Path?,
     artifactDirectory: Path?,
     transferDirectory: Path?,
+    val transportHints: List<TransportEndpointHint> = emptyList(),
 ) {
     val pairingCodes = PairingCodeStore()
     val devices = DeviceRegistry(deviceRegistryPath)
@@ -214,6 +223,15 @@ private class RelayRuntime(
     val fileTransfers = FileTransferStore(transferDirectory)
     val approvals = ApprovalNotificationStore()
 }
+
+private data class DirectIngressConfig(
+    val port: Int,
+    val keyStore: KeyStore,
+    val keyStorePath: Path,
+    val alias: String,
+    val password: CharArray,
+    val hints: List<TransportEndpointHint>,
+)
 
 internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = when {
     result.ok -> HttpStatusCode.OK
@@ -246,25 +264,109 @@ fun main() {
             ?.takeIf { it.isNotBlank() }
             ?: ".typed-droid",
     )
+    val directIngress = loadDirectIngressConfig()
+    val runtime = RelayRuntime(
+        deviceRegistryPath = stateDirectory.resolve("devices.json"),
+        artifactDirectory = stateDirectory.resolve("apk-artifacts"),
+        transferDirectory = stateDirectory.resolve("file-transfers"),
+        transportHints = directIngress?.hints.orEmpty(),
+    )
 
-    embeddedServer(Netty, port = port, host = RELAY_BIND_HOST) {
-        relayModule(
+    embeddedServer(Netty, configure = {
+        connector {
+            host = RELAY_BIND_HOST
+            this.port = port
+        }
+        directIngress?.let { direct ->
+            sslConnector(
+                keyStore = direct.keyStore,
+                keyAlias = direct.alias,
+                keyStorePassword = { direct.password.copyOf() },
+                privateKeyPassword = { direct.password.copyOf() },
+            ) {
+                host = DIRECT_INGRESS_BIND_HOST
+                this.port = direct.port
+                keyStorePath = direct.keyStorePath.toFile()
+            }
+        }
+    }) {
+        relayModuleInternal(
             adminToken = token,
-            deviceRegistryPath = stateDirectory.resolve("devices.json"),
-            artifactDirectory = stateDirectory.resolve("apk-artifacts"),
-            transferDirectory = stateDirectory.resolve("file-transfers"),
+            runtime = runtime,
+            adminPort = port,
         )
     }.start(wait = true)
 }
+
+private fun loadDirectIngressConfig(): DirectIngressConfig? {
+    val keyStoreValue = System.getenv("TYPED_DROID_DIRECT_KEYSTORE")?.trim().orEmpty()
+    val passwordValue = System.getenv("TYPED_DROID_DIRECT_KEYSTORE_PASSWORD")?.trim().orEmpty()
+    val hostsValue = System.getenv("TYPED_DROID_DIRECT_HOSTS")?.trim().orEmpty()
+    if (keyStoreValue.isEmpty() || passwordValue.isEmpty() || hostsValue.isEmpty()) return null
+
+    val port = System.getenv("TYPED_DROID_DIRECT_PORT")?.toIntOrNull() ?: DEFAULT_DIRECT_INGRESS_PORT
+    require(port in 1..65535 && port != (System.getenv("PORT")?.toIntOrNull() ?: 8080)) {
+        "TYPED_DROID_DIRECT_PORT must be a valid port distinct from the admin port."
+    }
+    val alias = System.getenv("TYPED_DROID_DIRECT_KEY_ALIAS")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: DIRECT_INGRESS_KEY_ALIAS
+    val keyStorePath = Path.of(keyStoreValue).toAbsolutePath().normalize()
+    val password = passwordValue.toCharArray()
+    val keyStore = KeyStore.getInstance("PKCS12").apply {
+        FileInputStream(keyStorePath.toFile()).use { load(it, password) }
+    }
+    val certificate = keyStore.getCertificate(alias) as? X509Certificate
+        ?: error("TypedDroid direct-ingress certificate alias is missing.")
+    certificate.checkValidity()
+    val fingerprint = MessageDigest.getInstance("SHA-256").digest(certificate.encoded).toHexLower()
+    val expiresAt = System.currentTimeMillis() + DIRECT_HINT_TTL_MILLIS
+    val hints = hostsValue
+        .split(',')
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinct()
+        .take(MAX_DIRECT_HINTS)
+        .map { host ->
+            require(isLiteralDirectHost(host)) { "TYPED_DROID_DIRECT_HOSTS contains an invalid non-literal address." }
+            val authority = if (':' in host && !host.startsWith('[')) "[$host]" else host
+            TransportEndpointHint(
+                webSocketUrl = "wss://$authority:$port/ws/device",
+                certificateSha256 = fingerprint,
+                expiresAtEpochMillis = expiresAt,
+            )
+        }
+    if (hints.isEmpty()) return null
+    return DirectIngressConfig(port, keyStore, keyStorePath, alias, password, hints)
+}
+
+private fun isLiteralDirectHost(value: String): Boolean {
+    if (value.length !in 2..64 || value.any { it.isWhitespace() || it == '/' || it == '@' }) return false
+    if (':' in value) return IPV6_LITERAL_REGEX.matches(value)
+    val parts = value.split('.')
+    return parts.size == 4 && parts.all { part -> part.toIntOrNull()?.let { it in 0..255 } == true }
+}
+
+private fun ByteArray.toHexLower(): String = joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
 fun Application.relayModule(
     adminToken: String,
     deviceRegistryPath: Path? = null,
     artifactDirectory: Path? = null,
     transferDirectory: Path? = null,
-) {
-    val runtime = RelayRuntime(deviceRegistryPath, artifactDirectory, transferDirectory)
+    transportHints: List<TransportEndpointHint> = emptyList(),
+) = relayModuleInternal(
+    adminToken = adminToken,
+    runtime = RelayRuntime(deviceRegistryPath, artifactDirectory, transferDirectory, transportHints),
+    adminPort = null,
+)
 
+private fun Application.relayModuleInternal(
+    adminToken: String,
+    runtime: RelayRuntime,
+    adminPort: Int?,
+) {
     install(WebSockets) {
         pingPeriodMillis = 20_000L
         timeoutMillis = 30_000L
@@ -278,7 +380,7 @@ fun Application.relayModule(
         }
 
         get("/api/v1/devices") {
-            if (!call.requireAdmin(adminToken)) return@get
+            if (!call.requireAdmin(adminToken, adminPort)) return@get
             val devices = runtime.devices.list().map { device ->
                 RelayDeviceResponse(
                     deviceId = device.deviceId,
@@ -293,7 +395,7 @@ fun Application.relayModule(
         }
 
         get("/api/v1/devices/{deviceId}/approvals") {
-            if (!call.requireAdmin(adminToken)) return@get
+            if (!call.requireAdmin(adminToken, adminPort)) return@get
             val deviceId = call.parameters["deviceId"]
             if (deviceId == null || !DEVICE_ID_REGEX.matches(deviceId)) {
                 call.respondText(
@@ -320,7 +422,7 @@ fun Application.relayModule(
         }
 
         post("/api/v1/devices/{deviceId}/revoke") {
-            if (!call.requireAdmin(adminToken)) return@post
+            if (!call.requireAdmin(adminToken, adminPort)) return@post
             val deviceId = call.parameters["deviceId"]
             if (deviceId == null || !DEVICE_ID_REGEX.matches(deviceId)) {
                 call.respondText(
@@ -351,7 +453,7 @@ fun Application.relayModule(
         }
 
         post("/api/v1/pairing-codes") {
-            if (!call.requireAdmin(adminToken)) return@post
+            if (!call.requireAdmin(adminToken, adminPort)) return@post
             val pairing = runtime.pairingCodes.create()
             val body = BridgeProtocol.json.encodeToString(
                 PairingCodeResponse(pairing.code, pairing.expiresAtEpochMillis)
@@ -360,7 +462,7 @@ fun Application.relayModule(
         }
 
         post("/api/v1/apk-artifacts") {
-            if (!call.requireAdmin(adminToken)) return@post
+            if (!call.requireAdmin(adminToken, adminPort)) return@post
             val fileName = call.request.headers[APK_NAME_HEADER]
             if (fileName.isNullOrBlank()) {
                 call.respondText(
@@ -446,7 +548,7 @@ fun Application.relayModule(
         }
 
         post("/api/v1/file-artifacts") {
-            if (!call.requireAdmin(adminToken)) return@post
+            if (!call.requireAdmin(adminToken, adminPort)) return@post
             val fileName = call.request.headers[FILE_NAME_HEADER]
             if (fileName.isNullOrBlank()) {
                 call.respondText("{\"error\":\"missing_file_name\"}", ContentType.Application.Json, HttpStatusCode.BadRequest)
@@ -490,7 +592,7 @@ fun Application.relayModule(
         }
 
         post("/api/v1/file-upload-slots") {
-            if (!call.requireAdmin(adminToken)) return@post
+            if (!call.requireAdmin(adminToken, adminPort)) return@post
             val slot = try {
                 runtime.fileTransfers.createUploadSlot()
             } catch (_: FileTransferConflictException) {
@@ -537,7 +639,7 @@ fun Application.relayModule(
         }
 
         get("/api/v1/file-upload-slots/{uploadId}") {
-            if (!call.requireAdmin(adminToken)) return@get
+            if (!call.requireAdmin(adminToken, adminPort)) return@get
             val uploadId = call.parameters["uploadId"]
             val status = uploadId?.let(runtime.fileTransfers::uploadStatus)
             if (status == null) {
@@ -548,7 +650,7 @@ fun Application.relayModule(
         }
 
         get("/api/v1/file-upload-slots/{uploadId}/content") {
-            if (!call.requireAdmin(adminToken)) return@get
+            if (!call.requireAdmin(adminToken, adminPort)) return@get
             val uploadId = call.parameters["uploadId"]
             val uploaded = uploadId?.let(runtime.fileTransfers::completedUpload)
             if (uploaded == null) {
@@ -582,7 +684,7 @@ fun Application.relayModule(
         }
 
         post("/api/v1/devices/{deviceId}/commands") {
-            if (!call.requireAdmin(adminToken)) return@post
+            if (!call.requireAdmin(adminToken, adminPort)) return@post
             val deviceId = call.parameters["deviceId"]
             if (deviceId.isNullOrBlank()) {
                 call.respondText(
@@ -635,7 +737,11 @@ fun Application.relayModule(
     }
 }
 
-private suspend fun ApplicationCall.requireAdmin(adminToken: String): Boolean {
+private suspend fun ApplicationCall.requireAdmin(adminToken: String, adminPort: Int?): Boolean {
+    if (adminPort != null && request.local.localPort != adminPort) {
+        respondText("Not Found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+        return false
+    }
     val supplied = request.headers[HttpHeaders.Authorization]
     if (supplied == "Bearer $adminToken") return true
     respondText("Unauthorized", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
@@ -792,6 +898,15 @@ private suspend fun DefaultWebSocketServerSession.handleDeviceSocket(runtime: Re
                             payload = BridgeProtocol.payload(AuthOkPayload(UUID.randomUUID().toString())),
                         )
                     )
+                    if (runtime.transportHints.isNotEmpty()) {
+                        sendEnvelope(
+                            BridgeProtocol.envelope(
+                                type = MessageType.TRANSPORT_HINTS,
+                                deviceId = device.deviceId,
+                                payload = BridgeProtocol.payload(TransportHintsPayload(runtime.transportHints)),
+                            )
+                        )
+                    }
                 }
 
                 MessageType.APPROVAL_REQUEST -> {
@@ -883,9 +998,15 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
 }
 
 internal const val RELAY_BIND_HOST = "127.0.0.1"
+internal const val DIRECT_INGRESS_BIND_HOST = "0.0.0.0"
+internal const val DEFAULT_DIRECT_INGRESS_PORT = 8443
+private const val DIRECT_INGRESS_KEY_ALIAS = "typeddroid-direct"
+private const val DIRECT_HINT_TTL_MILLIS = 30L * 24L * 60L * 60L * 1000L
+private const val MAX_DIRECT_HINTS = 8
 private const val APK_NAME_HEADER = "X-TypedDroid-Apk-Name"
 private const val APK_STAGING_KEY_HEADER = "X-TypedDroid-Apk-Staging-Key"
 private const val FILE_NAME_HEADER = "X-TypedDroid-File-Name"
 private const val MAX_IDEMPOTENCY_KEY_LENGTH = 128
 private val DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9-]{1,80}$")
 private val IDEMPOTENCY_KEY_REGEX = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+private val IPV6_LITERAL_REGEX = Regex("^[0-9A-Fa-f:]+$")

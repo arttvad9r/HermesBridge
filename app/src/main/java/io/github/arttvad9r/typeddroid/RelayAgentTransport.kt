@@ -13,11 +13,10 @@ import io.github.arttvad9r.typeddroid.protocol.MessageType
 import io.github.arttvad9r.typeddroid.protocol.PairOkPayload
 import io.github.arttvad9r.typeddroid.protocol.PairRequestPayload
 import io.github.arttvad9r.typeddroid.protocol.SessionHelloPayload
+import io.github.arttvad9r.typeddroid.protocol.TransportHintsPayload
 import io.github.arttvad9r.typeddroid.security.ApprovalManager
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
-import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
@@ -25,6 +24,7 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
@@ -36,22 +36,24 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
-class RelayAgentTransport(
+internal class RelayAgentTransport(
     context: Context,
     relayWsUrl: String,
     healthRepository: DeviceHealthRepository,
     appsRepository: InstalledAppsRepository = AndroidInstalledAppsRepository(context),
     filesRepository: SafFilesRepository = AndroidSafFilesRepository(context),
     privilegedAppsBackend: PrivilegedAppsBackend = EmbeddedPrivilegedAppsBackend(context.applicationContext),
-    apkArtifactRepository: ApkArtifactRepository = RelayApkArtifactRepository(context, relayWsUrl),
+    apkArtifactRepository: ApkArtifactRepository? = null,
     apkPackageInspector: ApkPackageInspector = AndroidApkPackageInspector(context),
     appUsageRepository: AppUsageRepository = AndroidAppUsageRepository(context),
     appPermissionsRepository: AppPermissionsRepository = AndroidAppPermissionsRepository(context),
@@ -59,27 +61,38 @@ class RelayAgentTransport(
     rawShellBackend: RawShellBackend = EmbeddedRawShellBackend(context.applicationContext),
     uiControlBackend: UiControlBackend = EmbeddedUiControlBackend(context.applicationContext),
     notificationControlBackend: NotificationControlBackend = AndroidNotificationControlBackend(context.applicationContext),
-    fileTransferBackend: FileTransferBackend = RelayFileTransferBackend(context.applicationContext, relayWsUrl),
+    fileTransferBackend: FileTransferBackend? = null,
     deviceIdentity: DeviceIdentity = AndroidKeystoreDeviceIdentity(),
     pairingRecordStore: PairingRecordStore = PairingStore(context.applicationContext),
+    endpointHintStore: RelayEndpointHintStore = RelayEndpointHintStore(context.applicationContext),
+    networkChangeMonitor: RelayNetworkChangeMonitor = AndroidRelayNetworkChangeMonitor(context.applicationContext),
 ) : AgentTransport {
-    private val relayWsUrl = parseRelayEndpoint(relayWsUrl).webSocketUrl
+    private val configuredRelayWebSocketUrl = parseRelayEndpoint(relayWsUrl).webSocketUrl
     private val identity = deviceIdentity
     private val pairingStore = pairingRecordStore
+    private val directHintStore = endpointHintStore
+    private val networkMonitor = networkChangeMonitor
     private val pairingCredentials = PairingCredentialManager(pairingStore, identity)
+    private val endpointRuntime = ActiveRelayEndpointRuntime(
+        RelayConnectionEndpoint(parseRelayEndpoint(configuredRelayWebSocketUrl))
+    )
+    private val effectiveApkArtifactRepository = apkArtifactRepository
+        ?: RelayApkArtifactRepository(context.applicationContext, endpointRuntime::current)
+    private val effectiveFileTransferBackend = fileTransferBackend
+        ?: RelayFileTransferBackend(context.applicationContext, endpointRuntime::current)
     private val coreToolRegistry = BridgeToolRegistry(
         healthRepository = healthRepository,
         appsRepository = appsRepository,
         filesRepository = filesRepository,
         privilegedAppsBackend = privilegedAppsBackend,
-        apkArtifactRepository = apkArtifactRepository,
+        apkArtifactRepository = effectiveApkArtifactRepository,
         apkPackageInspector = apkPackageInspector,
         batteryDiagnosticsBackend = batteryDiagnosticsBackend,
         appUsageRepository = appUsageRepository,
         rawShellBackend = rawShellBackend,
         uiControlBackend = uiControlBackend,
         notificationControlBackend = notificationControlBackend,
-        fileTransferBackend = fileTransferBackend,
+        fileTransferBackend = effectiveFileTransferBackend,
         agentTrustMode = pairingRecordStore::trustMode,
     )
     private val commandRouter = BridgeCommandRouter(
@@ -89,11 +102,9 @@ class RelayAgentTransport(
         privilegedAppsBackend = privilegedAppsBackend,
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val client = HttpClient(CIO) {
-        install(WebSockets) {
-            applyRelayWebSocketPolicy()
-        }
-    }
+    private val standardClient = createRelayWebSocketHttpClient(null)
+    private val pinnedClients = ConcurrentHashMap<String, HttpClient>()
+    private val networkGeneration = MutableStateFlow(0L)
 
     private val mutableConnectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<ConnectionState> = mutableConnectionState.asStateFlow()
@@ -107,12 +118,24 @@ class RelayAgentTransport(
     @Volatile
     private var revokeAck: CompletableDeferred<Result<Unit>>? = null
 
+    init {
+        networkMonitor.start {
+            networkGeneration.update { generation -> generation + 1L }
+            if (mutableConnectionState.value == ConnectionState.CONNECTED) {
+                scope.launch {
+                    activeSession?.close(CloseReason(CloseReason.Codes.NORMAL, "Android network changed"))
+                }
+            }
+        }
+    }
+
     override suspend fun pair(code: String): Result<Unit> = startConnection(code)
 
     override suspend fun resume(): Result<Unit> {
         val validation = pairingCredentials.validateResume()
         if (validation.isFailure) {
             if (pairingStore.deviceId() == null) {
+                directHintStore.clear()
                 BridgeApprovalRuntime.clear()
             }
             mutableConnectionState.value = ConnectionState.ERROR
@@ -134,6 +157,7 @@ class RelayAgentTransport(
 
     suspend fun revokePairing(): Result<Unit> {
         val deviceId = pairingStore.deviceId() ?: run {
+            directHintStore.clear()
             BridgeApprovalRuntime.clear()
             return Result.success(Unit)
         }
@@ -177,7 +201,10 @@ class RelayAgentTransport(
         connectionJob = null
         activeSession = null
         mutableConnectionState.value = ConnectionState.DISCONNECTED
-        client.close()
+        networkMonitor.close()
+        standardClient.close()
+        pinnedClients.values.forEach(HttpClient::close)
+        pinnedClients.clear()
         scope.cancel()
     }
 
@@ -207,11 +234,17 @@ class RelayAgentTransport(
     ) {
         var pairingCode = initialPairingCode
         var backoffMillis = 1_000L
+        var candidateIndex = 0
+        var observedNetworkGeneration = networkGeneration.value
 
         while (currentCoroutineContext().isActive) {
+            val directHints = if (pairingStore.deviceId() == null) emptyList() else directHintStore.load()
+            val candidates = relayConnectionCandidates(configuredRelayWebSocketUrl, directHints)
+            if (candidateIndex !in candidates.indices) candidateIndex = 0
+            val candidate = candidates[candidateIndex]
             var sessionFailure: Throwable? = null
             val authenticated = try {
-                runSession(pairingCode, ready)
+                runSession(candidate, pairingCode, ready)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
@@ -220,6 +253,7 @@ class RelayAgentTransport(
                     error.mode == DeviceIdentityFailureMode.REPAIR_REQUIRED
                 ) {
                     val resetFailure = pairingCredentials.invalidateForRepair().exceptionOrNull()
+                    directHintStore.clear()
                     BridgeApprovalRuntime.clear()
                     val terminalError = if (resetFailure == null) {
                         error
@@ -272,10 +306,13 @@ class RelayAgentTransport(
                 }
 
                 pairingCode = null
+                candidateIndex = (candidateIndex + 1) % candidates.size
                 mutableConnectionState.value = ConnectionState.RECONNECTING
-                val jitter = Random.nextLong(0L, min(1_000L, backoffMillis))
-                delay(backoffMillis + jitter)
-                backoffMillis = nextRelayReconnectBackoffMillis(backoffMillis)
+                val wait = awaitRelayReconnectOrNetworkChange(
+                    networkGeneration, backoffMillis, observedNetworkGeneration
+                )
+                observedNetworkGeneration = wait.generation
+                backoffMillis = if (wait.networkChanged) 1_000L else nextRelayReconnectBackoffMillis(backoffMillis)
                 continue
             }
 
@@ -286,23 +323,31 @@ class RelayAgentTransport(
             }
 
             pairingCode = null
-            if (authenticated) backoffMillis = 1_000L
+            if (authenticated) {
+                backoffMillis = 1_000L
+                candidateIndex = 0
+            } else {
+                candidateIndex = (candidateIndex + 1) % candidates.size
+            }
             mutableConnectionState.value = ConnectionState.RECONNECTING
 
-            val jitter = Random.nextLong(0L, min(1_000L, backoffMillis))
-            delay(backoffMillis + jitter)
-            backoffMillis = nextRelayReconnectBackoffMillis(backoffMillis)
+            val wait = awaitRelayReconnectOrNetworkChange(
+                networkGeneration, backoffMillis, observedNetworkGeneration
+            )
+            observedNetworkGeneration = wait.generation
+            backoffMillis = if (wait.networkChanged) 1_000L else nextRelayReconnectBackoffMillis(backoffMillis)
         }
     }
 
     private suspend fun runSession(
+        connectionEndpoint: RelayConnectionEndpoint,
         pairingCode: String?,
         ready: CompletableDeferred<Result<Unit>>,
     ): Boolean {
         var authenticated = false
         var pendingPairDeviceId: String? = null
 
-        client.webSocket(relayWsUrl) {
+        clientFor(connectionEndpoint).webSocket(connectionEndpoint.endpoint.webSocketUrl) {
             activeSession = this
             try {
                 val existingDeviceId = pairingStore.deviceId()
@@ -374,10 +419,20 @@ class RelayAgentTransport(
                             if (pendingPairDeviceId != null || pairingStore.hasPendingDeviceId()) {
                                 pairingStore.confirmDeviceId(expectedDeviceId)
                             }
+                            endpointRuntime.update(connectionEndpoint)
                             pendingPairDeviceId = null
                             authenticated = true
                             mutableConnectionState.value = ConnectionState.CONNECTED
                             if (!ready.isCompleted) ready.complete(Result.success(Unit))
+                        }
+
+                        MessageType.TRANSPORT_HINTS -> {
+                            val deviceId = pairingStore.deviceId()
+                            if (!authenticated || deviceId == null || envelope.deviceId != deviceId) {
+                                continue
+                            }
+                            val payload = BridgeProtocol.decodePayload<TransportHintsPayload>(envelope)
+                            directHintStore.replace(payload.hints)
                         }
 
                         MessageType.COMMAND_REQUEST -> {
@@ -403,6 +458,7 @@ class RelayAgentTransport(
                                 error("Relay returned inconsistent device revoke acknowledgement.")
                             }
                             pairingStore.clear()
+                            directHintStore.clear()
                             BridgeApprovalRuntime.clear()
                             mutableConnectionState.value = ConnectionState.DISCONNECTED
                             revokeAck?.complete(Result.success(Unit))
@@ -425,6 +481,7 @@ class RelayAgentTransport(
                             )
                             if (payload.code == "unknown_device") {
                                 pairingStore.clear()
+                                directHintStore.clear()
                                 BridgeApprovalRuntime.clear()
                                 mutableConnectionState.value = ConnectionState.ERROR
                             }
@@ -476,10 +533,38 @@ class RelayAgentTransport(
         )
     }
 
+    private fun clientFor(endpoint: RelayConnectionEndpoint): HttpClient {
+        val pin = endpoint.certificateSha256 ?: return standardClient
+        return pinnedClients.getOrPut(pin) { createRelayWebSocketHttpClient(pin) }
+    }
+
     private companion object {
         const val REVOKE_TIMEOUT_MILLIS = 15_000L
     }
 }
+
+
+internal suspend fun awaitRelayReconnectOrNetworkChange(
+    networkGeneration: StateFlow<Long>,
+    backoffMillis: Long,
+    observedGeneration: Long,
+    jitterMillis: Long = Random.nextLong(0L, min(1_000L, backoffMillis)),
+): RelayReconnectWait {
+    require(backoffMillis > 0L)
+    require(jitterMillis >= 0L)
+    val current = networkGeneration.value
+    if (current != observedGeneration) return RelayReconnectWait(current, true)
+    val changedGeneration = withTimeoutOrNull(backoffMillis + jitterMillis) {
+        networkGeneration.first { generation -> generation != observedGeneration }
+    }
+    return if (changedGeneration == null) {
+        RelayReconnectWait(observedGeneration, false)
+    } else {
+        RelayReconnectWait(changedGeneration, true)
+    }
+}
+
+internal data class RelayReconnectWait(val generation: Long, val networkChanged: Boolean)
 
 internal fun shouldRetryInitialAuthentication(
     hasStoredPairing: Boolean,

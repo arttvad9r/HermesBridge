@@ -68,3 +68,17 @@ Device/data-plane routes that may need proxy reachability are narrowly scoped, i
 - one-use token-gated `/device-file-uploads/*`
 
 Never expose `/api/v1/*`; it is the loopback admin boundary.
+
+## Optional direct device ingress
+
+For the managed `typeddroid-mcp` runtime, direct ingress is enabled opportunistically by default. When `keytool`, a private/overlay address, and a free direct port are available, MCP creates a user-private long-lived EC certificate and starts an additional WSS listener (default port `8443`). The admin listener remains `127.0.0.1:8080`.
+
+Relevant overrides:
+
+```text
+TYPED_DROID_DIRECT_ENABLED=0|1
+TYPED_DROID_DIRECT_PORT=8443
+TYPED_DROID_DIRECT_HOSTS=192.168.1.20,100.64.1.2
+```
+
+Only private literal addresses, IPv6 ULA, and RFC6598/overlay addresses are advertised. Public addresses, loopback, DNS names, and unscoped IPv6 link-local addresses are rejected by Android. The device learns the direct certificate pin only after authenticated relay login; a mismatched pin fails closed. If direct setup is unavailable, normal MCP startup continues and the configured Internet WSS route remains the fallback.

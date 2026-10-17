@@ -20,6 +20,12 @@ On normal startup, `typeddroid-mcp` starts or reuses the hidden loopback relay f
 
 By default it uses `http://127.0.0.1:8080`, `~/.config/typeddroid/admin-token`, `~/.local/share/typeddroid/apks`, and `~/.local/share/typeddroid/transfers`. An explicitly configured `TYPED_DROID_HOST_URL`/`TYPED_DROID_RELAY_URL` disables automatic local relay management.
 
+## Network route selection
+
+The MCP/relay admin boundary remains loopback-only. The managed runtime may additionally expose a private WSS device listener. Once the phone is authenticated, the relay can advertise private direct candidates and its certificate SHA-256 pin. TypedDroid stores only valid, unexpired private-literal hints, tries them before the configured Internet endpoint, and uses the endpoint of the current authenticated session for APK/file data-plane transfers as well. A default-network change interrupts reconnect backoff and causes a fresh authenticated session.
+
+This does not claim serverless Internet traversal: the configured Internet WSS endpoint is still the bootstrap/fallback outside direct reachability. A hosted rendezvous/relay remains a separate Phase 6 item.
+
 ## Agent configuration examples
 
 ### Codex

@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import atexit
+import ipaddress
 import json
 import os
 import secrets
+import shutil
+import socket
 import signal
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 DEFAULT_PORT = 8080
+DEFAULT_DIRECT_PORT = 8443
+DIRECT_KEY_ALIAS = "typeddroid-direct"
 STARTUP_TIMEOUT_SECONDS = 12.0
 HEALTH_POLL_SECONDS = 0.1
 
@@ -76,6 +81,205 @@ def _port() -> int:
         raise RuntimeError("TypedDroid local port must be from 1 to 65535.")
     return value
 
+
+
+def _direct_enabled() -> bool:
+    value = os.environ.get("TYPED_DROID_DIRECT_ENABLED", "1").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError("TYPED_DROID_DIRECT_ENABLED must be true or false.")
+
+
+def _direct_port() -> int:
+    raw = os.environ.get("TYPED_DROID_DIRECT_PORT", "").strip()
+    if not raw:
+        return DEFAULT_DIRECT_PORT
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("TypedDroid direct port must be an integer.") from exc
+    if not 1 <= value <= 65535 or value == _port():
+        raise RuntimeError("TypedDroid direct port must be valid and distinct from the local admin port.")
+    return value
+
+
+def _direct_tls_dir() -> Path:
+    return _config_dir() / "direct-tls"
+
+
+def _direct_keystore_path() -> Path:
+    return _direct_tls_dir() / "direct-ingress.p12"
+
+
+def _direct_keystore_password_file() -> Path:
+    return _direct_tls_dir() / "keystore-password"
+
+
+def _allowed_direct_ip(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return False
+    if address.is_loopback or address.is_multicast or address.is_unspecified:
+        return False
+    if address.version == 6:
+        # Link-local IPv6 requires an interface scope/zone ID, which the current hint format
+        # intentionally does not carry. Only ULA is useful as an unscoped direct candidate.
+        return address in ipaddress.ip_network("fc00::/7")
+    return any(
+        address in network
+        for network in (
+            ipaddress.ip_network("10.0.0.0/8"),
+            ipaddress.ip_network("172.16.0.0/12"),
+            ipaddress.ip_network("192.168.0.0/16"),
+            ipaddress.ip_network("100.64.0.0/10"),
+        )
+    )
+
+
+def _discover_direct_hosts() -> list[str]:
+    override = os.environ.get("TYPED_DROID_DIRECT_HOSTS", "").strip()
+    if override:
+        result = []
+        for raw in override.split(","):
+            value = raw.strip()
+            if value and _allowed_direct_ip(value) and value not in result:
+                result.append(value)
+        return result[:8]
+
+    candidates: set[str] = set()
+    ip_command = shutil.which("ip")
+    if ip_command:
+        try:
+            completed = subprocess.run(
+                [ip_command, "-j", "address", "show", "up"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=3,
+            )
+            for interface in json.loads(completed.stdout):
+                if str(interface.get("operstate", "")).upper() == "DOWN":
+                    continue
+                for info in interface.get("addr_info", []):
+                    value = info.get("local")
+                    if isinstance(value, str) and _allowed_direct_ip(value):
+                        candidates.add(value)
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            pass
+
+    if not candidates:
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, type=socket.SOCK_STREAM):
+                value = info[4][0]
+                if _allowed_direct_ip(value):
+                    candidates.add(value)
+        except OSError:
+            pass
+    return sorted(candidates)[:8]
+
+
+def _port_is_available(port: int) -> bool:
+    family = socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", port))
+        except OSError:
+            return False
+    return True
+
+
+def _ensure_private_secret(path: Path, create_value: Callable[[], str]) -> str:
+    _ensure_private_dir(path.parent)
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        value = str(create_value())
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        fd = os.open(path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(value + "\n")
+    if not value:
+        raise RuntimeError(f"TypedDroid secret file is empty: {path}")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return value
+
+
+def _ensure_direct_keystore() -> tuple[Path, str] | None:
+    keytool = shutil.which("keytool")
+    if not keytool:
+        return None
+    tls_dir = _direct_tls_dir()
+    _ensure_private_dir(tls_dir)
+    password = _ensure_private_secret(_direct_keystore_password_file(), lambda: secrets.token_hex(24))
+    keystore = _direct_keystore_path()
+    if not keystore.is_file():
+        temp = tls_dir / f".direct-ingress.{os.getpid()}.p12"
+        try:
+            subprocess.run(
+                [
+                    keytool,
+                    "-genkeypair",
+                    "-alias", DIRECT_KEY_ALIAS,
+                    "-keyalg", "EC",
+                    "-groupname", "secp256r1",
+                    "-sigalg", "SHA256withECDSA",
+                    "-validity", "3650",
+                    "-storetype", "PKCS12",
+                    "-keystore", str(temp),
+                    "-storepass", password,
+                    "-keypass", password,
+                    "-dname", "CN=typeddroid-direct",
+                    "-ext", "SAN=dns:typeddroid-direct",
+                    "-noprompt",
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+            temp.chmod(0o600)
+            os.replace(temp, keystore)
+        except (OSError, subprocess.SubprocessError):
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+            return None
+    try:
+        keystore.chmod(0o600)
+    except OSError:
+        pass
+    return keystore, password
+
+
+def _direct_runtime_environment() -> dict[str, str]:
+    if not _direct_enabled():
+        return {}
+    hosts = _discover_direct_hosts()
+    if not hosts:
+        return {}
+    port = _direct_port()
+    if not _port_is_available(port):
+        return {}
+    material = _ensure_direct_keystore()
+    if material is None:
+        return {}
+    keystore, password = material
+    return {
+        "TYPED_DROID_DIRECT_KEYSTORE": str(keystore),
+        "TYPED_DROID_DIRECT_KEYSTORE_PASSWORD": password,
+        "TYPED_DROID_DIRECT_KEY_ALIAS": DIRECT_KEY_ALIAS,
+        "TYPED_DROID_DIRECT_PORT": str(port),
+        "TYPED_DROID_DIRECT_HOSTS": ",".join(hosts),
+    }
 
 def local_host_url() -> str:
     return f"http://127.0.0.1:{_port()}"
@@ -327,6 +531,7 @@ class LocalRuntimeLease:
                         "PORT": str(_port()),
                     }
                 )
+                env.update(_direct_runtime_environment())
                 try:
                     spawned = subprocess.Popen(
                         [str(relay_bin)],

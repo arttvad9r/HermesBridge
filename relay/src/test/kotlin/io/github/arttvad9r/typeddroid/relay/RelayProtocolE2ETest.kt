@@ -8,6 +8,8 @@ import io.github.arttvad9r.typeddroid.protocol.CommandResultPayload
 import io.github.arttvad9r.typeddroid.protocol.MessageType
 import io.github.arttvad9r.typeddroid.protocol.PairOkPayload
 import io.github.arttvad9r.typeddroid.protocol.PairRequestPayload
+import io.github.arttvad9r.typeddroid.protocol.TransportEndpointHint
+import io.github.arttvad9r.typeddroid.protocol.TransportHintsPayload
 import io.github.arttvad9r.typeddroid.protocol.WireEnvelope
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
@@ -42,11 +44,17 @@ class RelayProtocolE2ETest {
     @Test
     fun `pair authenticate and round trip a typed command over websocket`() = testApplication {
         val directory = Files.createTempDirectory("typed-droid-protocol-e2e")
+        val directHint = TransportEndpointHint(
+            webSocketUrl = "wss://192.168.1.20:8443/ws/device",
+            certificateSha256 = "a".repeat(64),
+            expiresAtEpochMillis = System.currentTimeMillis() + 60_000L,
+        )
         application {
             relayModule(
                 adminToken = ADMIN_TOKEN,
                 deviceRegistryPath = directory.resolve("devices.json"),
                 artifactDirectory = directory.resolve("artifacts"),
+                transportHints = listOf(directHint),
             )
         }
 
@@ -105,6 +113,11 @@ class RelayProtocolE2ETest {
             val authOk = receiveEnvelope()
             assertEquals(MessageType.AUTH_OK, authOk.type)
             assertEquals(pairOk.deviceId, authOk.deviceId)
+            val hintsEnvelope = receiveEnvelope()
+            assertEquals(MessageType.TRANSPORT_HINTS, hintsEnvelope.type)
+            assertEquals(pairOk.deviceId, hintsEnvelope.deviceId)
+            val hintsPayload = BridgeProtocol.decodePayload<TransportHintsPayload>(hintsEnvelope)
+            assertEquals(listOf(directHint), hintsPayload.hints)
 
             coroutineScope {
                 val adminCommand = async {

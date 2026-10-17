@@ -59,7 +59,7 @@ Codex / Claude / OpenCode / Cursor / Hermes / ...
 
 ```
 
-Wireless Debugging is used to establish/restore the shell-UID helper, not as the intended long-lived agent transport. The normal agent↔phone connection remains TypedDroid's authenticated device channel, so future Wi-Fi↔mobile-network handover is independent of ADB networking.
+Wireless Debugging is used to establish/restore the shell-UID helper, not as the intended long-lived agent transport. The normal agent↔phone connection remains TypedDroid's authenticated device channel. After authentication, the local managed relay can advertise certificate-pinned private LAN/overlay WSS candidates; Android prefers those direct routes and falls back to the configured Internet WSS endpoint. Android network changes interrupt reconnect backoff immediately. A hosted rendezvous/relay for arbitrary NAT without a user-managed server is still future work.
 
 See [Architecture](docs/ARCHITECTURE.md), [Security model](docs/SECURITY.md), [MCP integration](docs/MCP.md), and [full-control roadmap](docs/FULL_CONTROL_ROADMAP.md).
 

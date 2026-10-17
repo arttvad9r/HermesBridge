@@ -22,6 +22,7 @@ object MessageType {
     const val AUTH_CHALLENGE = "auth.challenge"
     const val AUTH_RESPONSE = "auth.response"
     const val AUTH_OK = "auth.ok"
+    const val TRANSPORT_HINTS = "transport.hints"
     const val HEARTBEAT_PING = "heartbeat.ping"
     const val HEARTBEAT_PONG = "heartbeat.pong"
     const val COMMAND_REQUEST = "command.request"
@@ -64,7 +65,19 @@ data class AuthChallengePayload(val challenge: String)
 data class AuthResponsePayload(val signature: String)
 
 @Serializable
+data class TransportEndpointHint(
+    val webSocketUrl: String,
+    val certificateSha256: String,
+    val expiresAtEpochMillis: Long,
+)
+
+@Serializable
 data class AuthOkPayload(val sessionId: String)
+
+@Serializable
+data class TransportHintsPayload(
+    val hints: List<TransportEndpointHint>,
+)
 
 @Serializable
 data class DeviceRevokeOkPayload(val deviceId: String)

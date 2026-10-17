@@ -46,12 +46,16 @@ interface ApkPackageInspector {
 class ApkArtifactDownloadException(message: String) : IllegalStateException(message)
 class ApkInspectionException(message: String) : IllegalStateException(message)
 
-class RelayApkArtifactRepository(
+internal class RelayApkArtifactRepository(
     context: Context,
-    relayWebSocketUrl: String,
+    private val endpointProvider: () -> RelayConnectionEndpoint,
 ) : ApkArtifactRepository {
+    constructor(context: Context, relayWebSocketUrl: String) : this(
+        context,
+        { RelayConnectionEndpoint(parseRelayEndpoint(relayWebSocketUrl)) },
+    )
+
     private val appContext = context.applicationContext
-    private val artifactBaseUrl = artifactBaseUrlFromWebSocket(relayWebSocketUrl)
     private val cacheDirectory = File(appContext.cacheDir, "relay-apks")
 
     override suspend fun download(descriptor: ApkArtifactDescriptor): VerifiedApkArtifact =
@@ -75,8 +79,9 @@ class RelayApkArtifactRepository(
 
             val temp = File.createTempFile("apk-", ".part", cacheDirectory)
             try {
-                val url = URL("$artifactBaseUrl/${descriptor.artifactId}")
-                val connection = (url.openConnection() as HttpURLConnection).apply {
+                val relayEndpoint = endpointProvider()
+                val url = URL("${relayEndpoint.endpoint.artifactBaseUrl}/${descriptor.artifactId}")
+                val connection = openRelayHttpConnection(url, relayEndpoint).apply {
                     instanceFollowRedirects = false
                     connectTimeout = CONNECT_TIMEOUT_MILLIS
                     readTimeout = READ_TIMEOUT_MILLIS

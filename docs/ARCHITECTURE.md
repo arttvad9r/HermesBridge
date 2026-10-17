@@ -62,7 +62,9 @@ MCP is deliberately local because stdio is broadly supported and keeps relay cre
 
 The Kotlin relay binds to `127.0.0.1`, persists device public keys/state under the current user, and exposes its admin API only locally. `typeddroid-mcp` owns its normal lifecycle through a locked multi-process lease registry plus detached cleanup watchdogs; users do not start a second product command.
 
-Device-facing WSS ingress is separate from agent integration. No specific cloud provider, tunnel or reverse proxy is part of the architecture.
+Device-facing transport is separate from agent integration. The managed relay has two deliberately different listeners: the admin connector remains loopback-only, while an optional TLS device-ingress connector may bind to private interfaces. The direct connector exposes only `/health`, `/ws/device`, and token-gated artifact/upload data-plane routes; `/api/v1/*` is rejected on that port even with the correct local admin token.
+
+After a device proves possession of its persisted identity key, the post-authentication `transport.hints` message may contain short-lived private literal WSS candidates plus the SHA-256 pin of the direct-ingress certificate. Android validates and persists those hints, prefers them before the configured Internet endpoint, and uses the same device challenge/response on every route. `ConnectivityManager.NetworkCallback` closes the old socket and wakes reconnect immediately when the default network changes. A future hosted rendezvous/relay can plug into the same endpoint abstraction without changing Android authority or the MCP protocol.
 
 ## Android layers
 

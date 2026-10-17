@@ -62,10 +62,14 @@ internal object DisabledFileTransferBackend : FileTransferBackend {
 
 internal class RelayFileTransferBackend(
     context: Context,
-    relayWebSocketUrl: String,
+    private val endpointProvider: () -> RelayConnectionEndpoint,
 ) : FileTransferBackend {
+    constructor(context: Context, relayWebSocketUrl: String) : this(
+        context,
+        { RelayConnectionEndpoint(parseRelayEndpoint(relayWebSocketUrl)) },
+    )
+
     private val store = EmbeddedPrivilegedStore(context.applicationContext)
-    private val relayEndpoint = parseRelayEndpoint(relayWebSocketUrl)
 
     override fun readiness(): PrivilegedBackendReadiness {
         val endpoint = store.endpoint()
@@ -87,8 +91,9 @@ internal class RelayFileTransferBackend(
         try {
             validateDescriptor(descriptor)
             val endpoint = requireNotNull(store.endpoint()) { "Embedded privileged helper is unavailable." }
-            val url = URL("${relayEndpoint.fileArtifactBaseUrl}/${descriptor.artifactId}")
-            val connection = (url.openConnection() as HttpURLConnection).apply {
+            val relayEndpoint = endpointProvider()
+            val url = URL("${relayEndpoint.endpoint.fileArtifactBaseUrl}/${descriptor.artifactId}")
+            val connection = openRelayHttpConnection(url, relayEndpoint).apply {
                 instanceFollowRedirects = false
                 connectTimeout = CONNECT_TIMEOUT_MILLIS
                 readTimeout = TRANSFER_TIMEOUT_MILLIS
@@ -134,8 +139,9 @@ internal class RelayFileTransferBackend(
             require(TOKEN_REGEX.matches(uploadToken)) { "Upload token is invalid." }
             val endpoint = requireNotNull(store.endpoint()) { "Embedded privileged helper is unavailable." }
             EmbeddedPrivilegedClient(endpoint).withFileInputStream(sourcePath) { sizeBytes, input ->
-                val url = URL("${relayEndpoint.deviceUploadBaseUrl}/$uploadId")
-                val connection = (url.openConnection() as HttpURLConnection).apply {
+                val relayEndpoint = endpointProvider()
+                val url = URL("${relayEndpoint.endpoint.deviceUploadBaseUrl}/$uploadId")
+                val connection = openRelayHttpConnection(url, relayEndpoint).apply {
                     instanceFollowRedirects = false
                     connectTimeout = CONNECT_TIMEOUT_MILLIS
                     readTimeout = TRANSFER_TIMEOUT_MILLIS
