@@ -88,9 +88,11 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updatePairingCode(value: String) {
+        val normalizedInput = normalizePairingInput(value).take(MAX_PAIRING_BUNDLE_CHARS)
+        val normalized = if (normalizedInput.startsWith(PAIRING_BUNDLE_PREFIX)) normalizedInput else normalizedInput.take(9)
         _state.update {
             it.copy(
-                pairingCode = value.uppercase().take(9),
+                pairingCode = normalized,
                 message = null,
             )
         }
@@ -124,7 +126,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setAgentTrustMode(mode: AgentTrustMode) {
         if (pairingStore.deviceId() == null) {
-            _state.update { it.copy(message = "Сначала подключите Bridge Host.") }
+            _state.update { it.copy(message = "Сначала подключите компьютер к TypedDroid.") }
             return
         }
         runCatching { pairingStore.saveTrustMode(mode) }
@@ -281,14 +283,16 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun pair() {
-        val code = PairingCodeValidator.normalize(_state.value.pairingCode)
-        if (!PairingCodeValidator.isValid(code)) {
-            _state.update { it.copy(message = "Код должен иметь формат XXXX-XXXX.") }
+        val bootstrap = parsePairingBootstrapInput(_state.value.pairingCode)
+        if (bootstrap == null) {
+            _state.update {
+                it.copy(message = "Вставьте pairing bundle из typeddroid-mcp или код XXXX-XXXX для настроенного Internet relay.")
+            }
             return
         }
 
         BridgeRuntime.update(ConnectionState.PAIRING)
-        runCatching { BridgeForegroundService.pair(app, code) }
+        runCatching { BridgeForegroundService.pair(app, bootstrap.code, bootstrap.endpoints) }
             .onFailure { error ->
                 BridgeRuntime.update(
                     ConnectionState.ERROR,
@@ -299,7 +303,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun revokePairing() {
         if (_state.value.connectionState != ConnectionState.CONNECTED) {
-            _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с Bridge Host.") }
+            _state.update { it.copy(message = "Для безопасной отвязки сначала восстановите соединение с компьютером.") }
             return
         }
         runCatching { BridgeForegroundService.revokePairing(app) }
@@ -313,7 +317,7 @@ class BridgeViewModel(application: Application) : AndroidViewModel(application) 
 
     fun finishSetup() {
         if (_state.value.connectionState != ConnectionState.CONNECTED) {
-            _state.update { it.copy(message = "Сначала подключите Bridge Host.") }
+            _state.update { it.copy(message = "Сначала подключите компьютер к TypedDroid.") }
             return
         }
         setupStore.markCompleted()

@@ -13,6 +13,9 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import io.github.arttvad9r.typeddroid.protocol.BridgeProtocol
+import io.github.arttvad9r.typeddroid.protocol.TransportEndpointHint
+import io.github.arttvad9r.typeddroid.protocol.TransportHintsPayload
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,6 +23,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 
 class BridgeForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -57,10 +62,16 @@ class BridgeForegroundService : Service() {
         when (intent?.action ?: ACTION_CONNECT) {
             ACTION_PAIR -> {
                 val code = intent?.getStringExtra(EXTRA_PAIRING_CODE)
+                val hintsRaw = intent?.getStringExtra(EXTRA_PAIRING_HINTS)
+                val hints = hintsRaw?.let { raw ->
+                    runCatching { BridgeProtocol.json.decodeFromString<TransportHintsPayload>(raw).hints }.getOrNull()
+                } ?: emptyList()
                 if (code.isNullOrBlank()) {
                     onTransportState(ConnectionState.ERROR, "Не передан код привязки.")
+                } else if (hintsRaw != null && hints.isEmpty()) {
+                    onTransportState(ConnectionState.ERROR, "Некорректные параметры защищённого подключения.")
                 } else {
-                    launchCommand { transport.pair(code) }
+                    launchCommand { transport.pair(code, hints) }
                 }
             }
 
@@ -125,9 +136,9 @@ class BridgeForegroundService : Service() {
         BridgeRuntime.update(state, message)
         val text = when (state) {
             ConnectionState.DISCONNECTED -> "Соединение остановлено"
-            ConnectionState.PAIRING -> "Подключение к Bridge Host…"
+            ConnectionState.PAIRING -> "Подключение к компьютеру…"
             ConnectionState.RECONNECTING -> "Соединение потеряно. Переподключение…"
-            ConnectionState.CONNECTED -> "Bridge Host подключён к телефону"
+            ConnectionState.CONNECTED -> "Компьютер подключён к телефону"
             ConnectionState.ERROR -> message ?: "Ошибка соединения"
         }
         startAsForeground("TypedDroid", text)
@@ -194,7 +205,7 @@ class BridgeForegroundService : Service() {
             "TypedDroid",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = "Постоянное защищённое соединение Bridge Host с телефоном"
+            description = "Постоянное защищённое соединение компьютера с телефоном"
             setShowBadge(false)
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -209,6 +220,7 @@ class BridgeForegroundService : Service() {
         private const val ACTION_REVOKE = "io.github.arttvad9r.typeddroid.REVOKE_PAIRING"
         private const val ACTION_STOP = "io.github.arttvad9r.typeddroid.STOP"
         private const val EXTRA_PAIRING_CODE = "pairing_code"
+        private const val EXTRA_PAIRING_HINTS = "pairing_hints"
 
         fun connect(context: Context) {
             ContextCompat.startForegroundService(
@@ -224,13 +236,17 @@ class BridgeForegroundService : Service() {
             )
         }
 
-        fun pair(context: Context, code: String) {
-            ContextCompat.startForegroundService(
-                context,
-                Intent(context, BridgeForegroundService::class.java)
-                    .setAction(ACTION_PAIR)
-                    .putExtra(EXTRA_PAIRING_CODE, code),
-            )
+        fun pair(context: Context, code: String, bootstrapHints: List<TransportEndpointHint> = emptyList()) {
+            val intent = Intent(context, BridgeForegroundService::class.java)
+                .setAction(ACTION_PAIR)
+                .putExtra(EXTRA_PAIRING_CODE, code)
+            if (bootstrapHints.isNotEmpty()) {
+                intent.putExtra(
+                    EXTRA_PAIRING_HINTS,
+                    BridgeProtocol.json.encodeToString(TransportHintsPayload(bootstrapHints)),
+                )
+            }
+            ContextCompat.startForegroundService(context, intent)
         }
 
         fun revokePairing(context: Context) {

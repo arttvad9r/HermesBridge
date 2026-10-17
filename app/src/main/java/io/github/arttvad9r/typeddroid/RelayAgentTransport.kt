@@ -129,7 +129,10 @@ internal class RelayAgentTransport(
         }
     }
 
-    override suspend fun pair(code: String): Result<Unit> = startConnection(code)
+    override suspend fun pair(code: String): Result<Unit> = startConnection(code, emptyList())
+
+    suspend fun pair(code: String, bootstrapHints: List<io.github.arttvad9r.typeddroid.protocol.TransportEndpointHint>): Result<Unit> =
+        startConnection(code, bootstrapHints)
 
     override suspend fun resume(): Result<Unit> {
         val validation = pairingCredentials.validateResume()
@@ -141,7 +144,7 @@ internal class RelayAgentTransport(
             mutableConnectionState.value = ConnectionState.ERROR
             return validation
         }
-        return startConnection(null)
+        return startConnection(null, emptyList())
     }
 
     override suspend fun disconnect(): Result<Unit> = try {
@@ -163,7 +166,7 @@ internal class RelayAgentTransport(
         }
         if (mutableConnectionState.value != ConnectionState.CONNECTED) {
             return Result.failure(
-                IllegalStateException("Connect to Bridge Host before revoking this device pairing.")
+                IllegalStateException("Connect to the paired computer before revoking this device pairing.")
             )
         }
         val session = activeSession
@@ -208,13 +211,16 @@ internal class RelayAgentTransport(
         scope.cancel()
     }
 
-    private suspend fun startConnection(pairingCode: String?): Result<Unit> {
+    private suspend fun startConnection(
+        pairingCode: String?,
+        bootstrapHints: List<io.github.arttvad9r.typeddroid.protocol.TransportEndpointHint>,
+    ): Result<Unit> {
         connectionJob?.cancelAndJoin()
         mutableConnectionState.value = ConnectionState.PAIRING
 
         val ready = CompletableDeferred<Result<Unit>>()
         connectionJob = scope.launch {
-            connectionLoop(pairingCode, ready)
+            connectionLoop(pairingCode, bootstrapHints, ready)
         }
 
         return try {
@@ -230,6 +236,7 @@ internal class RelayAgentTransport(
 
     private suspend fun connectionLoop(
         initialPairingCode: String?,
+        bootstrapHints: List<io.github.arttvad9r.typeddroid.protocol.TransportEndpointHint>,
         ready: CompletableDeferred<Result<Unit>>,
     ) {
         var pairingCode = initialPairingCode
@@ -238,7 +245,7 @@ internal class RelayAgentTransport(
         var observedNetworkGeneration = networkGeneration.value
 
         while (currentCoroutineContext().isActive) {
-            val directHints = if (pairingStore.deviceId() == null) emptyList() else directHintStore.load()
+            val directHints = if (pairingStore.deviceId() == null) bootstrapHints else directHintStore.load()
             val candidates = relayConnectionCandidates(configuredRelayWebSocketUrl, directHints)
             if (candidateIndex !in candidates.indices) candidateIndex = 0
             val candidate = candidates[candidateIndex]
@@ -276,6 +283,12 @@ internal class RelayAgentTransport(
                 val hasStoredPairing = pairingStore.deviceId() != null
                 val hasPendingPairing = pairingStore.hasPendingDeviceId()
                 if (!hasStoredPairing) {
+                    val nextCandidate = candidateIndex + 1
+                    if (pairingCode != null && nextCandidate < candidates.size) {
+                        candidateIndex = nextCandidate
+                        mutableConnectionState.value = ConnectionState.RECONNECTING
+                        continue
+                    }
                     BridgeApprovalRuntime.clear()
                     mutableConnectionState.value = ConnectionState.ERROR
                     ready.complete(

@@ -57,6 +57,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handlePairingIntent(intent)
         enableEdgeToEdge()
         setContent {
             TypedDroidTheme {
@@ -133,6 +134,27 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairingIntent(intent)
+    }
+
+    private fun handlePairingIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val value = intent.dataString ?: return
+        val bootstrap = parsePairingBootstrapInput(value) ?: return
+        BridgeRuntime.update(ConnectionState.PAIRING)
+        runCatching {
+            BridgeForegroundService.pair(applicationContext, bootstrap.code, bootstrap.endpoints)
+        }.onFailure { error ->
+            BridgeRuntime.update(
+                ConnectionState.ERROR,
+                error.message ?: "Не удалось запустить привязку устройства.",
+            )
+        }
+    }
 }
 
 @Composable
@@ -188,7 +210,7 @@ private fun BridgeScreen(
             title = { Text("Отвязать телефон?") },
             text = {
                 Text(
-                    "Bridge Host потеряет доступ к этому телефону. Чтобы подключить его снова, понадобится новый одноразовый код привязки."
+                    "Этот компьютер потеряет доступ к телефону. Для повторного подключения понадобится новый QR-код."
                 )
             },
             dismissButton = {
@@ -393,7 +415,7 @@ private fun SetupHeaderCard(connected: Boolean) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             Text(
-                if (connected) "Выберите, что агент сможет делать" else "Подключите телефон к Bridge Host",
+                if (connected) "Выберите, что агент сможет делать" else "Подключите телефон к компьютеру",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -401,7 +423,7 @@ private fun SetupHeaderCard(connected: Boolean) {
                 if (connected) {
                     "Дополнительные права можно выдать сейчас или позже. Изменяющие данные действия всё равно требуют отдельного подтверждения."
                 } else {
-                    "Получите одноразовый код через Bridge Host или подключённого агента и введите его ниже. После этого телефон будет переподключаться автоматически."
+                    "Попросите агента показать QR-код подключения и отсканируйте его обычной камерой телефона. TypedDroid откроется и подключится автоматически."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -458,7 +480,7 @@ private fun StatusCard(
         ConnectionState.DISCONNECTED -> "Не подключён" to "Введите одноразовый код привязки."
         ConnectionState.PAIRING -> "Подключение…" to "Проверяем код и сервер."
         ConnectionState.RECONNECTING -> "Переподключение…" to "Связь с relay потеряна, соединение восстановится автоматически."
-        ConnectionState.CONNECTED -> "Bridge Host подключён" to "Телефон доступен агенту в рамках выданных прав."
+        ConnectionState.CONNECTED -> "Компьютер подключён" to "Телефон доступен агенту в рамках выданных прав."
         ConnectionState.ERROR -> "Не подключён" to "Соединение не установлено."
     }
 
@@ -554,6 +576,8 @@ private fun PairingCard(
     onCodeChange: (String) -> Unit,
     onPair: () -> Unit,
 ) {
+    var showManual by remember { mutableStateOf(false) }
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             Modifier.padding(18.dp),
@@ -561,27 +585,49 @@ private fun PairingCard(
         ) {
             Text("Подключение", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
-                "Код создаётся Bridge Host и используется только для первой привязки устройства.",
+                "На компьютере попросите агента показать QR-код подключения. Отсканируйте его обычной камерой телефона — TypedDroid откроется и выполнит привязку сам.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
-                value = code,
-                onValueChange = onCodeChange,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = enabled,
-                singleLine = true,
-                label = { Text("Код XXXX-XXXX") },
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
-                isError = message != null,
-                supportingText = message?.let { { Text(it) } },
-            )
-            Button(
-                onClick = onPair,
-                modifier = Modifier.fillMaxWidth(),
+            TextButton(
+                onClick = { showManual = !showManual },
                 enabled = enabled,
             ) {
-                Text("Подключить Bridge Host")
+                Text(if (showManual) "Скрыть ручной способ" else "Другой способ")
+            }
+            if (showManual) {
+                Text(
+                    "Для отладки можно вставить pairing bundle или короткий код для заранее настроенного Internet relay.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = onCodeChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = enabled,
+                    singleLine = true,
+                    label = { Text("Pairing bundle или код") },
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        keyboardType = KeyboardType.Ascii,
+                    ),
+                    isError = message != null,
+                    supportingText = message?.let { { Text(it) } },
+                )
+                Button(
+                    onClick = onPair,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = enabled,
+                ) {
+                    Text("Подключить вручную")
+                }
+            } else if (message != null) {
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
         }
     }
@@ -649,7 +695,7 @@ private fun NotificationAccessCard(
                 if (granted) {
                     "TypedDroid может показывать статус фонового соединения и быстрый доступ к истории."
                 } else {
-                    "Базовое соединение работает и без них, но Android не покажет обычное уведомление о состоянии Bridge Host."
+                    "Базовое соединение работает и без них, но Android не покажет обычное уведомление о состоянии TypedDroid."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -763,7 +809,7 @@ private fun UsageAccessCard(
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                "Нужен только для чтения времени последнего использования и времени на переднем плане у приложений, уже видимых Bridge Host. Разрешение включается вручную в Android.",
+                "Нужен только для чтения времени последнего использования и времени на переднем плане у приложений, уже видимых TypedDroid. Разрешение включается вручную в Android.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

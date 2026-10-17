@@ -44,6 +44,12 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="typeddroid" android:host="pair" />
+            </intent-filter>
         </activity>
 
         <service
@@ -53,7 +59,7 @@
             android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Maintains an authenticated outbound connection to the user's Bridge Host so explicitly allowlisted device commands can be received while the app UI is closed." />
+                android:value="Maintains an authenticated outbound connection to the paired computer so explicitly allowlisted device commands can be received while the app UI is closed." />
         </service>
 
         <service

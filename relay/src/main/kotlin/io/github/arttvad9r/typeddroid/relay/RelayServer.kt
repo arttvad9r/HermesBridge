@@ -461,6 +461,14 @@ private fun Application.relayModuleInternal(
             call.respondText(body, ContentType.Application.Json)
         }
 
+        get("/api/v1/transport-hints") {
+            if (!call.requireAdmin(adminToken, adminPort)) return@get
+            call.respondText(
+                BridgeProtocol.json.encodeToString(TransportHintsPayload(runtime.transportHints)),
+                ContentType.Application.Json,
+            )
+        }
+
         post("/api/v1/apk-artifacts") {
             if (!call.requireAdmin(adminToken, adminPort)) return@post
             val fileName = call.request.headers[APK_NAME_HEADER]

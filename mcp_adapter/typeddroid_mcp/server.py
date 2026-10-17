@@ -8,6 +8,8 @@ import json
 import os
 import re
 import signal
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -530,13 +532,109 @@ def pending_approvals(device_id: str) -> list[dict[str, Any]]:
     return result
 
 
+def _pairing_bundle(code: str, expires_at: int, hints: list[dict[str, Any]]) -> str:
+    if not re.fullmatch(r"^[A-Z0-9]{4}-[A-Z0-9]{4}$", code):
+        raise RuntimeError("Relay returned an invalid pairing code.")
+    if isinstance(expires_at, bool) or not isinstance(expires_at, int) or expires_at <= 0:
+        raise RuntimeError("Relay returned an invalid pairing expiry.")
+    endpoints: list[dict[str, str]] = []
+    for item in hints[:8]:
+        if not isinstance(item, dict):
+            raise RuntimeError("Relay returned an invalid transport hint.")
+        url = item.get("webSocketUrl")
+        pin = item.get("certificateSha256")
+        if not isinstance(url, str) or len(url) > 2048 or not url.startswith("wss://"):
+            raise RuntimeError("Relay returned an invalid transport hint URL.")
+        if not isinstance(pin, str) or not SHA256_RE.fullmatch(pin):
+            raise RuntimeError("Relay returned an invalid transport hint pin.")
+        endpoints.append({"webSocketUrl": url, "certificateSha256": pin})
+    if not endpoints:
+        raise RuntimeError("TypedDroid direct bootstrap is unavailable on this computer.")
+    payload = {
+        "v": 1,
+        "code": code,
+        "expiresAtEpochMillis": expires_at,
+        "endpoints": endpoints,
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"typeddroid://pair/{encoded}"
+
+
+def _render_pairing_qr(bundle: str) -> tuple[str | None, bool]:
+    qrencode = shutil.which("qrencode")
+    if qrencode is None:
+        return None, False
+    cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "typeddroid"
+    cache_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        cache_root.chmod(0o700)
+    except OSError:
+        pass
+    path = cache_root / "pairing.png"
+    subprocess.run(
+        [qrencode, "-o", str(path), "-s", "8", "-m", "2", bundle],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    path.chmod(0o600)
+    opener = shutil.which("xdg-open")
+    can_open = opener is not None and bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    if can_open:
+        try:
+            subprocess.Popen(
+                [opener, str(path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except OSError:
+            can_open = False
+    return str(path), can_open
+
+
 @mcp.tool()
 def create_pairing_code() -> dict[str, Any]:
-    """Create a one-time pairing code for connecting a new Android phone."""
+    """Create a one-time pairing bundle for connecting a new Android phone."""
     result = _request_json("POST", "/api/v1/pairing-codes")
     if not isinstance(result, dict) or not isinstance(result.get("code"), str):
         raise RuntimeError("Relay returned an invalid pairing code response.")
-    return result
+    expires_at = result.get("expiresAtEpochMillis")
+    hints_payload = _request_json("GET", "/api/v1/transport-hints")
+    hints = hints_payload.get("hints") if isinstance(hints_payload, dict) else None
+    if not isinstance(hints, list):
+        raise RuntimeError("Relay returned an invalid transport hint response.")
+    bundle = _pairing_bundle(result["code"], expires_at, hints) if hints else None
+    return {
+        "code": result["code"],
+        "expiresAtEpochMillis": expires_at,
+        "pairingBundle": bundle,
+        "directEndpoints": [item.get("webSocketUrl") for item in hints if isinstance(item, dict)],
+    }
+
+
+@mcp.tool()
+def show_pairing_qr() -> dict[str, Any]:
+    """Create a one-time pairing QR and show it on this computer when a desktop opener is available."""
+    pairing = create_pairing_code()
+    bundle = pairing.get("pairingBundle")
+    if not isinstance(bundle, str) or not bundle.startswith("typeddroid://pair/"):
+        raise RuntimeError("No direct pairing bundle is available for QR pairing.")
+    path, shown = _render_pairing_qr(bundle)
+    return {
+        "code": pairing["code"],
+        "expiresAtEpochMillis": pairing["expiresAtEpochMillis"],
+        "qrShown": shown,
+        "qrPath": path,
+        "fallbackPairingBundle": None if shown else bundle,
+        "message": (
+            "Scan the QR with the phone camera; TypedDroid will open and pair automatically."
+            if shown
+            else "QR could not be shown automatically; use fallbackPairingBundle."
+        ),
+    }
 
 
 @mcp.tool()
