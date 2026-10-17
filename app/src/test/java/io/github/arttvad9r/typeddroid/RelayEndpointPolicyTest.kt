@@ -11,14 +11,16 @@ class RelayEndpointPolicyTest {
 
         assertEquals("wss://bridge.example.com:8443/ws/device", endpoint.webSocketUrl)
         assertEquals("https://bridge.example.com:8443/device-artifacts", endpoint.artifactBaseUrl)
+        assertEquals("https://bridge.example.com:8443/file-artifacts", endpoint.fileArtifactBaseUrl)
+        assertEquals("https://bridge.example.com:8443/device-file-uploads", endpoint.deviceUploadBaseUrl)
     }
 
     @Test
     fun defaultPortAndIpv6AreSupported() {
-        assertEquals(
-            "https://bridge.example.com/device-artifacts",
-            parseRelayEndpoint("wss://bridge.example.com/ws/device").artifactBaseUrl,
-        )
+        val endpoint = parseRelayEndpoint("wss://bridge.example.com/ws/device")
+        assertEquals("https://bridge.example.com/device-artifacts", endpoint.artifactBaseUrl)
+        assertEquals("https://bridge.example.com/file-artifacts", endpoint.fileArtifactBaseUrl)
+        assertEquals("https://bridge.example.com/device-file-uploads", endpoint.deviceUploadBaseUrl)
         assertEquals(
             "wss://[2001:db8::1]/ws/device",
             parseRelayEndpoint("wss://[2001:db8::1]/ws/device").webSocketUrl,

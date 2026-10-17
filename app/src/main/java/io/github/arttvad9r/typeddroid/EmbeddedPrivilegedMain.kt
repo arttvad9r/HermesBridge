@@ -10,6 +10,9 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
@@ -79,6 +82,11 @@ object EmbeddedPrivilegedMain {
             return false
         }
 
+        if (request.operation == EmbeddedPrivilegedProtocol.OP_READ_FILE_STREAM) {
+            streamFileToClient(request, socket.getOutputStream())
+            return false
+        }
+
         val response = when (request.operation) {
             EmbeddedPrivilegedProtocol.OP_PING -> EmbeddedPrivilegedResponse(
                 id = request.id,
@@ -98,6 +106,7 @@ object EmbeddedPrivilegedMain {
             EmbeddedPrivilegedProtocol.OP_UI_TEXT -> uiText(request)
             EmbeddedPrivilegedProtocol.OP_UI_KEY -> uiKey(request)
             EmbeddedPrivilegedProtocol.OP_OPEN_APP -> openApp(request)
+            EmbeddedPrivilegedProtocol.OP_WRITE_FILE_STREAM -> writeFileFromClient(request, socket.getInputStream())
 
             EmbeddedPrivilegedProtocol.OP_SHUTDOWN -> EmbeddedPrivilegedResponse(
                 id = request.id,
@@ -176,6 +185,114 @@ object EmbeddedPrivilegedMain {
         } finally {
             runCatching { staged.delete() }
         }
+    }
+
+
+    private fun streamFileToClient(request: EmbeddedPrivilegedRequest, output: java.io.OutputStream) {
+        val path = normalizedTransferPath(request.filePath, mutation = false)
+        if (path == null) {
+            EmbeddedPrivilegedProtocol.writeResponse(output, EmbeddedPrivilegedResponse(request.id, false, error = "File path is invalid."))
+            return
+        }
+        val file = File(path)
+        if (!file.isFile) {
+            EmbeddedPrivilegedProtocol.writeResponse(output, EmbeddedPrivilegedResponse(request.id, false, error = "File is not a readable regular file."))
+            return
+        }
+        val size = file.length()
+        if (size !in 1..EmbeddedPrivilegedProtocol.MAX_TRANSFER_FILE_BYTES) {
+            EmbeddedPrivilegedProtocol.writeResponse(output, EmbeddedPrivilegedResponse(request.id, false, error = "File size is outside the transfer limit."))
+            return
+        }
+        EmbeddedPrivilegedProtocol.writeResponse(
+            output,
+            EmbeddedPrivilegedResponse(id = request.id, ok = true, exitCode = 0, sizeBytes = size),
+        )
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            var remaining = size
+            while (remaining > 0) {
+                val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                check(read >= 0) { "File changed while it was being streamed." }
+                if (read == 0) continue
+                output.write(buffer, 0, read)
+                remaining -= read
+            }
+            output.flush()
+        }
+    }
+
+    private fun writeFileFromClient(
+        request: EmbeddedPrivilegedRequest,
+        input: java.io.InputStream,
+    ): EmbeddedPrivilegedResponse {
+        val path = normalizedTransferPath(request.filePath, mutation = true)
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Destination path is invalid or outside trusted writable roots.")
+        val size = request.fileSizeBytes
+            ?.takeIf { it in 1..EmbeddedPrivilegedProtocol.MAX_TRANSFER_FILE_BYTES }
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Transfer size is invalid.")
+        val expectedSha = request.fileSha256
+            ?.takeIf { SHA256_REGEX.matches(it) }
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Transfer SHA-256 is invalid.")
+        val overwrite = request.overwrite ?: false
+        val createParents = request.createParents ?: true
+        val target = File(path)
+        if (target.exists() && !overwrite) {
+            return EmbeddedPrivilegedResponse(request.id, false, error = "Destination already exists and overwrite is disabled.")
+        }
+        val parent = target.parentFile
+            ?: return EmbeddedPrivilegedResponse(request.id, false, error = "Destination parent is invalid.")
+        val temp = File(parent, ".typeddroid-transfer-${UUID.randomUUID()}.part")
+        return try {
+            if (!parent.exists() && createParents && !parent.mkdirs()) {
+                error("Destination parent directories could not be created.")
+            }
+            check(parent.isDirectory) { "Destination parent is not a directory." }
+            val digest = MessageDigest.getInstance("SHA-256")
+            var remaining = size
+            FileOutputStream(temp).buffered().use { fileOutput ->
+                val buffer = ByteArray(64 * 1024)
+                while (remaining > 0) {
+                    val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                    if (read < 0) error("Transfer stream ended before the declared size.")
+                    if (read == 0) continue
+                    digest.update(buffer, 0, read)
+                    fileOutput.write(buffer, 0, read)
+                    remaining -= read
+                }
+            }
+            check(temp.length() == size) { "Transferred file size mismatch." }
+            check(digest.digest().toHex() == expectedSha) { "Transferred file SHA-256 mismatch." }
+            val sourcePath = temp.toPath()
+            val targetPath = target.toPath()
+            try {
+                if (overwrite) {
+                    Files.move(sourcePath, targetPath, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+                } else {
+                    Files.move(sourcePath, targetPath, StandardCopyOption.ATOMIC_MOVE)
+                }
+            } catch (_: Exception) {
+                if (overwrite) Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING)
+                else Files.move(sourcePath, targetPath)
+            }
+            EmbeddedPrivilegedResponse(id = request.id, ok = true, exitCode = 0, sizeBytes = size, sha256 = expectedSha)
+        } catch (error: Throwable) {
+            EmbeddedPrivilegedResponse(request.id, false, error = safeError(error))
+        } finally {
+            runCatching { temp.delete() }
+        }
+    }
+
+    private fun normalizedTransferPath(raw: String?, mutation: Boolean): String? {
+        val value = raw ?: return null
+        if (!value.startsWith('/') || '\u0000' in value || '\n' in value || '\r' in value ||
+            value.encodeToByteArray().size > EmbeddedPrivilegedProtocol.MAX_TRANSFER_PATH_BYTES) return null
+        val normalized = runCatching { Paths.get(value).normalize().toString() }.getOrNull() ?: return null
+        if (!normalized.startsWith('/')) return null
+        if (mutation) {
+            if (TRUSTED_TRANSFER_WRITE_ROOTS.none { normalized.startsWith("$it/") }) return null
+        }
+        return normalized
     }
 
     private fun uninstallApp(request: EmbeddedPrivilegedRequest): EmbeddedPrivilegedResponse {
@@ -474,6 +591,7 @@ object EmbeddedPrivilegedMain {
     private const val MAX_UI_SWIPE_DURATION_MILLIS = 10_000
     private const val MAX_UI_KEY_CODE = 1_000
     private val SHA256_REGEX = Regex("^[0-9a-f]{64}$")
+    private val TRUSTED_TRANSFER_WRITE_ROOTS = listOf("/sdcard", "/storage/emulated/0", "/data/local/tmp")
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
 }

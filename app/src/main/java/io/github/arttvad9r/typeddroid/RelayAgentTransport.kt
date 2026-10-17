@@ -59,6 +59,7 @@ class RelayAgentTransport(
     rawShellBackend: RawShellBackend = EmbeddedRawShellBackend(context.applicationContext),
     uiControlBackend: UiControlBackend = EmbeddedUiControlBackend(context.applicationContext),
     notificationControlBackend: NotificationControlBackend = AndroidNotificationControlBackend(context.applicationContext),
+    fileTransferBackend: FileTransferBackend = RelayFileTransferBackend(context.applicationContext, relayWsUrl),
     deviceIdentity: DeviceIdentity = AndroidKeystoreDeviceIdentity(),
     pairingRecordStore: PairingRecordStore = PairingStore(context.applicationContext),
 ) : AgentTransport {
@@ -78,6 +79,7 @@ class RelayAgentTransport(
         rawShellBackend = rawShellBackend,
         uiControlBackend = uiControlBackend,
         notificationControlBackend = notificationControlBackend,
+        fileTransferBackend = fileTransferBackend,
         agentTrustMode = pairingRecordStore::trustMode,
     )
     private val commandRouter = BridgeCommandRouter(

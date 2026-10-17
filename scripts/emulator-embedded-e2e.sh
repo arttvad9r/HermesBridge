@@ -34,6 +34,8 @@ cleanup() {
   probe shutdown >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" shell cmd notification disallow_listener "$APP/.TypedDroidNotificationListenerService" >/dev/null 2>&1 || true
   "$ADB" -s "$SERIAL" uninstall "$FIXTURE" >/dev/null 2>&1 || true
+  "$ADB" -s "$SERIAL" shell rm -f /data/local/tmp/typeddroid-transfer-e2e.bin >/dev/null 2>&1 || true
+  "$ADB" -s "$SERIAL" shell run-as "$APP" rm -f files/transfer-source.bin files/transfer-roundtrip.bin >/dev/null 2>&1 || true
   rm -f /tmp/typeddroid-e2e-large.txt /tmp/typeddroid-e2e-battery.txt /tmp/typeddroid-e2e-ui.xml.b64 /tmp/typeddroid-e2e-ui-after.txt /tmp/typeddroid-e2e-edit-center /tmp/typeddroid-e2e-screen.txt /tmp/typeddroid-e2e-setting.txt /tmp/typeddroid-e2e-appops.txt /tmp/typeddroid-e2e-processes.txt /tmp/typeddroid-e2e-logcat.txt /tmp/typeddroid-e2e-fs-stat.txt /tmp/typeddroid-e2e-fs-list.txt /tmp/typeddroid-e2e-fs-read.txt
 }
 trap cleanup EXIT
@@ -189,6 +191,32 @@ probe exec 5000 "mv -f '/data/local/tmp/typeddroid-fs-e2e/copy.txt' '/data/local
 probe exec 5000 "rm -f '/data/local/tmp/typeddroid-fs-e2e/moved.txt'" | grep -q '^exitCode=0$'
 [[ -z $("$ADB" -s "$SERIAL" shell 'test -e /data/local/tmp/typeddroid-fs-e2e/moved.txt && echo exists' || true) ]]
 echo "PASS trusted filesystem primitives"
+
+# Raw binary transfer path: 2 MiB is intentionally far above the 256 KiB control-channel frame.
+python3 - <<'PYTRANSFER' > /tmp/typeddroid-transfer-source.bin
+import sys
+size = 2 * 1024 * 1024
+chunk = bytes((i * 37 + 11) % 256 for i in range(4096))
+out = sys.stdout.buffer
+for _ in range(size // len(chunk)):
+    out.write(chunk)
+PYTRANSFER
+timeout 20s "$ADB" -s "$SERIAL" push /tmp/typeddroid-transfer-source.bin /data/local/tmp/typeddroid-transfer-host-source.bin >/dev/null
+"$ADB" -s "$SERIAL" shell run-as "$APP" cp /data/local/tmp/typeddroid-transfer-host-source.bin files/transfer-source.bin
+transfer_size=$(stat -c %s /tmp/typeddroid-transfer-source.bin)
+transfer_sha=$(sha256sum /tmp/typeddroid-transfer-source.bin | awk '{print $1}')
+probe stream-write files/transfer-source.bin /data/local/tmp/typeddroid-transfer-e2e.bin "$transfer_size" "$transfer_sha" true true | grep -q '^exitCode=0$'
+remote_meta=$("$ADB" -s "$SERIAL" shell "stat -c '%s' /data/local/tmp/typeddroid-transfer-e2e.bin; sha256sum /data/local/tmp/typeddroid-transfer-e2e.bin" | tr -d '\r')
+printf '%s\n' "$remote_meta" | head -1 | grep -qx "$transfer_size"
+printf '%s\n' "$remote_meta" | tail -1 | awk '{print $1}' | grep -qx "$transfer_sha"
+probe stream-read /data/local/tmp/typeddroid-transfer-e2e.bin files/transfer-roundtrip.bin > /tmp/typeddroid-e2e-transfer-read.txt
+grep -q "^sizeBytes=$transfer_size$" /tmp/typeddroid-e2e-transfer-read.txt
+grep -q "^sha256=$transfer_sha$" /tmp/typeddroid-e2e-transfer-read.txt
+roundtrip_sha=$("$ADB" -s "$SERIAL" shell run-as "$APP" sha256sum files/transfer-roundtrip.bin | awk '{print $1}' | tr -d '\r')
+[[ "$roundtrip_sha" == "$transfer_sha" ]]
+rm -f /tmp/typeddroid-transfer-source.bin /tmp/typeddroid-e2e-transfer-read.txt
+"$ADB" -s "$SERIAL" shell rm -f /data/local/tmp/typeddroid-transfer-host-source.bin
+echo "PASS raw 2 MiB binary file stream round-trip"
 
 probe open-app "$FIXTURE" | grep -q '^exitCode=0$'
 sleep .5

@@ -190,6 +190,8 @@ private val AUDITED_TOOL_NAMES = setOf(
     "notifications.open",
     "notifications.action",
     "notifications.reply",
+    "transfer.push",
+    "transfer.pull",
     "files.list",
     "files.analyze",
     "files.delete",

@@ -5,6 +5,8 @@ import java.net.URI
 internal data class RelayEndpoint(
     val webSocketUrl: String,
     val artifactBaseUrl: String,
+    val fileArtifactBaseUrl: String,
+    val deviceUploadBaseUrl: String,
 )
 
 internal fun parseRelayEndpoint(value: String): RelayEndpoint {
@@ -30,21 +32,25 @@ internal fun parseRelayEndpoint(value: String): RelayEndpoint {
         null,
         null,
     ).toASCIIString()
-    val artifactBase = URI(
+    fun httpsPath(path: String) = URI(
         "https",
         null,
         uri.host,
         uri.port,
-        ARTIFACT_PATH,
+        path,
         null,
         null,
     ).toASCIIString().removeSuffix("/")
 
     return RelayEndpoint(
         webSocketUrl = canonicalWebSocket,
-        artifactBaseUrl = artifactBase,
+        artifactBaseUrl = httpsPath(ARTIFACT_PATH),
+        fileArtifactBaseUrl = httpsPath(FILE_ARTIFACT_PATH),
+        deviceUploadBaseUrl = httpsPath(DEVICE_UPLOAD_PATH),
     )
 }
 
 internal const val RELAY_WS_PATH = "/ws/device"
 private const val ARTIFACT_PATH = "/device-artifacts"
+private const val FILE_ARTIFACT_PATH = "/file-artifacts"
+private const val DEVICE_UPLOAD_PATH = "/device-file-uploads"

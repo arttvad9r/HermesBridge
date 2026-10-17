@@ -1,6 +1,7 @@
 package io.github.arttvad9r.typeddroid
 
 import java.io.File
+import java.security.MessageDigest
 import java.util.Base64
 import kotlin.system.exitProcess
 
@@ -80,6 +81,44 @@ object EmbeddedPrivilegedProbe {
                         replace = args[7].toBooleanStrict(),
                     )
                 )
+            }
+            "stream-write" -> {
+                require(args.size == 9) { "stream-write requires sourceFile destinationPath size sha256 overwrite createParents" }
+                val source = File(args[3])
+                source.inputStream().buffered().use { input ->
+                    printResult(
+                        client.writeFileStream(
+                            filePath = args[4],
+                            sizeBytes = args[5].toLong(),
+                            sha256 = args[6],
+                            overwrite = args[7].toBooleanStrict(),
+                            createParents = args[8].toBooleanStrict(),
+                            input = input,
+                        )
+                    )
+                }
+            }
+            "stream-read" -> {
+                require(args.size == 5) { "stream-read requires sourcePath destinationFile" }
+                val target = File(args[4])
+                val digest = MessageDigest.getInstance("SHA-256")
+                val returnedSize = client.withFileInputStream(args[3]) { sizeBytes, input ->
+                    target.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var remaining = sizeBytes
+                        while (remaining > 0) {
+                            val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                            check(read >= 0) { "Stream ended before declared size." }
+                            if (read == 0) continue
+                            digest.update(buffer, 0, read)
+                            output.write(buffer, 0, read)
+                            remaining -= read
+                        }
+                    }
+                    sizeBytes
+                }
+                println("sizeBytes=$returnedSize")
+                println("sha256=${digest.digest().joinToString("") { "%02x".format(it) }}")
             }
             "shutdown" -> println("shutdown=${client.shutdown()}")
             else -> error("Unknown operation: ${args[2]}")

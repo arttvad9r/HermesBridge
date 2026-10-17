@@ -5,6 +5,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
 bin_dir=${TYPED_DROID_BIN_DIR:-"$HOME/.local/bin"}
 install_root=${TYPED_DROID_INSTALL_ROOT:-"$data_home/typeddroid"}
+transfer_dir=${TYPED_DROID_TRANSFER_DIR:-"$data_home/typeddroid/transfers"}
 runtime_dir="$install_root/host-runtime"
 venv_dir="$install_root/mcp-venv"
 scripts_dir="$install_root/scripts"
@@ -30,7 +31,8 @@ PY
 
 "$repo_root/gradlew" --no-daemon :relay:installDist
 
-mkdir -p "$install_root" "$bin_dir"
+mkdir -p "$install_root" "$bin_dir" "$transfer_dir"
+chmod 700 "$transfer_dir"
 tmp_dir=$(mktemp -d "$install_root/.install.XXXXXX")
 cleanup() { rm -rf -- "$tmp_dir"; }
 trap cleanup EXIT

@@ -187,6 +187,8 @@ internal class CommandReplayGuard {
             "notifications.open",
             "notifications.action",
             "notifications.reply",
+            "transfer.push",
+            "transfer.pull",
             "apps.open",
             "activity.start",
             "settings.put",

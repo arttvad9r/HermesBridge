@@ -205,11 +205,13 @@ private class DeviceSessionHub {
 private class RelayRuntime(
     deviceRegistryPath: Path?,
     artifactDirectory: Path?,
+    transferDirectory: Path?,
 ) {
     val pairingCodes = PairingCodeStore()
     val devices = DeviceRegistry(deviceRegistryPath)
     val sessions = DeviceSessionHub()
     val apkArtifacts = ApkArtifactStore(artifactDirectory)
+    val fileTransfers = FileTransferStore(transferDirectory)
     val approvals = ApprovalNotificationStore()
 }
 
@@ -222,6 +224,9 @@ internal fun commandHttpStatus(result: CommandResultPayload): HttpStatusCode = w
 
 internal fun commandTimeoutMillis(tool: String): Long = when (tool) {
     "apps.install" -> 300_000L
+    "transfer.push",
+    "transfer.pull",
+    -> 600_000L
     "files.analyze",
     "battery.usage",
     -> 60_000L
@@ -247,6 +252,7 @@ fun main() {
             adminToken = token,
             deviceRegistryPath = stateDirectory.resolve("devices.json"),
             artifactDirectory = stateDirectory.resolve("apk-artifacts"),
+            transferDirectory = stateDirectory.resolve("file-transfers"),
         )
     }.start(wait = true)
 }
@@ -255,8 +261,9 @@ fun Application.relayModule(
     adminToken: String,
     deviceRegistryPath: Path? = null,
     artifactDirectory: Path? = null,
+    transferDirectory: Path? = null,
 ) {
-    val runtime = RelayRuntime(deviceRegistryPath, artifactDirectory)
+    val runtime = RelayRuntime(deviceRegistryPath, artifactDirectory, transferDirectory)
 
     install(WebSockets) {
         pingPeriodMillis = 20_000L
@@ -436,6 +443,121 @@ fun Application.relayModule(
                 ContentType.Application.Json,
                 HttpStatusCode.Created,
             )
+        }
+
+        post("/api/v1/file-artifacts") {
+            if (!call.requireAdmin(adminToken)) return@post
+            val fileName = call.request.headers[FILE_NAME_HEADER]
+            if (fileName.isNullOrBlank()) {
+                call.respondText("{\"error\":\"missing_file_name\"}", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                return@post
+            }
+            val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            if (declaredLength != null && declaredLength !in 1..FileTransferStore.MAX_FILE_BYTES) {
+                call.respondText("{\"error\":\"file_too_large\"}", ContentType.Application.Json, HttpStatusCode.PayloadTooLarge)
+                return@post
+            }
+            val staged = try {
+                call.receiveStream().use { input ->
+                    withContext(Dispatchers.IO) { runtime.fileTransfers.stageDownload(fileName, input, declaredLength) }
+                }
+            } catch (_: FileTransferTooLargeException) {
+                call.respondText("{\"error\":\"file_too_large\"}", ContentType.Application.Json, HttpStatusCode.PayloadTooLarge)
+                return@post
+            } catch (_: InvalidFileTransferException) {
+                call.respondText("{\"error\":\"invalid_file_transfer\"}", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                return@post
+            }
+            call.respondText(BridgeProtocol.json.encodeToString(staged), ContentType.Application.Json, HttpStatusCode.Created)
+        }
+
+        get("/file-artifacts/{artifactId}") {
+            val artifactId = call.parameters["artifactId"]
+            val suppliedToken = call.request.headers[HttpHeaders.Authorization]
+                ?.removePrefix("Bearer ")?.takeIf { it.isNotBlank() }
+            if (artifactId.isNullOrBlank() || suppliedToken == null) {
+                call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                return@get
+            }
+            val artifact = runtime.fileTransfers.findDownloadAuthorized(artifactId, suppliedToken)
+            if (artifact == null) {
+                call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                return@get
+            }
+            call.response.header(HttpHeaders.CacheControl, "no-store")
+            call.response.header("X-Content-Type-Options", "nosniff")
+            call.respondFile(file = artifact.path.toFile())
+        }
+
+        post("/api/v1/file-upload-slots") {
+            if (!call.requireAdmin(adminToken)) return@post
+            val slot = try {
+                runtime.fileTransfers.createUploadSlot()
+            } catch (_: FileTransferConflictException) {
+                call.respondText("{\"error\":\"upload_slots_busy\"}", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
+                return@post
+            }
+            call.respondText(BridgeProtocol.json.encodeToString(slot), ContentType.Application.Json, HttpStatusCode.Created)
+        }
+
+        post("/device-file-uploads/{uploadId}") {
+            val uploadId = call.parameters["uploadId"]
+            val suppliedToken = call.request.headers[HttpHeaders.Authorization]
+                ?.removePrefix("Bearer ")?.takeIf { it.isNotBlank() }
+            val fileName = call.request.headers[FILE_NAME_HEADER]
+            if (uploadId.isNullOrBlank() || suppliedToken == null || fileName.isNullOrBlank()) {
+                call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                return@post
+            }
+            val declaredLength = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            if (declaredLength != null && declaredLength !in 1..FileTransferStore.MAX_FILE_BYTES) {
+                call.respondText("{\"error\":\"file_too_large\"}", ContentType.Application.Json, HttpStatusCode.PayloadTooLarge)
+                return@post
+            }
+            val uploaded = try {
+                call.receiveStream().use { input ->
+                    withContext(Dispatchers.IO) {
+                        runtime.fileTransfers.receiveUpload(uploadId, suppliedToken, fileName, input, declaredLength)
+                    }
+                }
+            } catch (_: FileTransferNotFoundException) {
+                call.respondText("Not found", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                return@post
+            } catch (_: FileTransferConflictException) {
+                call.respondText("{\"error\":\"upload_already_used\"}", ContentType.Application.Json, HttpStatusCode.Conflict)
+                return@post
+            } catch (_: FileTransferTooLargeException) {
+                call.respondText("{\"error\":\"file_too_large\"}", ContentType.Application.Json, HttpStatusCode.PayloadTooLarge)
+                return@post
+            } catch (_: InvalidFileTransferException) {
+                call.respondText("{\"error\":\"invalid_file_transfer\"}", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                return@post
+            }
+            call.respondText(BridgeProtocol.json.encodeToString(uploaded), ContentType.Application.Json, HttpStatusCode.Created)
+        }
+
+        get("/api/v1/file-upload-slots/{uploadId}") {
+            if (!call.requireAdmin(adminToken)) return@get
+            val uploadId = call.parameters["uploadId"]
+            val status = uploadId?.let(runtime.fileTransfers::uploadStatus)
+            if (status == null) {
+                call.respondText("{\"error\":\"upload_not_found\"}", ContentType.Application.Json, HttpStatusCode.NotFound)
+                return@get
+            }
+            call.respondText(BridgeProtocol.json.encodeToString(status), ContentType.Application.Json, HttpStatusCode.OK)
+        }
+
+        get("/api/v1/file-upload-slots/{uploadId}/content") {
+            if (!call.requireAdmin(adminToken)) return@get
+            val uploadId = call.parameters["uploadId"]
+            val uploaded = uploadId?.let(runtime.fileTransfers::completedUpload)
+            if (uploaded == null) {
+                call.respondText("{\"error\":\"upload_not_ready\"}", ContentType.Application.Json, HttpStatusCode.NotFound)
+                return@get
+            }
+            call.response.header(HttpHeaders.CacheControl, "no-store")
+            call.response.header("X-Content-Type-Options", "nosniff")
+            call.respondFile(file = uploaded.path.toFile())
         }
 
         get("/device-artifacts/{artifactId}") {
@@ -763,6 +885,7 @@ private suspend fun DefaultWebSocketServerSession.sendError(code: String, messag
 internal const val RELAY_BIND_HOST = "127.0.0.1"
 private const val APK_NAME_HEADER = "X-TypedDroid-Apk-Name"
 private const val APK_STAGING_KEY_HEADER = "X-TypedDroid-Apk-Staging-Key"
+private const val FILE_NAME_HEADER = "X-TypedDroid-File-Name"
 private const val MAX_IDEMPOTENCY_KEY_LENGTH = 128
 private val DEVICE_ID_REGEX = Regex("^device_[A-Za-z0-9-]{1,80}$")
 private val IDEMPOTENCY_KEY_REGEX = Regex("^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")

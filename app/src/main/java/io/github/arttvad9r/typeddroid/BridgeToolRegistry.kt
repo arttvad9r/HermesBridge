@@ -36,6 +36,7 @@ class BridgeToolRegistry(
     private val rawShellBackend: RawShellBackend = DisabledRawShellBackend,
     private val uiControlBackend: UiControlBackend = DisabledUiControlBackend,
     private val notificationControlBackend: NotificationControlBackend = DisabledNotificationControlBackend,
+    private val fileTransferBackend: FileTransferBackend = DisabledFileTransferBackend,
     private val agentTrustMode: () -> AgentTrustMode = { AgentTrustMode.SAFE },
 ) {
     suspend fun execute(request: CommandRequestPayload): CommandResultPayload {
@@ -64,6 +65,8 @@ class BridgeToolRegistry(
             NOTIFICATIONS_OPEN -> executeNotificationOpen(request)
             NOTIFICATIONS_ACTION -> executeNotificationAction(request)
             NOTIFICATIONS_REPLY -> executeNotificationReply(request)
+            TRANSFER_PUSH -> executeTransferPush(request)
+            TRANSFER_PULL -> executeTransferPull(request)
             FS_STAT -> executeFsStat(request)
             FS_LIST -> executeFsList(request)
             FS_READ -> executeFsRead(request)
@@ -1025,6 +1028,82 @@ class BridgeToolRegistry(
         )
     }
 
+    private suspend fun executeTransferPush(request: CommandRequestPayload): CommandResultPayload {
+        val required = setOf(ARTIFACT_ID, DOWNLOAD_TOKEN, FILE_NAME, SIZE_BYTES, SHA256, DESTINATION_PATH)
+        val allowed = required + setOf(OVERWRITE, CREATE_PARENTS)
+        if (request.arguments.keys.any { it !in allowed } || !request.arguments.keys.containsAll(required)) {
+            return failure(request.requestId, "invalid_arguments", "transfer.push requires staged file metadata and destinationPath.")
+        }
+        val artifactId = stringArgument(request, ARTIFACT_ID, 64)?.takeIf { FILE_ARTIFACT_ID_REGEX.matches(it) }
+            ?: return transferArgumentFailure(request)
+        val token = stringArgument(request, DOWNLOAD_TOKEN, 128)?.takeIf { TRANSFER_TOKEN_REGEX.matches(it) }
+            ?: return transferArgumentFailure(request)
+        val fileName = stringArgument(request, FILE_NAME, 120)?.takeIf { it.none { ch -> ch.isISOControl() || ch == '/' || ch == '\\' } }
+            ?: return transferArgumentFailure(request)
+        val size = parseLongArgument(request, SIZE_BYTES, 1L..EmbeddedPrivilegedProtocol.MAX_TRANSFER_FILE_BYTES)
+            ?: return transferArgumentFailure(request)
+        val sha = stringArgument(request, SHA256, 64)?.takeIf { TRANSFER_SHA256_REGEX.matches(it) }
+            ?: return transferArgumentFailure(request)
+        val destination = trustedPath(request, DESTINATION_PATH, mutation = true)
+            ?: return transferArgumentFailure(request)
+        val overwrite = booleanArgument(request, OVERWRITE)
+            ?: if (OVERWRITE in request.arguments) return transferArgumentFailure(request) else false
+        val createParents = booleanArgument(request, CREATE_PARENTS)
+            ?: if (CREATE_PARENTS in request.arguments) return transferArgumentFailure(request) else true
+        requireTrustedFileTransfer(request)?.let { return it }
+        val result = fileTransferBackend.pushToDevice(
+            FileTransferDescriptor(artifactId, token, fileName, size, sha),
+            destination,
+            overwrite,
+            createParents,
+        )
+        if (!result.ok) return failure(request.requestId, result.code ?: "file_push_failed", result.message ?: "File push failed.")
+        return CommandResultPayload(request.requestId, true, result = buildJsonObject {
+            put(DESTINATION_PATH, destination)
+            put(FILE_NAME, result.fileName ?: fileName)
+            put(SIZE_BYTES, result.sizeBytes ?: size)
+            put(SHA256, result.sha256 ?: sha)
+            put("pushed", true)
+        })
+    }
+
+    private suspend fun executeTransferPull(request: CommandRequestPayload): CommandResultPayload {
+        if (request.arguments.keys != setOf(SOURCE_PATH, UPLOAD_ID, UPLOAD_TOKEN)) {
+            return failure(request.requestId, "invalid_arguments", "transfer.pull requires sourcePath, uploadId and uploadToken.")
+        }
+        val source = trustedPath(request, SOURCE_PATH) ?: return transferArgumentFailure(request)
+        val uploadId = stringArgument(request, UPLOAD_ID, 64)?.takeIf { FILE_UPLOAD_ID_REGEX.matches(it) }
+            ?: return transferArgumentFailure(request)
+        val uploadToken = stringArgument(request, UPLOAD_TOKEN, 128)?.takeIf { TRANSFER_TOKEN_REGEX.matches(it) }
+            ?: return transferArgumentFailure(request)
+        requireTrustedFileTransfer(request)?.let { return it }
+        val result = fileTransferBackend.pullFromDevice(source, uploadId, uploadToken)
+        if (!result.ok) return failure(request.requestId, result.code ?: "file_pull_failed", result.message ?: "File pull failed.")
+        return CommandResultPayload(request.requestId, true, result = buildJsonObject {
+            put(SOURCE_PATH, source)
+            put(UPLOAD_ID, uploadId)
+            result.fileName?.let { put(FILE_NAME, it) }
+            result.sizeBytes?.let { put(SIZE_BYTES, it) }
+            result.sha256?.let { put(SHA256, it) }
+            put("pulled", true)
+        })
+    }
+
+    private fun requireTrustedFileTransfer(request: CommandRequestPayload): CommandResultPayload? {
+        if (DefaultToolPolicy.decision(BridgeTool(request.tool, ToolRisk.TRUSTED_CONTROL), agentTrustMode()) != ApprovalDecision.ALLOW) {
+            return failure(request.requestId, "policy_denied", "File transfer is available only to an agent explicitly placed in Trusted mode on the phone.")
+        }
+        val readiness = fileTransferBackend.readiness()
+        return if (readiness.ready) null else failure(
+            request.requestId,
+            readiness.code ?: "file_transfer_unavailable",
+            readiness.message ?: "File transfer backend is unavailable.",
+        )
+    }
+
+    private fun transferArgumentFailure(request: CommandRequestPayload) =
+        failure(request.requestId, "invalid_arguments", "File-transfer arguments are invalid or outside supported bounds.")
+
     private suspend fun executeFsStat(request: CommandRequestPayload): CommandResultPayload {
         if (request.arguments.keys != setOf(PATH)) {
             return failure(request.requestId, "invalid_arguments", "fs.stat requires path.")
@@ -1779,6 +1858,8 @@ class BridgeToolRegistry(
         const val NOTIFICATIONS_OPEN = "notifications.open"
         const val NOTIFICATIONS_ACTION = "notifications.action"
         const val NOTIFICATIONS_REPLY = "notifications.reply"
+        const val TRANSFER_PUSH = "transfer.push"
+        const val TRANSFER_PULL = "transfer.pull"
         const val FS_STAT = "fs.stat"
         const val FS_LIST = "fs.list"
         const val FS_READ = "fs.read"
@@ -1842,6 +1923,9 @@ class BridgeToolRegistry(
         private const val PATH = "path"
         private const val SOURCE_PATH = "sourcePath"
         private const val DESTINATION_PATH = "destinationPath"
+        private const val UPLOAD_ID = "uploadId"
+        private const val UPLOAD_TOKEN = "uploadToken"
+        private const val OVERWRITE = "overwrite"
         private const val DATA_BASE64 = "dataBase64"
         private const val OFFSET = "offset"
         private const val MAX_BYTES = "maxBytes"
@@ -1891,6 +1975,10 @@ class BridgeToolRegistry(
         private val SETTINGS_NAMESPACES = setOf("system", "secure", "global")
         private val APP_OP_MODES = setOf("allow", "ignore", "deny", "default", "foreground")
         private val LOGCAT_BUFFERS = setOf("main", "system", "events", "crash", "radio", "all")
+        private val FILE_ARTIFACT_ID_REGEX = Regex("^file_[0-9a-fA-F-]{36}$")
+        private val FILE_UPLOAD_ID_REGEX = Regex("^upload_[0-9a-fA-F-]{36}$")
+        private val TRANSFER_TOKEN_REGEX = Regex("^[A-Za-z0-9_-]{40,128}$")
+        private val TRANSFER_SHA256_REGEX = Regex("^[0-9a-f]{64}$")
         private val SETTINGS_KEY_REGEX = Regex("^[A-Za-z0-9._:-]{1,128}$")
         private val APP_OP_NAME_REGEX = Regex("^[A-Za-z0-9_.:-]{1,80}$")
         private val COMPONENT_REGEX = Regex("^[A-Za-z_][A-Za-z0-9_.]*/\\.?[A-Za-z_][A-Za-z0-9_.$]*$")

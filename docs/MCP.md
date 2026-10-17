@@ -197,6 +197,8 @@ The same TRUSTED boundary also exposes structured convenience tools so agents do
 - `list_notifications(device_id, limit=50)` → `notifications.list`;
 - `dismiss_notification(...)` / `open_notification(...)` → `notifications.dismiss` / `notifications.open`;
 - `notification_action(...)` / `reply_notification(...)` → `notifications.action` / `notifications.reply`;
+- `push_file(device_id, local_name, remote_path, ...)` → staged HTTPS data-plane download + `transfer.push`;
+- `pull_file(device_id, remote_path, local_name=None, overwrite=false)` → `transfer.pull` + a one-use HTTPS upload slot;
 - `fs_stat` / `fs_list` / `fs_read` / `fs_search` for shell-visible absolute paths;
 - `fs_write` / `fs_mkdir` / `fs_copy` / `fs_move` / `fs_delete` for trusted mutable roots (`/sdcard`, `/storage/emulated/0`, `/data/local/tmp`);
 - `open_app(...)` → `apps.open`;
@@ -207,7 +209,9 @@ The same TRUSTED boundary also exposes structured convenience tools so agents do
 
 Notification tools require Android Notification Access in addition to TRUSTED pairing state. `notifications.list` returns only bounded structured fields and marks the entire payload with `untrustedContent=true`: notification title/text/action labels originate from external apps and must be treated as data, never instructions. The exposed `notificationKey` is an opaque SHA-256 token, not the app-controlled raw Android notification key. Open/action/reply/dismiss are separate explicit calls and use replay protection so retrying the same idempotency key does not execute the PendingIntent twice. TypedDroid does not bypass lockscreen/authentication requirements declared by Android notification actions.
 
-Filesystem reads are bounded to 128 KiB per call and writes to 32 KiB per call, with explicit offsets so larger files can be transferred in chunks without exceeding the 256 KiB control-channel frame ceiling. Typed destructive file operations refuse to delete or move the mutable roots themselves.
+Filesystem inspection/edit tools keep their 128 KiB read and 32 KiB write call bounds. Bulk `push_file`/`pull_file` uses a separate raw HTTP/binary data plane: bytes are never placed in the 256 KiB WebSocket control frame or base64-encoded into command JSON. A transfer is capped at 512 MiB, verified by size and SHA-256, and uses short-lived random bearer capabilities. The device-upload slot is one-use; staged host-to-device download artifacts are short-lived and token-gated for retryability. Typed destructive file operations refuse to delete or move the mutable roots themselves.
+
+Agent-side bulk transfers are confined to `TYPED_DROID_TRANSFER_DIR` (default `~/.local/share/typeddroid/transfers`) and accept only simple direct-child filenames. `push_file` cannot read arbitrary host paths, and `pull_file` cannot write outside that directory or replace an existing local file unless `overwrite=true` is explicit. Android push destinations remain limited to `/sdcard`, `/storage/emulated/0`, and `/data/local/tmp`; pull sources remain limited by what Android's shell UID can actually read.
 
 These tools validate names, paths, bounds and enums on both MCP/Android boundaries and then use the same owned shell-UID helper where applicable. Notification controls use Android's `NotificationListenerService`/`PendingIntent`/`RemoteInput` APIs rather than shell parsing. They are convenience and audit surfaces, not a reduction of the authority already granted by `run_shell`. `appops_set` also protects the TypedDroid package itself.
 
@@ -305,7 +309,8 @@ Keep these properties:
 - MCP runs locally beside the agent;
 - relay admin API stays loopback-only;
 - Android transport uses WSS through the public reverse proxy;
-- only tokenized `/device-artifacts/*` downloads are additionally exposed for APK transfer;
+- tokenized `/device-artifacts/*` downloads are exposed for APK transfer;
+- tokenized `/file-artifacts/*` downloads and one-use `/device-file-uploads/*` slots form the bounded bulk-file data plane; admin-only endpoints create/retrieve those short-lived transfer capabilities;
 - approval notifications contain no target arguments or local display summary and cannot resolve tickets;
 - read-only tools remain fixed and bounded;
 - package metadata tools remain launcher-scoped;

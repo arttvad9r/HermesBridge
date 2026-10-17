@@ -24,6 +24,8 @@ EXPECTED_TOOLS = {
     "open_notification",
     "notification_action",
     "reply_notification",
+    "push_file",
+    "pull_file",
     "fs_stat",
     "fs_list",
     "fs_read",

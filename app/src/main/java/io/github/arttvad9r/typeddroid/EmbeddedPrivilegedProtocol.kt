@@ -32,6 +32,11 @@ internal data class EmbeddedPrivilegedRequest(
     val durationMillis: Int? = null,
     val keyCode: Int? = null,
     val text: String? = null,
+    val filePath: String? = null,
+    val fileSizeBytes: Long? = null,
+    val fileSha256: String? = null,
+    val overwrite: Boolean? = null,
+    val createParents: Boolean? = null,
 )
 
 @Serializable
@@ -48,6 +53,8 @@ internal data class EmbeddedPrivilegedResponse(
     val imageWidth: Int? = null,
     val imageHeight: Int? = null,
     val mimeType: String? = null,
+    val sizeBytes: Long? = null,
+    val sha256: String? = null,
 )
 
 internal object EmbeddedPrivilegedProtocol {
@@ -66,11 +73,15 @@ internal object EmbeddedPrivilegedProtocol {
     const val OP_UI_TEXT = "ui_text"
     const val OP_UI_KEY = "ui_key"
     const val OP_OPEN_APP = "open_app"
+    const val OP_READ_FILE_STREAM = "read_file_stream"
+    const val OP_WRITE_FILE_STREAM = "write_file_stream"
     // Batterystats may retain up to 4 MiB before base64 encoding into the response frame.
     const val MAX_REQUEST_FRAME_BYTES = 128 * 1024
     const val MAX_RESPONSE_FRAME_BYTES = 8 * 1024 * 1024
     const val MAX_COMMAND_BYTES = 64 * 1024
     const val MAX_TIMEOUT_MILLIS = 5 * 60 * 1000L
+    const val MAX_TRANSFER_FILE_BYTES = 512L * 1024L * 1024L
+    const val MAX_TRANSFER_PATH_BYTES = 1024
 
     val json = Json {
         ignoreUnknownKeys = false

@@ -53,7 +53,9 @@ Read-only:
 - `list_files(device_id, path_segments=[])`
 - `analyze_files(device_id, path_segments=[])`
 
-TRUSTED full-control tools include `device_capabilities`, `run_shell`, structured system/appops/settings/process/logcat tools, typed shell-visible filesystem tools, UI perception/control, and notification tools: `list_notifications`, `dismiss_notification`, `open_notification`, `notification_action`, and `reply_notification`. Notification content is explicitly external/untrusted data, and Android Notification Access must be enabled on the phone.
+TRUSTED full-control tools include `device_capabilities`, `run_shell`, structured system/appops/settings/process/logcat tools, typed shell-visible filesystem tools, `push_file` / `pull_file` bulk streaming, UI perception/control, and notification tools: `list_notifications`, `dismiss_notification`, `open_notification`, `notification_action`, and `reply_notification`. Notification content is explicitly external/untrusted data, and Android Notification Access must be enabled on the phone.
+
+Bulk transfer files are confined to `TYPED_DROID_TRANSFER_DIR` (default `~/.local/share/typeddroid/transfers`). `push_file` reads only a simple direct-child filename from that directory; `pull_file` writes only there and does not replace an existing local file unless `overwrite=true` is explicit. The data plane streams raw bytes with a 512 MiB per-transfer cap and size/SHA-256 verification instead of placing file contents in MCP/control JSON.
 
 Mutating/privileged, always subject to Android-side policy/approval:
 

@@ -93,8 +93,8 @@ The current full-control path uses the owned shell-UID helper for perception and
 - [x] notification listener: list/open/dismiss/action/reply, including free-form RemoteInput replies and emulator E2E.
 - [ ] clipboard read/write with Android-version-aware limits.
 - [ ] media/photo/document discovery through Android APIs.
-- [ ] file copy/move/read/write/search in user-granted storage plus shell-accessible areas.
-- [ ] upload/download between agent side and phone with bounded transfer policies.
+- [x] file copy/move/read/write/search in user-granted storage plus shell-accessible areas.
+- [x] bidirectional agent-side ↔ phone file streaming with 512 MiB per-transfer bound, short-lived bearer capabilities, SHA-256 verification, and emulator raw-stream E2E.
 
 ## Phase 5 — simplify the agent side
 

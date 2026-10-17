@@ -2,6 +2,7 @@ package io.github.arttvad9r.typeddroid
 
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.io.InputStream
 import java.net.Socket
 import java.util.Base64
 import java.util.UUID
@@ -201,6 +202,73 @@ internal class EmbeddedPrivilegedClient(
         }
     }
 
+
+    fun <T> withFileInputStream(
+        filePath: String,
+        block: (sizeBytes: Long, input: InputStream) -> T,
+    ): T {
+        requireValidTransferPath(filePath)
+        openSocket(FILE_RPC_TIMEOUT_MILLIS).use { socket ->
+            val request = EmbeddedPrivilegedRequest(
+                id = UUID.randomUUID().toString(),
+                operation = EmbeddedPrivilegedProtocol.OP_READ_FILE_STREAM,
+                authToken = endpoint.authToken,
+                filePath = filePath,
+            )
+            EmbeddedPrivilegedProtocol.writeRequest(socket.outputStream, request)
+            val response = EmbeddedPrivilegedProtocol.readResponse(socket.inputStream)
+            check(response.id == request.id) { "Mismatched privileged RPC response ID." }
+            response.requireRemoteSuccess("File streaming failed.")
+            val size = response.sizeBytes
+                ?.takeIf { it in 1..EmbeddedPrivilegedProtocol.MAX_TRANSFER_FILE_BYTES }
+                ?: error("Privileged file stream returned an invalid size.")
+            return block(size, socket.inputStream)
+        }
+    }
+
+    fun writeFileStream(
+        filePath: String,
+        sizeBytes: Long,
+        sha256: String,
+        overwrite: Boolean,
+        createParents: Boolean,
+        input: InputStream,
+    ): EmbeddedPrivilegedExecResult {
+        requireValidTransferPath(filePath)
+        require(sizeBytes in 1..EmbeddedPrivilegedProtocol.MAX_TRANSFER_FILE_BYTES) { "Transfer size is invalid." }
+        require(SHA256_REGEX.matches(sha256)) { "Transfer SHA-256 is invalid." }
+        openSocket(FILE_RPC_TIMEOUT_MILLIS).use { socket ->
+            val request = EmbeddedPrivilegedRequest(
+                id = UUID.randomUUID().toString(),
+                operation = EmbeddedPrivilegedProtocol.OP_WRITE_FILE_STREAM,
+                authToken = endpoint.authToken,
+                filePath = filePath,
+                fileSizeBytes = sizeBytes,
+                fileSha256 = sha256,
+                overwrite = overwrite,
+                createParents = createParents,
+            )
+            EmbeddedPrivilegedProtocol.writeRequest(socket.outputStream, request)
+            val buffer = ByteArray(64 * 1024)
+            var remaining = sizeBytes
+            while (remaining > 0) {
+                val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                check(read >= 0) { "Transfer source ended before its declared size." }
+                if (read == 0) continue
+                socket.outputStream.write(buffer, 0, read)
+                remaining -= read
+            }
+            socket.outputStream.flush()
+            return decodeExecResponse(request.id, EmbeddedPrivilegedProtocol.readResponse(socket.inputStream))
+        }
+    }
+
+    private fun requireValidTransferPath(filePath: String) {
+        require(filePath.startsWith('/')) { "Transfer path must be absolute." }
+        require('\u0000' !in filePath && '\n' !in filePath && '\r' !in filePath) { "Transfer path contains control characters." }
+        require(filePath.encodeToByteArray().size <= EmbeddedPrivilegedProtocol.MAX_TRANSFER_PATH_BYTES) { "Transfer path is too long." }
+    }
+
     fun shutdown(): Boolean = runCatching {
         request(EmbeddedPrivilegedProtocol.OP_SHUTDOWN).ok
     }.getOrDefault(false)
@@ -285,5 +353,7 @@ internal class EmbeddedPrivilegedClient(
         const val BATTERY_RPC_TIMEOUT_MILLIS = 45_000L
         const val UI_RPC_TIMEOUT_MILLIS = 15_000L
         const val APK_RPC_TIMEOUT_MILLIS = 6 * 60 * 1000L
+        const val FILE_RPC_TIMEOUT_MILLIS = 10 * 60 * 1000L
+        val SHA256_REGEX = Regex("^[0-9a-f]{64}$")
     }
 }

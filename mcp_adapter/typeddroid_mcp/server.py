@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -20,6 +21,8 @@ DEVICE_ID_RE = re.compile(r"^device_[A-Za-z0-9-]+$")
 PACKAGE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$")
 PERMISSION_NAME_RE = PACKAGE_NAME_RE
 ARTIFACT_ID_RE = re.compile(r"^apk_[0-9a-fA-F-]{36}$")
+FILE_ARTIFACT_ID_RE = re.compile(r"^file_[0-9a-fA-F-]{36}$")
+FILE_UPLOAD_ID_RE = re.compile(r"^upload_[0-9a-fA-F-]{36}$")
 ARTIFACT_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -31,6 +34,8 @@ MAX_PACKAGE_NAME_LENGTH = 255
 MAX_PERMISSION_NAME_LENGTH = 255
 MAX_APK_NAME_LENGTH = 120
 MAX_APK_BYTES = 200 * 1024 * 1024
+MAX_TRANSFER_FILE_BYTES = 512 * 1024 * 1024
+MAX_TRANSFER_NAME_LENGTH = 120
 MAX_PENDING_APPROVALS = 200
 MAX_SHELL_COMMAND_BYTES = 64 * 1024
 MAX_SHELL_TIMEOUT_SECONDS = 300
@@ -74,6 +79,7 @@ ACTION_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{1,255}$")
 TYPED_DROID_PACKAGE = "io.github.arttvad9r.typeddroid"
 APK_NAME_HEADER = "X-TypedDroid-Apk-Name"
 APK_STAGING_KEY_HEADER = "X-TypedDroid-Apk-Staging-Key"
+FILE_NAME_HEADER = "X-TypedDroid-File-Name"
 
 mcp = MCPServer("TypedDroid")
 
@@ -140,6 +146,12 @@ def _admin_token() -> str:
     if len(token) < 24:
         raise RuntimeError("Bridge Host admin token is shorter than 24 characters.")
     return token
+
+
+def _transfer_directory() -> Path:
+    value = os.environ.get("TYPED_DROID_TRANSFER_DIR", "").strip()
+    path = Path(value).expanduser() if value else _data_home() / "typeddroid" / "transfers"
+    return path.resolve()
 
 
 def _apk_directory() -> Path:
@@ -345,6 +357,149 @@ def _stage_apk(apk_name: str, *, staging_key: str | None = None) -> dict[str, An
     if not isinstance(sha256, str) or not SHA256_RE.fullmatch(sha256):
         raise RuntimeError("Relay returned an invalid APK SHA-256.")
     return result
+
+
+def _validate_transfer_name(name: str, field: str = "local_name") -> str:
+    if not isinstance(name, str):
+        raise ValueError(f"{field} must be a string.")
+    value = name.strip()
+    if not (1 <= len(value) <= MAX_TRANSFER_NAME_LENGTH):
+        raise ValueError(f"{field} has an invalid length.")
+    if any(ord(char) < 32 or char in "/\\" for char in value) or value in {".", ".."}:
+        raise ValueError(f"{field} must be a simple file name without path separators.")
+    return value
+
+
+def _resolve_transfer_file(local_name: str) -> Path:
+    name = _validate_transfer_name(local_name)
+    root = _transfer_directory()
+    candidate = (root / name).resolve(strict=True)
+    if candidate.parent != root or not candidate.is_file():
+        raise ValueError("local_name must identify a file directly inside TYPED_DROID_TRANSFER_DIR.")
+    size = candidate.stat().st_size
+    if not 1 <= size <= MAX_TRANSFER_FILE_BYTES:
+        raise ValueError(f"Transfer file size must be between 1 and {MAX_TRANSFER_FILE_BYTES} bytes.")
+    return candidate
+
+
+def _stage_transfer_file(local_name: str) -> dict[str, Any]:
+    source = _resolve_transfer_file(local_name)
+    size_bytes = source.stat().st_size
+    parsed = urlsplit(_host_url())
+    connection_type = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    connection = connection_type(parsed.hostname, parsed.port, timeout=180)
+    try:
+        connection.putrequest("POST", "/api/v1/file-artifacts")
+        connection.putheader("Authorization", f"Bearer {_admin_token()}")
+        connection.putheader("Accept", "application/json")
+        connection.putheader("Content-Type", "application/octet-stream")
+        connection.putheader("Content-Length", str(size_bytes))
+        connection.putheader(FILE_NAME_HEADER, source.name)
+        connection.endheaders()
+        with source.open("rb") as stream:
+            while chunk := stream.read(64 * 1024):
+                connection.send(chunk)
+        response = connection.getresponse()
+        raw = response.read(1024 * 1024)
+        if response.status != 201:
+            raise RuntimeError(f"Relay file staging returned HTTP {response.status}: {raw.decode('utf-8', errors='replace')}")
+    except OSError as exc:
+        raise RuntimeError(f"Relay file staging failed: {exc}") from exc
+    finally:
+        connection.close()
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Relay returned invalid file staging JSON.") from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("Relay returned invalid file staging metadata.")
+    if not isinstance(result.get("artifactId"), str) or not FILE_ARTIFACT_ID_RE.fullmatch(result["artifactId"]):
+        raise RuntimeError("Relay returned an invalid file artifact ID.")
+    if not isinstance(result.get("downloadToken"), str) or not ARTIFACT_TOKEN_RE.fullmatch(result["downloadToken"]):
+        raise RuntimeError("Relay returned an invalid file artifact token.")
+    if result.get("fileName") != source.name or result.get("sizeBytes") != size_bytes:
+        raise RuntimeError("Relay changed staged file metadata unexpectedly.")
+    if not isinstance(result.get("sha256"), str) or not SHA256_RE.fullmatch(result["sha256"]):
+        raise RuntimeError("Relay returned an invalid file SHA-256.")
+    return result
+
+
+def _create_upload_slot() -> dict[str, Any]:
+    result = _request_json("POST", "/api/v1/file-upload-slots", {}, timeout=15)
+    if not isinstance(result, dict):
+        raise RuntimeError("Relay returned invalid upload-slot metadata.")
+    if not isinstance(result.get("uploadId"), str) or not FILE_UPLOAD_ID_RE.fullmatch(result["uploadId"]):
+        raise RuntimeError("Relay returned an invalid upload slot ID.")
+    if not isinstance(result.get("uploadToken"), str) or not ARTIFACT_TOKEN_RE.fullmatch(result["uploadToken"]):
+        raise RuntimeError("Relay returned an invalid upload slot token.")
+    return result
+
+
+def _materialize_upload(upload_id: str, local_name: str | None, overwrite: bool) -> dict[str, Any]:
+    if not FILE_UPLOAD_ID_RE.fullmatch(upload_id):
+        raise RuntimeError("Upload slot ID is invalid.")
+    status = _request_json("GET", f"/api/v1/file-upload-slots/{quote(upload_id, safe='')}", timeout=15)
+    if not isinstance(status, dict) or status.get("complete") is not True:
+        raise RuntimeError("Device upload did not complete.")
+    remote_name = status.get("fileName")
+    size_bytes = status.get("sizeBytes")
+    sha256 = status.get("sha256")
+    if not isinstance(remote_name, str):
+        raise RuntimeError("Relay returned an invalid uploaded file name.")
+    remote_name = _validate_transfer_name(remote_name, "remote file name")
+    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or not 1 <= size_bytes <= MAX_TRANSFER_FILE_BYTES:
+        raise RuntimeError("Relay returned an invalid uploaded file size.")
+    if not isinstance(sha256, str) or not SHA256_RE.fullmatch(sha256):
+        raise RuntimeError("Relay returned an invalid uploaded file SHA-256.")
+    if not isinstance(overwrite, bool):
+        raise ValueError("overwrite must be a boolean.")
+    output_name = _validate_transfer_name(local_name, "local_name") if local_name is not None else remote_name
+    root = _transfer_directory()
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        root.chmod(0o700)
+    except OSError:
+        pass
+    target = (root / output_name).resolve()
+    if target.parent != root:
+        raise ValueError("local_name escaped TYPED_DROID_TRANSFER_DIR.")
+    if target.exists() and not overwrite:
+        raise FileExistsError(f"Transfer destination already exists: {output_name}")
+    fd, temp_name = tempfile.mkstemp(prefix=".typeddroid-pull-", suffix=".part", dir=root)
+    os.close(fd)
+    temp = Path(temp_name)
+    request = Request(
+        f"{_host_url()}/api/v1/file-upload-slots/{quote(upload_id, safe='')}/content",
+        headers={"Authorization": f"Bearer {_admin_token()}", "Accept": "application/octet-stream"},
+        method="GET",
+    )
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        with urlopen(request, timeout=180) as response, temp.open("wb") as output:
+            while chunk := response.read(64 * 1024):
+                total += len(chunk)
+                if total > size_bytes or total > MAX_TRANSFER_FILE_BYTES:
+                    raise RuntimeError("Downloaded device file exceeded verified metadata.")
+                digest.update(chunk)
+                output.write(chunk)
+        if total != size_bytes or digest.hexdigest() != sha256:
+            raise RuntimeError("Downloaded device file failed size/SHA-256 verification.")
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"Transfer destination already exists: {output_name}")
+        os.replace(temp, target)
+    except Exception:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return {
+        "localName": output_name,
+        "localPath": str(target),
+        "sizeBytes": size_bytes,
+        "sha256": sha256,
+    }
 
 
 @mcp.tool()
@@ -806,6 +961,73 @@ def reply_notification(
         {"notificationKey": _validate_notification_key(notification_key), "actionIndex": index, "text": text},
         **_idempotency_kwargs(idempotency_key),
     )
+
+
+@mcp.tool()
+def push_file(
+    device_id: str,
+    local_name: str,
+    remote_path: str,
+    overwrite: bool = False,
+    create_parents: bool = True,
+) -> dict[str, Any]:
+    """Stream one file from the dedicated TypedDroid transfer directory to trusted writable Android storage."""
+    if not isinstance(overwrite, bool) or not isinstance(create_parents, bool):
+        raise ValueError("overwrite and create_parents must be booleans.")
+    destination = _fs_path(remote_path)
+    staged = _stage_transfer_file(local_name)
+    return _device_command(
+        device_id,
+        "transfer.push",
+        {
+            "artifactId": staged["artifactId"],
+            "downloadToken": staged["downloadToken"],
+            "fileName": staged["fileName"],
+            "sizeBytes": staged["sizeBytes"],
+            "sha256": staged["sha256"],
+            "destinationPath": destination,
+            "overwrite": overwrite,
+            "createParents": create_parents,
+        },
+        timeout=650,
+    )
+
+
+@mcp.tool()
+def pull_file(
+    device_id: str,
+    remote_path: str,
+    local_name: str | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Stream one shell-readable Android file into the dedicated TypedDroid transfer directory."""
+    if not isinstance(overwrite, bool):
+        raise ValueError("overwrite must be a boolean.")
+    if local_name is not None:
+        validated_local_name = _validate_transfer_name(local_name)
+        existing = (_transfer_directory() / validated_local_name).resolve()
+        if existing.parent != _transfer_directory():
+            raise ValueError("local_name escaped TYPED_DROID_TRANSFER_DIR.")
+        if existing.exists() and not overwrite:
+            raise FileExistsError(f"Transfer destination already exists: {validated_local_name}")
+    source = _fs_path(remote_path)
+    slot = _create_upload_slot()
+    result = _device_command(
+        device_id,
+        "transfer.pull",
+        {
+            "sourcePath": source,
+            "uploadId": slot["uploadId"],
+            "uploadToken": slot["uploadToken"],
+        },
+        timeout=650,
+    )
+    if result.get("ok") is not True:
+        return result
+    local = _materialize_upload(slot["uploadId"], local_name, overwrite)
+    result = dict(result)
+    result["localFile"] = local
+    return result
 
 
 @mcp.tool()

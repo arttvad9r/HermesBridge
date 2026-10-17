@@ -33,7 +33,7 @@ On first start the script:
 - builds the relay distribution from source if needed;
 - creates a random local admin token without printing it;
 - stores state under the XDG user directories;
-- creates a dedicated local APK staging directory;
+- creates dedicated local APK and generic file-transfer staging directories;
 - binds the admin/relay process to `127.0.0.1:8080` only.
 
 Default paths:
@@ -42,6 +42,7 @@ Default paths:
 ~/.config/typeddroid/admin-token
 ~/.local/state/typeddroid/
 ~/.local/share/typeddroid/apks/
+~/.local/share/typeddroid/transfers/
 ```
 
 The generic MCP adapter reads the same token file automatically, so local MCP hosts normally need no secret in their configuration.

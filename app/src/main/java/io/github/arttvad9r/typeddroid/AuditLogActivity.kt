@@ -184,6 +184,8 @@ private fun auditToolLabel(tool: String): String = when (tool) {
     "notifications.open" -> "Открытие уведомления"
     "notifications.action" -> "Действие уведомления"
     "notifications.reply" -> "Ответ на уведомление"
+    "transfer.push" -> "Отправка файла на телефон"
+    "transfer.pull" -> "Получение файла с телефона"
     "files.list" -> "Просмотр файлов"
     "files.analyze" -> "Анализ файлов"
     "files.delete" -> "Удаление файла"
