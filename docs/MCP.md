@@ -2,24 +2,23 @@
 
 TypedDroid exposes one canonical, agent-neutral MCP server over local stdio. The same executable works with Codex, Claude Code, OpenCode, Cursor, Hermes Agent, and other MCP hosts.
 
-The MCP process talks only to the local Bridge Host over loopback. It exposes fixed Android tools plus an explicit `run_shell` capability. The phone itself authorizes `run_shell`: SAFE mode denies it, while a pairing explicitly switched to TRUSTED may use it after the owned privileged helper is active. MCP still exposes no arbitrary HTTP client, arbitrary Android-intent transport, or arbitrary APK URL.
+The MCP process owns an internal local relay over loopback. The relay starts/reuses automatically and is not a separate normal user-facing process. It exposes fixed Android tools plus an explicit `run_shell` capability. The phone itself authorizes `run_shell`: SAFE mode denies it, while a pairing explicitly switched to TRUSTED may use it after the owned privileged helper is active. MCP still exposes no arbitrary HTTP client, arbitrary Android-intent transport, or arbitrary APK URL.
 
 ## Install
 
 ```bash
-python3 -m venv ~/.local/share/typeddroid/mcp-venv
-~/.local/share/typeddroid/mcp-venv/bin/pip install ./mcp_adapter
+./install.sh
 ```
 
-The primary executable is:
+The installer creates one user-facing executable:
 
 ```text
 ~/.local/bin/typeddroid-mcp
 ```
 
-The old `typed-droid-mcp` name remains as a compatibility alias only.
+On normal startup, `typeddroid-mcp` starts or reuses the hidden loopback relay from `~/.local/share/typeddroid/relay-runtime/`. Multiple MCP clients share that relay through a local lease registry; the final managed client shuts it down. No `typeddroid-host` command or manual startup step is required.
 
-Start the local Bridge Host separately with `./host/run-local-host.sh`. By default the adapter uses `http://127.0.0.1:8080`, reads `~/.config/typeddroid/admin-token`, and stages APKs from `~/.local/share/typeddroid/apks`.
+By default it uses `http://127.0.0.1:8080`, `~/.config/typeddroid/admin-token`, `~/.local/share/typeddroid/apks`, and `~/.local/share/typeddroid/transfers`. An explicitly configured `TYPED_DROID_HOST_URL`/`TYPED_DROID_RELAY_URL` disables automatic local relay management.
 
 ## Agent configuration examples
 
@@ -73,7 +72,7 @@ claude mcp add --scope user android_bridge -- \
 
 Hermes is only an adapter/configuration over the same generic MCP server. See `../adapters/hermes/README.md`.
 
-No agent-specific configuration should contain the Bridge Host admin token unless the default local token-file mechanism is intentionally overridden.
+No agent-specific configuration should contain the internal relay admin token unless the default local token-file mechanism is intentionally overridden.
 
 ## Read-only MCP tools
 
@@ -307,7 +306,7 @@ Each public MCP function hardcodes one Android tool name. Android applies anothe
 Keep these properties:
 
 - MCP runs locally beside the agent;
-- relay admin API stays loopback-only;
+- the internal relay admin API stays loopback-only;
 - Android transport uses WSS through the public reverse proxy;
 - tokenized `/device-artifacts/*` downloads are exposed for APK transfer;
 - tokenized `/file-artifacts/*` downloads and one-use `/device-file-uploads/*` slots form the bounded bulk-file data plane; admin-only endpoints create/retrieve those short-lived transfer capabilities;
@@ -316,11 +315,11 @@ Keep these properties:
 - package metadata tools remain launcher-scoped;
 - permission changes are revoke-only, exact-target and locally approved;
 - mutating/privileged tools are separate typed functions;
-- no arbitrary shell, dumpsys arguments, intent, content URI, remote URL or raw filesystem path is exposed.
+- raw shell remains an explicit TRUSTED-only tool; SAFE mode still denies it, while typed tools keep their own validation and bounds.
 
 ## Smoke test
 
-After Bridge Host and MCP are configured:
+After `typeddroid-mcp` is configured in the chosen agent:
 
 1. Reload MCP in the chosen agent and call `list_devices`.
 2. If needed, call `create_pairing_code` and finish pairing in the Android app.

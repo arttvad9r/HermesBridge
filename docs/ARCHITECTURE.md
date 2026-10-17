@@ -3,8 +3,8 @@
 ## Principles
 
 1. **Agent-neutral.** Android authority is independent of Codex, Claude Code, OpenCode, Hermes, Cursor, or any other MCP host.
-2. **Typed tools, not shell.** The agent sees fixed operations, never arbitrary argv or a generic Android command selector.
-3. **Local host boundary.** Agent integration and the admin API run locally on the user's computer.
+2. **Typed by default, explicit shell when trusted.** SAFE exposes bounded typed operations; a pairing explicitly switched to TRUSTED may additionally use the named raw-shell capability.
+3. **Local MCP boundary.** Agent integration and the relay admin API run locally on the user's computer; the relay is managed internally by `typeddroid-mcp`.
 4. **Outbound from Android.** The phone initiates the authenticated device connection; no management port is opened on Android.
 5. **Android policy wins.** A compromised agent or host still cannot bypass Android-side validation and local approval.
 6. **Least privilege and bounded output.** Optional capabilities remain opt-in and results have explicit size/count limits.
@@ -21,15 +21,15 @@
                     | MCP stdio
                     v
 +--------------------------------------+
-| Generic MCP adapter                  |
+| typeddroid-mcp                       |
 | - agent-neutral schemas              |
-| - second typed allowlist             |
+| - runtime/relay lifecycle manager    |
 +-------------------+------------------+
                     |
                     | loopback HTTP
                     v
 +--------------------------------------+
-| Local Bridge Host                    |
+| Internal local relay                 |
 | - pairing/device registry            |
 | - command routing                    |
 | - idempotency                        |
@@ -56,11 +56,11 @@ Hermes Agent is one optional adapter/configuration on top of the generic MCP bou
 
 The canonical public integration is `mcp_adapter/typeddroid_mcp` over MCP stdio. Agent-specific integrations may configure or package that server, but must not add tools that bypass the generic allowlist.
 
-MCP is deliberately local because stdio is broadly supported and keeps Bridge Host credentials off remote agent configuration. Streamable HTTP may be added later for clients that genuinely require a remote MCP endpoint, but it is not required by the core design.
+MCP is deliberately local because stdio is broadly supported and keeps relay credentials out of remote agent configuration. The local relay is an implementation detail started/reused by `typeddroid-mcp`; agent configuration contains only the MCP executable.
 
-## Bridge Host
+## Internal relay runtime
 
-The existing Kotlin relay runtime is the first Bridge Host transport implementation. It binds to `127.0.0.1`, persists device public keys/state under the current user, and exposes its admin API only locally.
+The Kotlin relay binds to `127.0.0.1`, persists device public keys/state under the current user, and exposes its admin API only locally. `typeddroid-mcp` owns its normal lifecycle through a locked multi-process lease registry plus detached cleanup watchdogs; users do not start a second product command.
 
 Device-facing WSS ingress is separate from agent integration. No specific cloud provider, tunnel or reverse proxy is part of the architecture.
 
@@ -84,10 +84,10 @@ TypedDroid bootstraps its own `app_process` helper as Android shell UID through 
 
 ### UI-control boundary
 
-The standard build does not expose autonomous Accessibility-based control. Any future UI-control feature remains a distinct, explicit, short-lived authority described by ADR 0003.
+TRUSTED mode exposes typed screenshot/hierarchy/tap/swipe/long-press/text/key/open/wait primitives through the owned shell-UID helper. SAFE denies them. Protected Android surfaces may still hide content or reject input; TypedDroid does not claim to bypass those platform boundaries.
 
 ## Security ownership
 
-The agent and Bridge Host are treated as potentially compromised. Android remains the final authority for dangerous actions. Local one-use approvals are bound to canonical arguments/content fingerprints and cannot be resolved by an MCP token, host admin token, or notification channel.
+The agent, MCP process and internal relay are treated as potentially compromised. Android remains the final authority for dangerous actions. Local one-use approvals are bound to canonical arguments/content fingerprints and cannot be resolved by an MCP token, host admin token, or notification channel.
 
 See `SECURITY.md`, `PROTOCOL.md`, `MCP.md`, and `HOST.md`.

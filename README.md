@@ -8,6 +8,15 @@ Hermes Agent is only an optional adapter; the protocol and privilege model are a
 
 > Status: active full-control development on the dedicated development branch. SAFE/TRUSTED policy, generic MCP, repository-owned Android 11+ ADB pairing/transport, shell-v2, a shell-UID `app_process` helper, TRUSTED `run_shell`, typed privileged app operations, and typed UI perception/control are implemented on the owned backend. Wireless-Debugging onboarding and helper bootstrap are present in the Android UI. Physical-device interoperability/reboot/OEM tests are still required before stable release.
 
+
+## Agent-side install
+
+```bash
+./install.sh
+```
+
+This installs one user-facing command, `typeddroid-mcp`. Its loopback relay is an internal runtime started and shared automatically; `typeddroid-host` is no longer required for normal use.
+
 ## Why this exists
 
 Giving an autonomous agent ordinary `adb shell` is powerful but coarse. TypedDroid aims to keep that power while making the grant explicit and reusable:
@@ -33,7 +42,7 @@ Codex / Claude / OpenCode / Cursor / Hermes / ...
                  v
           typeddroid-mcp
                  |
-                 | local Bridge Host / device transport
+                 | internal relay / device transport
                  v
           TypedDroid Android app
                  |
@@ -108,38 +117,25 @@ The current full-control work does not claim root, lockscreen bypass, or access 
 
 ## Local setup
 
-### 1. Install and start Bridge Host
+### 1. Install the agent side
 
 Requirements: Java 17+ and Python 3.10+.
 
-For regular use:
-
 ```bash
-./host/install-local.sh
-typeddroid-host
+./install.sh
 ```
 
-For development directly from the checkout, use `./host/run-local-host.sh`.
-
-This creates user-local state and a random admin token:
-
-```text
-~/.config/typeddroid/admin-token
-~/.local/state/typeddroid/
-~/.local/share/typeddroid/apks/
-```
-
-No root, systemd, or machine-wide installation is required.
+This installs the MCP adapter plus its hidden relay runtime. There is no separate host process to start manually: `typeddroid-mcp` starts/reuses the loopback relay and coordinates its lifetime across concurrent agents. It creates user-local state and a random admin token under the normal XDG directories. No root, systemd, or machine-wide installation is required.
 
 ### 2. Connect the generic MCP adapter
 
-`install-local.sh` installs the adapter automatically. Primary executable:
+Primary executable:
 
 ```text
 ~/.local/bin/typeddroid-mcp
 ```
 
-The adapter reads the Bridge Host token file automatically. Agent-specific examples are in [docs/MCP.md](docs/MCP.md). Hermes-specific configuration lives under [adapters/hermes](adapters/hermes/README.md).
+The adapter manages the internal relay token automatically. Agent-specific examples are in [docs/MCP.md](docs/MCP.md). Hermes-specific configuration lives under [adapters/hermes](adapters/hermes/README.md).
 
 ### 3. Connect Android
 
@@ -149,7 +145,7 @@ The current production Android transport requires a trusted canonical endpoint:
 wss://HOST[:PORT]/ws/device
 ```
 
-How that device-facing WSS endpoint reaches the local Bridge Host is intentionally independent of the agent and core architecture. A user-controlled LAN reverse proxy, private overlay network, or tunnel can provide reachability. The Bridge Host admin routes under `/api/v1/*` must remain loopback-only.
+How that device-facing WSS endpoint reaches the internal local relay is intentionally independent of the agent and core architecture. A user-controlled LAN reverse proxy, private overlay network, or tunnel can provide reachability. The internal relay admin routes under `/api/v1/*` must remain loopback-only.
 
 ## Build and test
 
@@ -205,7 +201,7 @@ Historical Apache-2.0 provenance for early package-command behavior is retained 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security model](docs/SECURITY.md)
 - [Generic MCP integration](docs/MCP.md)
-- [Local Bridge Host](docs/HOST.md)
+- [Internal local relay](docs/HOST.md)
 - [Protocol](docs/PROTOCOL.md)
 - [Permissions and setup](docs/PERMISSIONS.md)
 - [Idempotency](docs/IDEMPOTENCY.md)

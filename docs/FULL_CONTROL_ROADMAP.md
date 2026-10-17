@@ -98,12 +98,12 @@ The current full-control path uses the owned shell-UID helper for perception and
 
 ## Phase 5 — simplify the agent side
 
-Goal: make `typeddroid-host` an implementation detail rather than a product component.
+Goal: keep the local relay as an implementation detail of `typeddroid-mcp`, not a separate product component.
 
-- [ ] move local host/transport responsibilities behind `typeddroid-mcp`.
-- [ ] one install command for the agent side.
-- [ ] adapters contain configuration only; no Hermes/Codex/Claude-specific protocol.
-- [ ] expose the same MCP surface to any MCP-capable host.
+- [x] move local relay lifecycle/transport responsibilities behind `typeddroid-mcp`; the relay is an internal shared runtime with per-process leases.
+- [x] one install command for the agent side (`./install.sh`) and one user-facing executable (`typeddroid-mcp`).
+- [x] adapters contain configuration only; no Hermes/Codex/Claude-specific protocol.
+- [x] expose the same MCP surface to any MCP-capable host; stdio compatibility is covered by the generic MCP test suite.
 
 ## Phase 6 — network independence
 

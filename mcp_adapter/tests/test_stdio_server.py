@@ -1,3 +1,4 @@
+import os
 import sys
 import unittest
 
@@ -66,6 +67,7 @@ class StdioMcpCompatibilityTest(unittest.TestCase):
             parameters = StdioServerParameters(
                 command=sys.executable,
                 args=["-m", "typeddroid_mcp.server"],
+                env={**os.environ, "TYPED_DROID_HOST_URL": "https://protocol-only.invalid"},
             )
             async with stdio_client(parameters) as (read_stream, write_stream):
                 async with ClientSession(read_stream, write_stream) as session:

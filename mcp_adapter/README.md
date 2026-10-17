@@ -6,9 +6,10 @@ The adapter exposes fixed tools plus a full-control TRUSTED surface (`run_shell`
 
 ## Install
 
+From a TypedDroid checkout, use the single agent-side installer:
+
 ```bash
-python3 -m venv ~/.local/share/typeddroid/mcp-venv
-~/.local/share/typeddroid/mcp-venv/bin/pip install ./mcp_adapter
+./install.sh
 ```
 
 Primary command:
@@ -17,25 +18,18 @@ Primary command:
 typeddroid-mcp
 ```
 
-`typed-droid-mcp` remains as a compatibility alias for older local configurations.
-
-## Local configuration
-
-Start the local Bridge Host first:
-
-```bash
-./host/run-local-host.sh
-```
+`typeddroid-mcp` starts or reuses the loopback relay automatically. Concurrent MCP clients share one relay process; the last managed MCP process shuts it down. The relay is an implementation detail under `~/.local/share/typeddroid/relay-runtime/`, not a second command the user must run.
 
 Defaults:
 
 ```text
-TYPED_DROID_HOST_URL=http://127.0.0.1:8080
+internal relay:    http://127.0.0.1:8080
 admin token file: ~/.config/typeddroid/admin-token
 APK directory:    ~/.local/share/typeddroid/apks
+transfer dir:     ~/.local/share/typeddroid/transfers
 ```
 
-Normally no token is copied into the agent configuration. The MCP process reads the same local token file created by Bridge Host. Environment overrides remain available through `TYPED_DROID_ADMIN_TOKEN`, `TYPED_DROID_ADMIN_TOKEN_FILE`, `TYPED_DROID_HOST_URL`, and `TYPED_DROID_APK_DIR`.
+Normally no token is copied into agent configuration. Environment overrides remain available for development or an explicitly external relay. Setting `TYPED_DROID_HOST_URL` or legacy `TYPED_DROID_RELAY_URL` disables managed-local-runtime startup.
 
 ## Tools
 
@@ -73,7 +67,7 @@ The MCP layer is a second allowlist in addition to Android:
 
 1. Each MCP function maps to one fixed Android tool.
 2. Android independently validates schemas, risk and exact approval arguments.
-3. The Bridge Host admin API stays loopback-only.
+3. The internal relay admin API stays loopback-only.
 4. Raw shell is a separate TRUSTED-only capability and is denied by the phone in SAFE mode.
 5. Package visibility stays launcher-scoped; `QUERY_ALL_PACKAGES` is not used.
 6. APK installation accepts only a simple file name from the dedicated local staging directory, then Android verifies the actual artifact before approval.

@@ -1,34 +1,35 @@
-# Local Bridge Host
+# Internal local relay
 
-The Bridge Host runs on the same computer as the AI agent. It is agent-neutral and does not require Hermes Agent, systemd, root, or a public admin API.
+The local relay runs on the same computer as the AI agent, but it is no longer a normal user-facing component. `typeddroid-mcp` starts/reuses it automatically and coordinates its lifetime across concurrent MCP processes. The standalone script remains only for development/debugging.
 
 ## Install for regular use
 
-From a source checkout, install the local runtime and generic MCP adapter without root:
+From a source checkout, install the complete agent side without root:
 
 ```bash
-./host/install-local.sh
+./install.sh
 ```
 
 This creates:
 
 ```text
-~/.local/bin/typeddroid-host
-~/.local/share/typeddroid/host-runtime/
 ~/.local/bin/typeddroid-mcp
+~/.local/share/typeddroid/relay-runtime/
 ```
 
-The installer does not edit Codex, Claude, OpenCode, Cursor, Hermes, or any other agent configuration. Point the chosen MCP host at the installed `typeddroid-mcp` executable.
+The installer does not edit Codex, Claude, OpenCode, Cursor, Hermes, or any other agent configuration. Point the chosen MCP host at the single installed `typeddroid-mcp` executable. The old `typeddroid-host` launcher is removed during migration.
 
-## Start from the source checkout
+## Standalone relay debugging
 
 Requirements: Java 17+ and Python 3.10+.
+
+For relay development only, it can still be started explicitly:
 
 ```bash
 ./host/run-local-host.sh
 ```
 
-On first start the script:
+The script:
 
 - builds the relay distribution from source if needed;
 - creates a random local admin token without printing it;

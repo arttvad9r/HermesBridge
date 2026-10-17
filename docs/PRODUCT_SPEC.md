@@ -6,7 +6,7 @@ TypedDroid is an Android companion that lets a user securely delegate typed phon
 
 The product is successful when daily use feels like:
 
-> Install the app, pair the phone with Bridge Host, grant capabilities, then use the AI agent normally.
+> Install the app, pair the phone with TypedDroid, grant capabilities, then use the AI agent normally.
 
 Technical concepts such as ADB, MCP servers, ports, addresses and Termux must not be part of normal operation.
 
@@ -17,7 +17,7 @@ Technical concepts such as ADB, MCP servers, ports, addresses and Termux must no
 1. Install TypedDroid APK.
 2. Open the app.
 3. Tap **Connect Bridge**.
-4. Scan a QR code or enter a one-time pairing code produced by the local Bridge Host.
+4. Scan a QR code or enter a one-time pairing code produced through `typeddroid-mcp`.
 5. Complete a guided capability wizard.
 6. Optional: enable full device access through the built-in Wireless-Debugging bootstrap.
 7. Land on one status screen showing that the bridge is connected.
@@ -101,7 +101,7 @@ V1 will not provide:
 
 - APK installs and runs on Android 11+.
 - Pairing works over cellular or unrelated Wi-Fi networks.
-- The user's agent machine runs Bridge Host locally; no separate always-on server is required.
+- The user's agent machine runs `typeddroid-mcp`; its internal relay is managed automatically and is not a separate user-facing service.
 - Device can reconnect after network changes.
 - Basic read-only health/app/file queries work through the generic MCP adapter.
 - Install APK, uninstall, force-stop, permission revoke and Batterystats work through the owned helper.

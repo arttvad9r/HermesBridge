@@ -7,6 +7,7 @@ import http.client
 import json
 import os
 import re
+import signal
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 from mcp.server import MCPServer
+
+from .local_runtime import LocalRuntimeLease, should_manage_local_runtime
 
 
 DEVICE_ID_RE = re.compile(r"^device_[A-Za-z0-9-]+$")
@@ -140,11 +143,11 @@ def _admin_token() -> str:
             token = token_file.read_text(encoding="utf-8").strip()
         except FileNotFoundError as exc:
             raise RuntimeError(
-                "Bridge Host admin token is unavailable. Start the local host first or set "
+                "TypedDroid relay admin token is unavailable. Set "
                 "TYPED_DROID_ADMIN_TOKEN/TYPED_DROID_ADMIN_TOKEN_FILE."
             ) from exc
     if len(token) < 24:
-        raise RuntimeError("Bridge Host admin token is shorter than 24 characters.")
+        raise RuntimeError("TypedDroid relay admin token is shorter than 24 characters.")
     return token
 
 
@@ -504,7 +507,7 @@ def _materialize_upload(upload_id: str, local_name: str | None, overwrite: bool)
 
 @mcp.tool()
 def list_devices() -> list[dict[str, Any]]:
-    """List phones paired with the local TypedDroid Bridge Host and whether each is currently connected."""
+    """List phones paired with the local TypedDroid relay and whether each is currently connected."""
     result = _request_json("GET", "/api/v1/devices")
     if not isinstance(result, list):
         raise RuntimeError("Relay returned an invalid device list.")
@@ -1331,7 +1334,26 @@ def run_shell(
 
 
 def main() -> None:
-    mcp.run()
+    runtime = LocalRuntimeLease() if should_manage_local_runtime() else None
+    previous_handlers: dict[int, Any] = {}
+    if runtime is not None:
+        runtime.start()
+        runtime.start_watchdog()
+
+        def shutdown_handler(signum: int, _frame: Any) -> None:
+            runtime.close()
+            raise SystemExit(128 + signum)
+
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous_handlers[signum] = signal.getsignal(signum)
+            signal.signal(signum, shutdown_handler)
+    try:
+        mcp.run()
+    finally:
+        if runtime is not None:
+            runtime.close()
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
 
 
 if __name__ == "__main__":

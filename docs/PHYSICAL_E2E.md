@@ -1,10 +1,10 @@
-# Physical phone + local Bridge Host end-to-end validation
+# Physical phone + managed MCP runtime end-to-end validation
 
 This is the release gate for the exact release-candidate build. Do not mark physical-device items complete from unit tests alone.
 
 ## 1. Host and device ingress
 
-1. Start Bridge Host as the normal desktop user:
+1. Install/configure `typeddroid-mcp` as the normal desktop user; its internal relay starts automatically:
 
    ```bash
    ./host/run-local-host.sh
@@ -25,7 +25,7 @@ Required checks:
 - `list_devices` works identically across hosts;
 - `create_pairing_code` creates one short-lived pairing code;
 - SAFE mode rejects `shell.run`; TRUSTED mode exposes it only after an explicit local trust grant and embedded-helper bootstrap;
-- Bridge Host admin token is read locally and is not copied into agent project configuration.
+- internal relay admin token is read locally and is not copied into agent project configuration.
 
 ## 3. Pairing and reconnect
 
@@ -36,12 +36,12 @@ On the physical phone:
 3. Verify Android reaches `CONNECTED` only after authenticated challenge/response.
 4. Kill/restart the app process and verify automatic reconnect.
 5. Reboot the phone and verify base connection recovery.
-6. Restart Bridge Host while preserving its state directory and verify reconnect without re-pairing.
-7. Remove Bridge Host pairing state intentionally and verify Android handles `unknown_device` cleanly and can re-pair.
+6. Restart the MCP runtime while preserving its state directory and verify reconnect without re-pairing.
+7. Remove internal relay pairing state intentionally and verify Android handles `unknown_device` cleanly and can re-pair.
 
 ## 4. Network handover
 
-With Bridge Host unchanged, move the phone through the relevant network paths:
+With the internal relay/runtime unchanged, move the phone through the relevant network paths:
 
 - Wi-Fi → mobile data;
 - mobile data → Wi-Fi;
